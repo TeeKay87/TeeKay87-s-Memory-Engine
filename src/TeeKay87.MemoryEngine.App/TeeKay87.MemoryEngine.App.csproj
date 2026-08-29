@@ -1,0 +1,27 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net9.0-windows</TargetFramework>
+    <EnableWindowsTargeting>true</EnableWindowsTargeting>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>TeeKay87.MemoryEngine</AssemblyName>
+    <RootNamespace>TeeKay87.MemoryEngine.App</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\TeeKay87.MemoryEngine.Core\TeeKay87.MemoryEngine.Core.csproj" />
+    <ProjectReference Include="..\TeeKay87.MemoryEngine.PluginSdk\TeeKay87.MemoryEngine.PluginSdk.csproj" />
+    <ProjectReference Include="..\Plugins\TeeKay87.MemoryEngine.Platform.Mock\TeeKay87.MemoryEngine.Platform.Mock.csproj"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+  <Target Name="CopyPlatformPlugins" AfterTargets="Build">
+    <MSBuild Projects="..\Plugins\TeeKay87.MemoryEngine.Platform.Mock\TeeKay87.MemoryEngine.Platform.Mock.csproj"
+             Targets="GetTargetPath"
+             Properties="Configuration=$(Configuration)">
+      <Output TaskParameter="TargetOutputs" ItemName="PlatformPluginAssemblies" />
+    </MSBuild>
+    <MakeDir Directories="$(OutDir)Plugins" />
+    <Copy SourceFiles="@(PlatformPluginAssemblies)"
+          DestinationFolder="$(OutDir)Plugins"
+          SkipUnchangedFiles="true" />
+  </Target>
+</Project>

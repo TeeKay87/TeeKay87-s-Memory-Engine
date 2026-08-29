@@ -1,0 +1,7 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>TeeKay87.MemoryEngine.PluginSdk</AssemblyName>
+    <RootNamespace>TeeKay87.MemoryEngine.PluginSdk</RootNamespace>
+  </PropertyGroup>
+</Project>

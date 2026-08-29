@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>TeeKay87.MemoryEngine.Tests</AssemblyName>
+    <RootNamespace>TeeKay87.MemoryEngine.Tests</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\TeeKay87.MemoryEngine.Core\TeeKay87.MemoryEngine.Core.csproj" />
+    <ProjectReference Include="..\..\src\TeeKay87.MemoryEngine.PluginSdk\TeeKay87.MemoryEngine.PluginSdk.csproj" />
+    <ProjectReference Include="..\..\src\Plugins\TeeKay87.MemoryEngine.Platform.Mock\TeeKay87.MemoryEngine.Platform.Mock.csproj" />
+  </ItemGroup>
+</Project>

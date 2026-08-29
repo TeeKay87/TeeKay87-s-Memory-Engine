@@ -1,0 +1,10 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <AssemblyName>TeeKay87.MemoryEngine.Platform.Mock</AssemblyName>
+    <RootNamespace>TeeKay87.MemoryEngine.Platform.Mock</RootNamespace>
+  </PropertyGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\..\TeeKay87.MemoryEngine.PluginSdk\TeeKay87.MemoryEngine.PluginSdk.csproj" />
+  </ItemGroup>
+</Project>
