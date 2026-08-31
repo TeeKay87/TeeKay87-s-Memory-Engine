@@ -1,258 +1,802 @@
 <Window x:Class="TeeKay87.MemoryEngine.App.MainWindow"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:controls="clr-namespace:TeeKay87.MemoryEngine.App.Controls"
         xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
         xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
         mc:Ignorable="d"
         Title="{Binding WindowTitle}"
-        Width="1120"
-        Height="720"
-        MinWidth="920"
-        MinHeight="600"
+        Width="1380"
+        Height="880"
+        MinWidth="1100"
+        MinHeight="720"
         WindowStartupLocation="CenterScreen"
-        Background="{StaticResource WindowBackgroundBrush}"
-        Foreground="{StaticResource PrimaryTextBrush}">
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}">
     <Grid>
         <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
             <RowDefinition Height="Auto" />
             <RowDefinition Height="*" />
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- Compact application bar. The primary workflow begins immediately below, similar to classic memory tools. -->
         <Border Grid.Row="0"
-                Padding="28,22"
-                Background="{StaticResource PanelBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+                Padding="16,10"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,0,0,1">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <StackPanel>
-                    <TextBlock Text="{Binding ApplicationTitle}"
-                               FontSize="26"
-                               FontWeight="SemiBold" />
-                    <TextBlock Margin="0,5,0,0"
-                               Text="Modular memory scanning, debugging and cheat-development foundation"
-                               Foreground="{StaticResource SecondaryTextBrush}"
-                               FontSize="13" />
-                </StackPanel>
+                <TextBlock VerticalAlignment="Center"
+                           Text="{Binding ApplicationTitle}"
+                           FontSize="18"
+                           FontWeight="SemiBold" />
 
                 <Border Grid.Column="1"
-                        Padding="12,6"
+                        Margin="12,0,0,0"
+                        Padding="8,3"
                         VerticalAlignment="Center"
-                        Background="{StaticResource AccentMutedBrush}"
-                        BorderBrush="{StaticResource AccentBrush}"
+                        Background="{DynamicResource AccentMutedBrush}"
+                        BorderBrush="{DynamicResource AccentBrush}"
                         BorderThickness="1"
-                        CornerRadius="6">
+                        CornerRadius="4">
                     <TextBlock Text="{Binding DisplayVersion}"
-                               Foreground="{StaticResource AccentBrush}"
+                               Foreground="{DynamicResource AccentBrush}"
+                               FontSize="11"
                                FontWeight="SemiBold" />
                 </Border>
+
+                <TextBlock Grid.Column="3"
+                           Margin="0,0,8,0"
+                           VerticalAlignment="Center"
+                           Text="Theme"
+                           Style="{StaticResource MutedTextStyle}" />
+
+                <ComboBox Grid.Column="4"
+                          Width="130"
+                          ItemsSource="{Binding Themes}"
+                          SelectedItem="{Binding SelectedTheme, Mode=TwoWay}"
+                          DisplayMemberPath="Name" />
             </Grid>
         </Border>
 
-        <Grid Grid.Row="1" Margin="24">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="330" />
-                <ColumnDefinition Width="18" />
-                <ColumnDefinition Width="*" />
-            </Grid.ColumnDefinitions>
-
-            <Border Grid.Column="0"
-                    Padding="18"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
+        <!-- Target and connection controls stay visible while the user works, following Cheat Engine's target-first workflow. -->
+        <Border Grid.Row="1"
+                Padding="14,8"
+                Background="{DynamicResource PanelSecondaryBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
+                BorderThickness="0,0,0,1">
+            <StackPanel>
                 <Grid>
-                    <Grid.RowDefinitions>
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="Auto" />
-                        <RowDefinition Height="*" />
-                        <RowDefinition Height="Auto" />
-                    </Grid.RowDefinitions>
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="250" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                    <TextBlock Text="Platform Plugins"
-                               FontSize="17"
-                               FontWeight="SemiBold" />
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Margin="0,0,0,5"
+                                   Text="Platform"
+                                   Style="{StaticResource MutedTextStyle}" />
+                        <ComboBox ItemsSource="{Binding Plugins}"
+                                  SelectedItem="{Binding SelectedPlugin, Mode=TwoWay}"
+                                  DisplayMemberPath="SelectorDisplay" />
+                    </StackPanel>
 
-                    <TextBlock Grid.Row="1"
-                               Margin="0,5,0,14"
-                               Text="Capabilities are supplied by plugins rather than hard-coded per platform."
-                               Foreground="{StaticResource SecondaryTextBrush}"
-                               TextWrapping="Wrap" />
-
-                    <ListBox Grid.Row="2"
-                             ItemsSource="{Binding Plugins}"
-                             SelectedItem="{Binding SelectedPlugin}"
-                             Background="Transparent"
-                             BorderThickness="0"
-                             ScrollViewer.HorizontalScrollBarVisibility="Disabled">
-                        <ListBox.ItemContainerStyle>
-                            <Style TargetType="ListBoxItem">
-                                <Setter Property="Padding" Value="0" />
-                                <Setter Property="Margin" Value="0,0,0,8" />
-                                <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                                <Setter Property="Background" Value="Transparent" />
-                                <Setter Property="BorderThickness" Value="0" />
-                                <Style.Triggers>
-                                    <Trigger Property="IsSelected" Value="True">
-                                        <Setter Property="Background" Value="{StaticResource AccentMutedBrush}" />
-                                    </Trigger>
-                                </Style.Triggers>
-                            </Style>
-                        </ListBox.ItemContainerStyle>
-                        <ListBox.ItemTemplate>
+                    <ItemsControl Grid.Column="2"
+                                  VerticalAlignment="Bottom"
+                                  ItemsSource="{Binding SelectedPlugin.ConnectionSettings}">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <WrapPanel Orientation="Horizontal" />
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
                             <DataTemplate>
-                                <Border Padding="12"
-                                        Background="{Binding RelativeSource={RelativeSource AncestorType=ListBoxItem}, Path=Background}"
-                                        BorderBrush="{StaticResource BorderBrush}"
-                                        BorderThickness="1"
-                                        CornerRadius="7">
-                                    <StackPanel>
-                                        <TextBlock Text="{Binding Name}"
-                                                   FontWeight="SemiBold" />
-                                        <TextBlock Margin="0,4,0,0"
-                                                   Text="{Binding Platform}"
-                                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                                   FontSize="12" />
-                                    </StackPanel>
-                                </Border>
+                                <StackPanel Width="210" Margin="0,0,10,0">
+                                    <TextBlock Margin="0,0,0,5"
+                                               Text="{Binding Label}"
+                                               Style="{StaticResource MutedTextStyle}" />
+                                    <TextBox Text="{Binding Value, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                             ToolTip="{Binding Description}" />
+                                </StackPanel>
                             </DataTemplate>
-                        </ListBox.ItemTemplate>
-                    </ListBox>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
 
-                    <Button Grid.Row="3"
-                            Margin="0,14,0,0"
+                    <Button Grid.Column="3"
+                            MinWidth="92"
+                            VerticalAlignment="Bottom"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Command="{Binding SelectedPlugin.ConnectCommand}"
+                            Content="Connect" />
+
+                    <Button Grid.Column="5"
+                            MinWidth="96"
+                            VerticalAlignment="Bottom"
+                            Style="{StaticResource DangerButtonStyle}"
+                            Command="{Binding SelectedPlugin.DisconnectCommand}"
+                            Content="Disconnect" />
+
+                    <Button Grid.Column="7"
+                            MinWidth="112"
+                            VerticalAlignment="Bottom"
+                            Style="{StaticResource SecondaryButtonStyle}"
                             Command="{Binding ReloadPluginsCommand}"
                             Content="Reload Plugins" />
                 </Grid>
-            </Border>
 
-            <Border Grid.Column="2"
-                    Padding="24"
-                    Background="{StaticResource PanelBackgroundBrush}"
-                    BorderBrush="{StaticResource BorderBrush}"
-                    BorderThickness="1"
-                    CornerRadius="10">
-                <ScrollViewer VerticalScrollBarVisibility="Auto">
-                    <StackPanel>
-                        <TextBlock Text="Selected Plugin"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                   FontSize="12"
-                                   FontWeight="SemiBold" />
-                        <TextBlock Margin="0,6,0,0"
-                                   Text="{Binding SelectedPlugin.Name, TargetNullValue='No plugin selected'}"
-                                   FontSize="24"
-                                   FontWeight="SemiBold" />
-                        <TextBlock Margin="0,8,0,0"
-                                   Text="{Binding SelectedPlugin.Description}"
-                                   Foreground="{StaticResource SecondaryTextBrush}"
-                                   TextWrapping="Wrap" />
+                <Grid Margin="0,7,0,0"
+                      Visibility="{Binding SelectedPlugin.SupportsProcessEnumeration, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="330" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="18" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
 
-                        <Grid Margin="0,24,0,0">
-                            <Grid.ColumnDefinitions>
-                                <ColumnDefinition Width="150" />
-                                <ColumnDefinition Width="*" />
-                            </Grid.ColumnDefinitions>
+                    <TextBlock VerticalAlignment="Center"
+                               Text="Target Process"
+                               Style="{StaticResource MutedTextStyle}" />
+
+                    <ComboBox Grid.Column="1"
+                              Margin="10,0,0,0"
+                              ItemsSource="{Binding SelectedPlugin.Processes}"
+                              SelectedItem="{Binding SelectedPlugin.SelectedProcess, Mode=TwoWay}"
+                              DisplayMemberPath="SelectionDisplay" />
+
+                    <Button Grid.Column="3"
+                            MinWidth="82"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Command="{Binding SelectedPlugin.RefreshProcessesCommand}"
+                            Content="Refresh" />
+
+                    <Button Grid.Column="5"
+                            MinWidth="126"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Command="{Binding SelectedPlugin.SetActiveProcessCommand}"
+                            Content="Set Active Target" />
+
+                    <TextBlock Grid.Column="7"
+                               VerticalAlignment="Center"
+                               Text="Active"
+                               Style="{StaticResource MutedTextStyle}" />
+                    <TextBlock Grid.Column="8"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               Text="{Binding SelectedPlugin.ActiveProcessText}"
+                               TextTrimming="CharacterEllipsis" />
+                </Grid>
+
+                <Grid Margin="0,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="18" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="18" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBlock Text="{Binding SelectedPlugin.ConnectionStatusText}"
+                               Style="{StaticResource MutedTextStyle}" />
+                    <TextBlock Grid.Column="2"
+                               Text="{Binding SelectedPlugin.ProcessStatusText}"
+                               Style="{StaticResource MutedTextStyle}" />
+                    <TextBlock Grid.Column="4"
+                               Text="{Binding SelectedPlugin.MemoryRegionStatusText}"
+                               Style="{StaticResource MutedTextStyle}" />
+
+                    <Expander Grid.Column="5"
+                              Header="Plugin details"
+                              HorizontalAlignment="Right">
+                        <Border Width="650"
+                                Margin="0,8,0,0"
+                                Padding="12"
+                                Style="{StaticResource CardBorderStyle}">
+                            <StackPanel>
+                                <Grid>
+                                    <Grid.ColumnDefinitions>
+                                        <ColumnDefinition Width="110" />
+                                        <ColumnDefinition Width="*" />
+                                        <ColumnDefinition Width="110" />
+                                        <ColumnDefinition Width="*" />
+                                    </Grid.ColumnDefinitions>
+                                    <Grid.RowDefinitions>
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                        <RowDefinition Height="Auto" />
+                                    </Grid.RowDefinitions>
+                                    <TextBlock Text="Platform" Style="{StaticResource MutedTextStyle}" />
+                                    <TextBlock Grid.Column="1" Text="{Binding SelectedPlugin.Platform}" />
+                                    <TextBlock Grid.Column="2" Text="Backend" Style="{StaticResource MutedTextStyle}" />
+                                    <TextBlock Grid.Column="3" Text="{Binding SelectedPlugin.Backend}" />
+
+                                    <TextBlock Grid.Row="1" Margin="0,6,0,0" Text="Plugin Version" Style="{StaticResource MutedTextStyle}" />
+                                    <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,6,0,0" Text="{Binding SelectedPlugin.Version}" />
+                                    <TextBlock Grid.Row="1" Grid.Column="2" Margin="0,6,0,0" Text="Plugin API" Style="{StaticResource MutedTextStyle}" />
+                                    <TextBlock Grid.Row="1" Grid.Column="3" Margin="0,6,0,0" Text="{Binding SelectedPlugin.ApiVersion}" />
+
+                                    <TextBlock Grid.Row="2" Margin="0,6,0,0" Text="Architecture" Style="{StaticResource MutedTextStyle}" />
+                                    <TextBlock Grid.Row="2" Grid.Column="1" Grid.ColumnSpan="3" Margin="0,6,0,0" Text="{Binding SelectedPlugin.ArchitectureDisplay}" />
+                                </Grid>
+
+                                <TextBlock Margin="0,10,0,0"
+                                           Text="{Binding SelectedPlugin.Description}"
+                                           Style="{StaticResource MutedTextStyle}"
+                                           TextWrapping="Wrap" />
+
+                                <ItemsControl Margin="0,10,0,0" ItemsSource="{Binding SelectedPlugin.Capabilities}">
+                                    <ItemsControl.ItemsPanel>
+                                        <ItemsPanelTemplate>
+                                            <WrapPanel />
+                                        </ItemsPanelTemplate>
+                                    </ItemsControl.ItemsPanel>
+                                    <ItemsControl.ItemTemplate>
+                                        <DataTemplate>
+                                            <Border Margin="0,0,6,6"
+                                                    Padding="8,3"
+                                                    Background="{DynamicResource AccentMutedBrush}"
+                                                    BorderBrush="{DynamicResource AccentBrush}"
+                                                    BorderThickness="1"
+                                                    CornerRadius="4">
+                                                <TextBlock Text="{Binding}"
+                                                           Foreground="{DynamicResource AccentBrush}"
+                                                           FontSize="11" />
+                                            </Border>
+                                        </DataTemplate>
+                                    </ItemsControl.ItemTemplate>
+                                </ItemsControl>
+                            </StackPanel>
+                        </Border>
+                    </Expander>
+                </Grid>
+
+                <TextBlock Margin="0,5,0,0"
+                           Text="{Binding SelectedPlugin.ConnectionErrorText}"
+                           Style="{StaticResource ErrorMessageTextStyle}" />
+                <TextBlock Margin="0,3,0,0"
+                           Text="{Binding SelectedPlugin.ProcessErrorText}"
+                           Style="{StaticResource ErrorMessageTextStyle}" />
+                <TextBlock Margin="0,3,0,0"
+                           Text="{Binding SelectedPlugin.MemoryRegionErrorText}"
+                           Style="{StaticResource ErrorMessageTextStyle}" />
+
+                <Expander Margin="0,5,0,0"
+                          Header="Raw Memory Read"
+                          Visibility="{Binding SelectedPlugin.SupportsMemoryRead, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Border Margin="0,6,0,0"
+                            Padding="12"
+                            Style="{StaticResource CardBorderStyle}">
+                        <Grid>
                             <Grid.RowDefinitions>
-                                <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                                 <RowDefinition Height="Auto" />
                             </Grid.RowDefinitions>
 
-                            <TextBlock Grid.Row="0" Text="Platform" Foreground="{StaticResource SecondaryTextBrush}" />
-                            <TextBlock Grid.Row="0" Grid.Column="1" Text="{Binding SelectedPlugin.Platform}" />
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="210" />
+                                    <ColumnDefinition Width="14" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="100" />
+                                    <ColumnDefinition Width="14" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                </Grid.ColumnDefinitions>
 
-                            <TextBlock Grid.Row="1" Margin="0,10,0,0" Text="Backend" Foreground="{StaticResource SecondaryTextBrush}" />
-                            <TextBlock Grid.Row="1" Grid.Column="1" Margin="0,10,0,0" Text="{Binding SelectedPlugin.Backend}" />
+                                <TextBlock VerticalAlignment="Center"
+                                           Text="Address (hex)"
+                                           Style="{StaticResource MutedTextStyle}" />
+                                <TextBox Grid.Column="1"
+                                         Margin="8,0,0,0"
+                                         Text="{Binding SelectedPlugin.MemoryReadAddressText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
 
-                            <TextBlock Grid.Row="2" Margin="0,10,0,0" Text="Plugin Version" Foreground="{StaticResource SecondaryTextBrush}" />
-                            <TextBlock Grid.Row="2" Grid.Column="1" Margin="0,10,0,0" Text="{Binding SelectedPlugin.Version}" />
+                                <TextBlock Grid.Column="3"
+                                           VerticalAlignment="Center"
+                                           Text="Length"
+                                           Style="{StaticResource MutedTextStyle}" />
+                                <TextBox Grid.Column="4"
+                                         Margin="8,0,0,0"
+                                         Text="{Binding SelectedPlugin.MemoryReadLengthText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Bytes to read. Decimal by default; 0x-prefixed hexadecimal is also accepted." />
 
-                            <TextBlock Grid.Row="3" Margin="0,10,0,0" Text="Architecture" Foreground="{StaticResource SecondaryTextBrush}" />
-                            <TextBlock Grid.Row="3" Grid.Column="1" Margin="0,10,0,0" Text="{Binding SelectedPlugin.ArchitectureDisplay}" />
+                                <Button Grid.Column="6"
+                                        MinWidth="104"
+                                        Style="{StaticResource PrimaryButtonStyle}"
+                                        Command="{Binding SelectedPlugin.ReadMemoryCommand}"
+                                        Content="Read Memory" />
+                            </Grid>
 
-                            <TextBlock Grid.Row="4" Margin="0,10,0,0" Text="Assembly" Foreground="{StaticResource SecondaryTextBrush}" />
-                            <TextBlock Grid.Row="4" Grid.Column="1" Margin="0,10,0,0" Text="{Binding SelectedPlugin.AssemblyPath}" TextWrapping="Wrap" />
+                            <TextBlock Grid.Row="1"
+                                       Margin="0,8,0,0"
+                                       Text="{Binding SelectedPlugin.MemoryReadStatusText}"
+                                       Style="{StaticResource MutedTextStyle}" />
+                            <TextBlock Grid.Row="2"
+                                       Margin="0,3,0,0"
+                                       Text="{Binding SelectedPlugin.MemoryReadErrorText}"
+                                       Style="{StaticResource ErrorMessageTextStyle}" />
+
+                            <TextBox Grid.Row="3"
+                                     Height="150"
+                                     Margin="0,8,0,0"
+                                     Padding="10,8"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     VerticalContentAlignment="Top"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     VerticalScrollBarVisibility="Auto"
+                                     TextWrapping="NoWrap"
+                                     Text="{Binding SelectedPlugin.MemoryReadResultText, Mode=OneWay}" />
                         </Grid>
+                    </Border>
+                </Expander>
 
-                        <TextBlock Margin="0,28,0,10"
-                                   Text="Capabilities"
-                                   FontSize="16"
-                                   FontWeight="SemiBold" />
+                <Expander Margin="0,5,0,0"
+                          Header="Raw Memory Write"
+                          Visibility="{Binding SelectedPlugin.SupportsMemoryWrite, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <Border Margin="0,6,0,0"
+                            Padding="12"
+                            Style="{StaticResource CardBorderStyle}">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                                <RowDefinition Height="Auto" />
+                            </Grid.RowDefinitions>
 
-                        <ItemsControl ItemsSource="{Binding SelectedPlugin.Capabilities}">
-                            <ItemsControl.ItemsPanel>
-                                <ItemsPanelTemplate>
-                                    <WrapPanel />
-                                </ItemsPanelTemplate>
-                            </ItemsControl.ItemsPanel>
-                            <ItemsControl.ItemTemplate>
-                                <DataTemplate>
-                                    <Border Margin="0,0,8,8"
-                                            Padding="10,5"
-                                            Background="{StaticResource AccentMutedBrush}"
-                                            BorderBrush="{StaticResource AccentBrush}"
-                                            BorderThickness="1"
-                                            CornerRadius="5">
-                                        <TextBlock Text="{Binding}"
-                                                   Foreground="{StaticResource AccentBrush}"
-                                                   FontSize="12" />
-                                    </Border>
-                                </DataTemplate>
-                            </ItemsControl.ItemTemplate>
-                        </ItemsControl>
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="210" />
+                                    <ColumnDefinition Width="14" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="14" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
 
-                        <Border Margin="0,24,0,0"
-                                Padding="16"
-                                Background="{StaticResource PanelSecondaryBrush}"
-                                BorderBrush="{StaticResource BorderBrush}"
-                                BorderThickness="1"
-                                CornerRadius="7">
-                            <StackPanel>
-                                <TextBlock Text="Foundation milestone"
-                                           FontWeight="SemiBold" />
-                                <TextBlock Margin="0,6,0,0"
-                                           Text="{Binding FeatureTitle}"
-                                           Foreground="{StaticResource AccentBrush}" />
-                                <TextBlock Margin="0,8,0,0"
-                                           Text="The application now discovers platform plugins through a shared SDK. Live target connection and PS5 integration are intentionally reserved for the next development milestone."
-                                           Foreground="{StaticResource SecondaryTextBrush}"
-                                           TextWrapping="Wrap" />
-                            </StackPanel>
+                                <TextBlock VerticalAlignment="Center"
+                                           Text="Address (hex)"
+                                           Style="{StaticResource MutedTextStyle}" />
+                                <TextBox Grid.Column="1"
+                                         Margin="8,0,0,0"
+                                         Text="{Binding SelectedPlugin.MemoryWriteAddressText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}" />
+
+                                <TextBlock Grid.Column="3"
+                                           VerticalAlignment="Center"
+                                           Text="Value (decimal)"
+                                           Style="{StaticResource MutedTextStyle}" />
+                                <TextBox Grid.Column="4"
+                                         Margin="8,0,0,0"
+                                         HorizontalScrollBarVisibility="Auto"
+                                         Text="{Binding SelectedPlugin.MemoryWriteValueText, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                                         ToolTip="Signed 4-byte integer value in decimal form, from -2147483648 through 2147483647." />
+
+                                <StackPanel Grid.Column="6"
+                                            Orientation="Horizontal">
+                                    <Button MinWidth="116"
+                                            Margin="0,0,8,0"
+                                            Style="{StaticResource SecondaryButtonStyle}"
+                                            Command="{Binding SelectedPlugin.SafeWriteTestCommand}"
+                                            Content="Safe Write Test"
+                                            ToolTip="Automatically selects a stable readable/writable non-executable range, writes the exact bytes already present, and verifies them by reading them back." />
+                                    <Button MinWidth="116"
+                                            Style="{StaticResource PrimaryButtonStyle}"
+                                            Command="{Binding SelectedPlugin.WriteMemoryCommand}"
+                                            Content="Write + Verify" />
+                                </StackPanel>
+                            </Grid>
+
+                            <TextBlock Grid.Row="1"
+                                       Margin="0,8,0,0"
+                                       Text="{Binding SelectedPlugin.MemoryWriteStatusText}"
+                                       Style="{StaticResource MutedTextStyle}" />
+                            <TextBlock Grid.Row="2"
+                                       Margin="0,3,0,0"
+                                       Text="{Binding SelectedPlugin.MemoryWriteErrorText}"
+                                       Style="{StaticResource ErrorMessageTextStyle}" />
+
+                            <TextBox Grid.Row="3"
+                                     Height="110"
+                                     Margin="0,8,0,0"
+                                     Padding="10,8"
+                                     IsReadOnly="True"
+                                     AcceptsReturn="True"
+                                     VerticalContentAlignment="Top"
+                                     FontFamily="Consolas"
+                                     FontSize="12"
+                                     HorizontalScrollBarVisibility="Auto"
+                                     VerticalScrollBarVisibility="Auto"
+                                     TextWrapping="NoWrap"
+                                     Text="{Binding SelectedPlugin.MemoryWriteResultText, Mode=OneWay}" />
+                        </Grid>
+                    </Border>
+                </Expander>
+            </StackPanel>
+        </Border>
+
+        <!-- Main memory workspace. Scan Results and Saved Addresses share the left column while Scan remains full-height on the right. -->
+        <Grid Grid.Row="2" Margin="12,12,12,10">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" MinWidth="640" />
+                <ColumnDefinition Width="14" />
+                <ColumnDefinition Width="310" MinWidth="280" MaxWidth="420" />
+            </Grid.ColumnDefinitions>
+
+            <Grid Grid.Column="0">
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="*" />
+                    <RowDefinition Height="14" />
+                    <RowDefinition Height="*" />
+                </Grid.RowDefinitions>
+
+                <Border Grid.Row="0" Style="{StaticResource CardBorderStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                            <RowDefinition Height="Auto" />
+                        </Grid.RowDefinitions>
+
+                        <Border Padding="12,9"
+                                Background="{DynamicResource PanelSecondaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="0,0,0,1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Text="Scan Results" Style="{StaticResource SectionTitleTextStyle}" />
+                                <TextBlock Grid.Column="1"
+                                           Text="{Binding SelectedPlugin.ScanResultCountText}"
+                                           Style="{StaticResource MutedTextStyle}" />
+                            </Grid>
                         </Border>
 
-                        <TextBlock Margin="0,20,0,0"
-                                   Text="{Binding ErrorText}"
-                                   Foreground="#FCA5A5"
-                                   TextWrapping="Wrap" />
-                    </StackPanel>
-                </ScrollViewer>
+                        <Grid Grid.Row="1">
+                            <DataGrid IsReadOnly="True"
+                                      ItemsSource="{Binding SelectedPlugin.ScanResults}"
+                                      EnableRowVirtualization="True"
+                                      EnableColumnVirtualization="True">
+                                <DataGrid.RowStyle>
+                                    <Style TargetType="{x:Type DataGridRow}"
+                                           BasedOn="{StaticResource {x:Type DataGridRow}}">
+                                        <Setter Property="ContextMenu">
+                                            <Setter.Value>
+                                                <ContextMenu DataContext="{Binding PlacementTarget.DataContext, RelativeSource={RelativeSource Self}}">
+                                                    <MenuItem Header="Copy address" Command="{Binding CopyAddressCommand}" />
+                                                    <MenuItem Header="Copy value" Command="{Binding CopyValueCommand}" />
+                                                    <Separator />
+                                                    <MenuItem Header="Change value" Command="{Binding ChangeValueCommand}" />
+                                                </ContextMenu>
+                                            </Setter.Value>
+                                        </Setter>
+                                    </Style>
+                                </DataGrid.RowStyle>
+                                <DataGrid.Columns>
+                                    <DataGridTextColumn Header="Address" Width="160" Binding="{Binding Address}" />
+                                    <DataGridTextColumn Header="Value" Width="160" Binding="{Binding Value}" />
+                                    <DataGridTextColumn Header="Previous" Width="160" Binding="{Binding Previous}" />
+                                    <DataGridTextColumn Header="Type" Width="120" Binding="{Binding Type}" />
+                                    <DataGridTextColumn Header="Region / Module" Width="*" Binding="{Binding Region}" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <TextBlock HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Text="{Binding SelectedPlugin.ScanEmptyMessage}"
+                                       IsHitTestVisible="False">
+                                <TextBlock.Style>
+                                    <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource MutedTextStyle}">
+                                        <Setter Property="Visibility" Value="Visible" />
+                                        <Style.Triggers>
+                                            <DataTrigger Binding="{Binding SelectedPlugin.HasVisibleScanResults}" Value="True">
+                                                <Setter Property="Visibility" Value="Collapsed" />
+                                            </DataTrigger>
+                                        </Style.Triggers>
+                                    </Style>
+                                </TextBlock.Style>
+                            </TextBlock>
+                        </Grid>
+
+                        <Border Grid.Row="2"
+                                Padding="10,6"
+                                Background="{DynamicResource PanelSecondaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="0,1,0,0">
+                            <Grid>
+                                <TextBlock Text="{Binding SelectedPlugin.ScanResultFooterText}"
+                                           Style="{StaticResource MutedTextStyle}" />
+                                <TextBlock HorizontalAlignment="Right"
+                                           Text="Export"
+                                           Foreground="{DynamicResource DisabledButtonTextBrush}" />
+                            </Grid>
+                        </Border>
+                    </Grid>
+                </Border>
+
+                <controls:ProportionalGridSplitter Grid.Row="1"
+                                                   Style="{StaticResource RowWorkspaceSplitterStyle}"
+                                                   ResizeDirection="Rows"
+                                                   ResizeBehavior="PreviousAndNext"
+                                                   MinimumPreviousRatio="0.2"
+                                                   MaximumPreviousRatio="0.8"
+                                                   ShowsPreview="False" />
+
+                <!-- Cheat Engine-style address table, retained as a distinct persistent list from scan results. -->
+                <Border Grid.Row="2"
+                        Style="{StaticResource CardBorderStyle}">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto" />
+                            <RowDefinition Height="*" />
+                        </Grid.RowDefinitions>
+
+                        <Border Padding="12,8"
+                                Background="{DynamicResource PanelSecondaryBrush}"
+                                BorderBrush="{DynamicResource BorderBrush}"
+                                BorderThickness="0,0,0,1">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="18" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="8" />
+                                    <ColumnDefinition Width="Auto" />
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="Auto" />
+                                </Grid.ColumnDefinitions>
+
+                                <TextBlock VerticalAlignment="Center"
+                                           Text="Saved Addresses"
+                                           Style="{StaticResource SectionTitleTextStyle}" />
+
+                                <Button Grid.Column="2"
+                                        MinWidth="94"
+                                        IsEnabled="False"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Content="Add Address" />
+                                <Button Grid.Column="4"
+                                        MinWidth="76"
+                                        IsEnabled="False"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Content="Edit" />
+                                <Button Grid.Column="6"
+                                        MinWidth="82"
+                                        IsEnabled="False"
+                                        Style="{StaticResource DangerButtonStyle}"
+                                        Content="Remove" />
+                                <Button Grid.Column="8"
+                                        MinWidth="90"
+                                        IsEnabled="False"
+                                        Style="{StaticResource SecondaryButtonStyle}"
+                                        Content="Export..." />
+                            </Grid>
+                        </Border>
+
+                        <Grid Grid.Row="1">
+                            <DataGrid IsReadOnly="True">
+                                <DataGrid.Columns>
+                                    <DataGridCheckBoxColumn Header="Active" Width="70" />
+                                    <DataGridTextColumn Header="Description" Width="2*" />
+                                    <DataGridTextColumn Header="Address" Width="190" />
+                                    <DataGridTextColumn Header="Type" Width="110" />
+                                    <DataGridTextColumn Header="Value" Width="150" />
+                                    <DataGridCheckBoxColumn Header="Frozen" Width="75" />
+                                    <DataGridTextColumn Header="Notes" Width="*" />
+                                </DataGrid.Columns>
+                            </DataGrid>
+                            <TextBlock HorizontalAlignment="Center"
+                                       VerticalAlignment="Center"
+                                       Text="No saved addresses."
+                                       Style="{StaticResource MutedTextStyle}"
+                                       IsHitTestVisible="False" />
+                        </Grid>
+                    </Grid>
+                </Border>
+            </Grid>
+
+            <GridSplitter Grid.Column="1"
+                          Style="{StaticResource ColumnWorkspaceSplitterStyle}"
+                          ResizeDirection="Columns"
+                          ResizeBehavior="PreviousAndNext"
+                          ShowsPreview="True" />
+
+            <Border Grid.Column="2"
+                    Padding="14"
+                    Style="{StaticResource CardBorderStyle}">
+                <StackPanel>
+                    <TextBlock Text="Scan" Style="{StaticResource SectionTitleTextStyle}" />
+
+                    <TextBlock Margin="0,14,0,5" Text="Value" Style="{StaticResource MutedTextStyle}" />
+                    <TextBox Text="{Binding SelectedPlugin.ScanValueText, UpdateSourceTrigger=PropertyChanged}"
+                             IsEnabled="{Binding SelectedPlugin.SupportsSharedScanner}"
+                             ToolTip="{Binding SelectedPlugin.ScanValueToolTip}">
+                        <TextBox.InputBindings>
+                            <KeyBinding Key="Enter" Command="{Binding SelectedPlugin.ScanSubmitCommand}" />
+                        </TextBox.InputBindings>
+                    </TextBox>
+
+                    <TextBlock Margin="0,12,0,5" Text="Scan Type" Style="{StaticResource MutedTextStyle}" />
+                    <ComboBox IsEnabled="False" SelectedIndex="0">
+                        <ComboBoxItem Content="Exact Value" />
+                    </ComboBox>
+
+                    <TextBlock Margin="0,12,0,5" Text="Value Type" Style="{StaticResource MutedTextStyle}" />
+                    <ComboBox ItemsSource="{Binding SelectedPlugin.ScanValueTypes}"
+                              SelectedItem="{Binding SelectedPlugin.SelectedScanValueType, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayName"
+                              IsEnabled="{Binding SelectedPlugin.CanSelectScanValueType}"
+                              ToolTip="Value Type is locked after First Scan. Choose New Scan before changing it." />
+
+                    <CheckBox Margin="0,14,0,0"
+                              VerticalAlignment="Center"
+                              Content="Pause target while scanning"
+                              IsChecked="{Binding SelectedPlugin.PauseTargetWhileScanning, Mode=TwoWay}"
+                              IsEnabled="{Binding SelectedPlugin.CanConfigureScanPause}"
+                              Visibility="{Binding SelectedPlugin.SupportsScanPause, Converter={StaticResource BooleanToVisibilityConverter}}"
+                              ToolTip="Temporarily suspends the Active Target during First Scan or Next Scan, then resumes it automatically. Off by default." />
+
+                    <Grid Margin="0,14,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0"
+                                Command="{Binding SelectedPlugin.FirstScanCommand}"
+                                Content="First Scan">
+                            <Button.Style>
+                                <Style TargetType="{x:Type Button}" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding SelectedPlugin.IsFirstScanPrimaryAction}" Value="True" />
+                                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsEnabled}" Value="True" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryButtonTextBrush}" />
+                                            <Setter Property="Background" Value="{DynamicResource PrimaryButtonBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource PrimaryButtonBorderBrush}" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                        <Button Grid.Column="2"
+                                Command="{Binding SelectedPlugin.NextScanCommand}"
+                                Content="Next Scan">
+                            <Button.Style>
+                                <Style TargetType="{x:Type Button}" BasedOn="{StaticResource SecondaryButtonStyle}">
+                                    <Style.Triggers>
+                                        <MultiDataTrigger>
+                                            <MultiDataTrigger.Conditions>
+                                                <Condition Binding="{Binding SelectedPlugin.IsNextScanPrimaryAction}" Value="True" />
+                                                <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsEnabled}" Value="True" />
+                                            </MultiDataTrigger.Conditions>
+                                            <Setter Property="Foreground" Value="{DynamicResource PrimaryButtonTextBrush}" />
+                                            <Setter Property="Background" Value="{DynamicResource PrimaryButtonBackgroundBrush}" />
+                                            <Setter Property="BorderBrush" Value="{DynamicResource PrimaryButtonBorderBrush}" />
+                                        </MultiDataTrigger>
+                                    </Style.Triggers>
+                                </Style>
+                            </Button.Style>
+                        </Button>
+                    </Grid>
+
+                    <Grid Margin="0,8,0,0">
+                        <Grid.ColumnDefinitions>
+                            <ColumnDefinition Width="*" />
+                            <ColumnDefinition Width="8" />
+                            <ColumnDefinition Width="*" />
+                        </Grid.ColumnDefinitions>
+                        <Button Grid.Column="0"
+                                Command="{Binding SelectedPlugin.NewScanCommand}"
+                                Style="{StaticResource SecondaryButtonStyle}"
+                                Content="New Scan" />
+                        <Button Grid.Column="2"
+                                Command="{Binding SelectedPlugin.CancelScanCommand}"
+                                Style="{StaticResource DangerButtonStyle}"
+                                Content="Cancel Scan" />
+                    </Grid>
+
+                </StackPanel>
             </Border>
         </Grid>
 
-        <Border Grid.Row="2"
-                Padding="24,12"
-                Background="{StaticResource PanelBackgroundBrush}"
-                BorderBrush="{StaticResource BorderBrush}"
+        <Border Grid.Row="3"
+                Padding="12,6"
+                Background="{DynamicResource PanelBackgroundBrush}"
+                BorderBrush="{DynamicResource BorderBrush}"
                 BorderThickness="0,1,0,0">
             <Grid>
                 <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="18" />
                     <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="12" />
+                    <ColumnDefinition Width="Auto" />
+                    <ColumnDefinition Width="18" />
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
-                <TextBlock Text="{Binding StatusText}"
-                           Foreground="{StaticResource SecondaryTextBrush}" />
-                <TextBlock Grid.Column="1"
-                           Text="{Binding PluginDirectory}"
-                           Foreground="{StaticResource SecondaryTextBrush}"
-                           FontSize="11" />
+
+                <TextBlock Text="{Binding StatusText}" Style="{StaticResource MutedTextStyle}" />
+
+                <TextBlock Grid.Column="2"
+                           MaxWidth="320"
+                           Text="{Binding ErrorText}"
+                           Foreground="{DynamicResource ErrorTextBrush}"
+                           TextTrimming="CharacterEllipsis" />
+
+                <TextBlock Grid.Column="4"
+                           Text="{Binding SelectedPlugin.ScanStatusBarText}"
+                           ToolTip="{Binding SelectedPlugin.ScanStatusBarText}"
+                           TextTrimming="CharacterEllipsis">
+                    <TextBlock.Style>
+                        <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource MutedTextStyle}">
+                            <Style.Triggers>
+                                <DataTrigger Binding="{Binding SelectedPlugin.HasScanError}" Value="True">
+                                    <Setter Property="Foreground" Value="{DynamicResource ErrorTextBrush}" />
+                                </DataTrigger>
+                            </Style.Triggers>
+                        </Style>
+                    </TextBlock.Style>
+                </TextBlock>
+
+                <StackPanel Grid.Column="6"
+                            Orientation="Horizontal"
+                            VerticalAlignment="Center"
+                            Visibility="{Binding SelectedPlugin.HasScanProgress, Converter={StaticResource BooleanToVisibilityConverter}}">
+                    <ProgressBar Width="170"
+                                 Height="8"
+                                 Minimum="0"
+                                 Maximum="100"
+                                 Value="{Binding SelectedPlugin.ScanProgressPercentage, Mode=OneWay}"
+                                 IsIndeterminate="{Binding SelectedPlugin.IsScanProgressIndeterminate, Mode=OneWay}"
+                                 Foreground="{DynamicResource AccentBrush}"
+                                 Background="{DynamicResource InputBackgroundBrush}"
+                                 BorderBrush="{DynamicResource BorderBrush}"
+                                 BorderThickness="1" />
+                    <TextBlock MinWidth="68"
+                               Margin="8,0,0,0"
+                               VerticalAlignment="Center"
+                               Text="{Binding SelectedPlugin.ScanElapsedText}"
+                               TextAlignment="Right"
+                               Style="{StaticResource MutedTextStyle}" />
+                </StackPanel>
+
+                <TextBlock Grid.Column="8"
+                           Text="{Binding FeatureTitle}"
+                           Style="{StaticResource MutedTextStyle}" />
             </Grid>
         </Border>
     </Grid>

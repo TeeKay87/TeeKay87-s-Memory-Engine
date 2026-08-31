@@ -1,15 +1,17 @@
 using System;
 using System.Windows;
+using TeeKay87.MemoryEngine.App.Theming;
 using TeeKay87.MemoryEngine.App.ViewModels;
 
 namespace TeeKay87.MemoryEngine.App;
 
 public partial class MainWindow : Window
 {
-    public MainWindow()
+    public MainWindow(ThemeManager themeManager)
     {
+        ArgumentNullException.ThrowIfNull(themeManager);
         InitializeComponent();
-        DataContext = new MainWindowViewModel();
+        DataContext = new MainWindowViewModel(themeManager);
     }
 
     protected override void OnClosed(EventArgs e)

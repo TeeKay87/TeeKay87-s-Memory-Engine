@@ -10,6 +10,8 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TeeKay87.MemoryEngine.Plugi
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TeeKay87.MemoryEngine.Platform.Mock", "src\Plugins\TeeKay87.MemoryEngine.Platform.Mock\TeeKay87.MemoryEngine.Platform.Mock.csproj", "{CD33DF37-4DF5-4A60-81B8-3E324572D847}"
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TeeKay87.MemoryEngine.Platform.PS5", "src\Plugins\TeeKay87.MemoryEngine.Platform.PS5\TeeKay87.MemoryEngine.Platform.PS5.csproj", "{E5C4D0F7-ACB1-47DE-B4A1-7D0C53C7C8F2}"
+EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "TeeKay87.MemoryEngine.Tests", "tests\TeeKay87.MemoryEngine.Tests\TeeKay87.MemoryEngine.Tests.csproj", "{1E78710F-E507-44E9-8AFD-22AF4E6E2752}"
 EndProject
 Global
@@ -34,6 +36,10 @@ Global
 		{CD33DF37-4DF5-4A60-81B8-3E324572D847}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{CD33DF37-4DF5-4A60-81B8-3E324572D847}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{CD33DF37-4DF5-4A60-81B8-3E324572D847}.Release|Any CPU.Build.0 = Release|Any CPU
+		{E5C4D0F7-ACB1-47DE-B4A1-7D0C53C7C8F2}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{E5C4D0F7-ACB1-47DE-B4A1-7D0C53C7C8F2}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{E5C4D0F7-ACB1-47DE-B4A1-7D0C53C7C8F2}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{E5C4D0F7-ACB1-47DE-B4A1-7D0C53C7C8F2}.Release|Any CPU.Build.0 = Release|Any CPU
 		{1E78710F-E507-44E9-8AFD-22AF4E6E2752}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{1E78710F-E507-44E9-8AFD-22AF4E6E2752}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{1E78710F-E507-44E9-8AFD-22AF4E6E2752}.Release|Any CPU.ActiveCfg = Release|Any CPU

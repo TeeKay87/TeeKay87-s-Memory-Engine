@@ -8,5 +8,10 @@ public sealed record PluginMetadata(
     string Platform,
     string Backend,
     Version Version,
+    int Revision,
+    Version ApiVersion,
     string Description,
-    TargetArchitecture Architecture);
+    TargetArchitecture Architecture)
+{
+    public string DisplayVersion => $"{Version}.rev{Revision}";
+}

@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using TeeKay87.MemoryEngine.PluginSdk.Capabilities;
@@ -10,11 +11,13 @@ namespace TeeKay87.MemoryEngine.Platform.Mock;
 public sealed class MockTargetPlugin : ITargetPlugin
 {
     public PluginMetadata Metadata { get; } = new(
-        Id: "platform.mock.in-memory",
-        Name: "In-Memory Test Target",
+        Id: MockPluginInfo.Id,
+        Name: MockPluginInfo.Name,
         Platform: "Development",
         Backend: "In-Memory",
-        Version: new Version(1, 0, 0),
+        Version: MockPluginInfo.SemanticVersion,
+        Revision: MockPluginInfo.Revision,
+        ApiVersion: MockPluginInfo.TargetApiVersion,
         Description: "Deterministic target used to validate the shared plugin and memory-access architecture.",
         Architecture: new TargetArchitecture(
             CpuArchitecture.X64,
@@ -29,6 +32,9 @@ public sealed class MockTargetPlugin : ITargetPlugin
         TargetCapabilities.MemoryRegionEnumeration |
         TargetCapabilities.MemoryRead |
         TargetCapabilities.MemoryWrite;
+
+    public IReadOnlyList<TargetConnectionSettingDefinition> ConnectionSettings { get; } =
+        Array.Empty<TargetConnectionSettingDefinition>();
 
     public Task<ITargetSession> ConnectAsync(
         TargetConnectionOptions options,

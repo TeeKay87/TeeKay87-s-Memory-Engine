@@ -1,8 +1,9 @@
+# Files
+*.zip
+*.bat
+
 # Folders
 revisions
-
-# Files
-
 
 # Build output
 bin/

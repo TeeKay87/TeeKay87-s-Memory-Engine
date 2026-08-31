@@ -2,70 +2,142 @@
 
 ## Purpose
 
-This document records the plugin architecture implemented for the initial foundation of TeeKay87's Memory Engine.
+This document describes the current platform-plugin boundary used by TeeKay87's Memory Engine.
 
-It complements the broader `EARLY_DEVELOPMENT_ARCHITECTURE.md` guide by describing the concrete contracts that now exist in source code. These contracts are intentionally limited to the foundation required before live PS5 integration and should be extended carefully as new subsystems are implemented.
+The Plugin SDK is deliberately platform-neutral. It defines what the host needs to know about a target plugin without exposing ps5debug-NG, Windows APIs, Xbox 360 protocols, or other backend-specific implementation types to Core or WPF.
+
+Plugin-specific implementation and test documentation belongs under that plugin's dedicated directory in `docs/plugins/`.
 
 ## Project Boundary
 
-The implemented solution separates responsibilities into the following projects:
+The solution currently separates responsibilities into:
 
 | Project | Responsibility |
 | --- | --- |
-| `TeeKay87.MemoryEngine.App` | WPF presentation layer and application composition |
-| `TeeKay87.MemoryEngine.Core` | Shared application infrastructure and plugin hosting |
-| `TeeKay87.MemoryEngine.PluginSdk` | Public contracts, capability flags, and platform-neutral target models |
-| `TeeKay87.MemoryEngine.Platform.Mock` | Deterministic development platform implementation |
-| `TeeKay87.MemoryEngine.Tests` | Dependency-free foundation verification |
+| `TeeKay87.MemoryEngine.App` | WPF presentation and application composition |
+| `TeeKay87.MemoryEngine.Core` | Shared host infrastructure and plugin discovery |
+| `TeeKay87.MemoryEngine.PluginSdk` | Public contracts, capability flags, compatibility metadata, and neutral target models |
+| platform plugin projects | Target-specific connection and operation implementations |
+| `TeeKay87.MemoryEngine.Tests` | Dependency-free verification executable |
 
-The Plugin SDK does not reference Core or the WPF application. Platform plugins are therefore able to depend on the SDK without taking a dependency on the host application.
+The Plugin SDK does not reference Core or WPF. A platform plugin therefore depends only on the SDK and its own backend dependencies.
+
+## Independent Version Domains
+
+Three version domains are intentionally separate.
+
+### Host Application Version
+
+The main application uses its own `AppInfo` version and revision, for example:
+
+```text
+0.1.1.rev1
+```
+
+This version describes TeeKay87's Memory Engine as a whole.
+
+### Plugin Version
+
+Every plugin owns its own semantic version and revision. A plugin does not inherit the host application's version.
+
+Examples can therefore coexist as:
+
+```text
+Host application:  0.1.1.rev1
+Plugin A:          1.0.0.rev1
+Plugin B:          0.1.0.rev1
+```
+
+A plugin changes its version/revision only when that plugin changes.
+
+Each built-in plugin keeps its version values in a plugin-local information class rather than duplicating displayed values across its source.
+
+### Plugin API Version
+
+The Plugin SDK has a separate compatibility version exposed by `PluginApiInfo`.
+
+The current Plugin API version is:
+
+```text
+1.2.0
+```
+
+Plugin API `1.1.0` was introduced by host `0.1.2.rev4` to add optional native value-scanning and process-control services. Plugin API `1.2.0` was introduced by host `0.1.2.rev5` to add optional native refinement/session-reset behavior through `INativeValueScanRefiner`. Host `0.1.3.rev1` keeps Plugin API `1.2.0`: the existing `MemoryValueType` identifiers and generic `NativeValueScanRequest` already cover the full ps5debug-NG value-type expansion, so no public SDK contract change is required.
+
+Each plugin declares the Plugin API version it targets in `PluginMetadata.ApiVersion`.
+
+The current compatibility rule is:
+
+- major version must match the host Plugin API major version;
+- a plugin may target the same or an older minor version within that major version;
+- a plugin targeting a newer minor version than the host is rejected during discovery.
+
+This allows the host application, individual plugins, and the public contract to evolve independently.
 
 ## Plugin Entry Point
 
 A platform plugin exposes one or more public, non-abstract classes implementing `ITargetPlugin`.
 
-The current entry-point contract provides:
+The current contract provides:
 
 ```csharp
 PluginMetadata Metadata { get; }
 TargetCapabilities Capabilities { get; }
+IReadOnlyList<TargetConnectionSettingDefinition> ConnectionSettings { get; }
 Task<ITargetSession> ConnectAsync(
     TargetConnectionOptions options,
     CancellationToken cancellationToken);
 ```
 
-A plugin entry type currently requires a public parameterless constructor because plugin discovery instantiates it through reflection.
-
-This requirement is deliberately simple for the foundation. A future manifest, factory, dependency-injection, or package system can replace construction behavior without moving target-specific code into Core.
+A plugin entry type currently requires a public parameterless constructor because `PluginHost` creates it through reflection.
 
 ## Plugin Metadata
 
-`PluginMetadata` distinguishes platform information from backend information.
+`PluginMetadata` contains:
 
-The fields are:
+- stable plugin id;
+- user-facing plugin name;
+- target platform;
+- backend/transport name;
+- plugin semantic version;
+- plugin revision;
+- targeted Plugin API version;
+- description;
+- target architecture.
 
-- `Id` — stable unique plugin identifier;
-- `Name` — user-facing plugin name;
-- `Platform` — target platform;
-- `Backend` — transport, protocol, runtime, or backend implementation;
-- `Version` — plugin implementation version;
-- `Description` — user-facing description;
-- `Architecture` — target CPU, pointer width, address width, and endianness.
-
-This distinction is important for the first planned live implementation:
+`PluginMetadata.DisplayVersion` combines the plugin's own semantic version and revision using:
 
 ```text
-Platform: PlayStation 5
-Backend:  ps5debug-NG
+<version>.rev<revision>
 ```
 
-Core must not use the backend name as a substitute for platform identity.
+Platform and backend are separate concepts. For example, a target platform may be PlayStation 5 while its current backend is ps5debug-NG.
+
+## Connection Settings
+
+Connection requirements are plugin-owned.
+
+`ITargetPlugin.ConnectionSettings` exposes a collection of `TargetConnectionSettingDefinition` instances. A definition currently contains:
+
+- `Key` — stable option key used to construct `TargetConnectionOptions`;
+- `Label` — user-facing field label;
+- `Description` — optional help text;
+- `DefaultValue` — optional initial value;
+- `IsRequired` — whether the generic host should reject an empty value before connecting.
+
+The WPF application renders these fields without checking the target platform name.
+
+A plugin that requires no input returns an empty settings collection.
+
+The plugin remains responsible for backend-specific validation such as legal port ranges, address syntax, credentials, or target-specific requirements.
+
+The connection-setting model can be extended later with typed controls or richer validation metadata when a real need appears. The current contract intentionally implements only what the first connection workflows require.
 
 ## Capability Model
 
-`TargetCapabilities` is a flags enum. The host and UI use these flags to determine which operations a plugin claims to support.
+`TargetCapabilities` is a flags enum. The host and UI use these flags to determine which operations a plugin implementation actually provides.
 
-The initial capability surface contains:
+The current capability surface includes:
 
 - connection;
 - process enumeration;
@@ -78,7 +150,7 @@ The initial capability surface contains:
 - AOB scanning;
 - native pointer scanning;
 - disassembly and assembly;
-- debugger session support;
+- debugger sessions;
 - breakpoints and watchpoints;
 - register access;
 - thread enumeration;
@@ -88,21 +160,23 @@ The initial capability surface contains:
 - cheat validation;
 - cheat export.
 
-A capability flag describes availability. It does not define the full API for that subsystem. Subsystem contracts should be introduced when implementation begins and the required behavior is understood well enough to define a stable interface.
+A backend may support an operation that its Memory Engine plugin does not yet implement. In that case the plugin must not advertise the capability yet.
+
+Capability flags describe availability. Full subsystem contracts are introduced only when Core needs to invoke the operation and the behavior is understood well enough to define a useful neutral interface.
 
 ## Target Sessions and Services
 
 A successful connection returns `ITargetSession`.
 
-The session exposes:
+A session exposes:
 
-- the plugin metadata associated with the connection;
+- plugin metadata;
 - target architecture;
 - connection state;
 - asynchronous disposal;
 - typed service lookup through `GetService<TService>()`.
 
-The initial service contracts are:
+The current neutral service contracts are:
 
 ```text
 IProcessProvider
@@ -110,38 +184,54 @@ IForegroundProcessProvider
 IMemoryMapProvider
 IMemoryReader
 IMemoryWriter
+INativeValueScanner
+INativeValueScanRefiner
+IProcessControl
 ```
 
-Using typed services avoids creating a large `ITargetSession` interface where every platform must implement every planned feature.
+Using typed services avoids one large target-session interface where every plugin must implement operations it does not support.
 
-For example, a read-only memory dump could provide:
+`TargetSessionExtensions.GetRequiredService<TService>()` is available for code paths where capability checks have already established that a service must exist.
 
-```text
-IProcessProvider
-IMemoryMapProvider
-IMemoryReader
-```
+### INativeValueScanner
 
-without exposing `IMemoryWriter`.
+`INativeValueScanner` is an optional acceleration boundary for platforms/backends that can perform a value comparison on the target rather than requiring Core to transfer every scanned byte. The service accepts the `TargetProcess`, Core's neutral scannable `IReadOnlyList<MemoryRegion>`, and a neutral `NativeValueScanRequest`, then returns matching absolute addresses. Passing the neutral region set lets the backend preserve the same scan boundaries chosen by Core without moving platform-specific memory-map data into the SDK.
 
-A live PS5 session may expose additional services as its implementation grows.
+The current request model carries:
 
-`TargetSessionExtensions.GetRequiredService<TService>()` is provided for code paths where a capability has already been checked and the service is mandatory. Missing required services produce an explicit `NotSupportedException`.
+- `MemoryValueType`;
+- `ValueScanComparison`;
+- encoded comparison bytes;
+- requested alignment.
+
+Core remains responsible for selecting eligible neutral regions, normalizing returned addresses into shared `MemoryScanResult` objects, enforcing common result limits, and implementing fallback scanning when the session does not expose the service. A plugin may advertise `NativeValueScanning` as an implemented plugin capability while a connected session conditionally returns no service when runtime backend negotiation shows that the remote server lacks the required optional protocol support.
+
+### INativeValueScanRefiner
+
+`INativeValueScanRefiner` is an optional companion to `INativeValueScanner` for backends that can keep an initial survivor set on the target and narrow that set without uploading every candidate from the host. The service receives the current `TargetProcess`, the host's previous absolute address list, the same neutral `NativeValueScanRequest`, and a cancellation token. It returns the absolute addresses that survive the refinement.
+
+The host still owns shared scan-session semantics. Core validates returned addresses against the previous host result set and constructs new `MemoryScanResult` objects with `CurrentValue` from the requested Exact Value and `PreviousValue` from the preceding host result. If native refinement is unavailable or the backend reports that its resident session can no longer be used, the host falls back to the existing shared Core reader-based Next Scan.
+
+`ResetAsync` lets New Scan or Active Target replacement release target-side resident scan state without introducing backend-specific cleanup commands into WPF/Core.
+
+### IProcessControl
+
+`IProcessControl` provides neutral asynchronous `SuspendAsync` and `ResumeAsync` operations for a `TargetProcess`. The current Scan workflow uses it only when both `ProcessSuspend` and `ProcessResume` are advertised.
+
+The contract deliberately contains no debugger/session or platform-specific signal semantics. A plugin owns how process suspension is performed.
 
 ## Initial Neutral Models
-
-The Plugin SDK currently defines the minimum models needed for the first live-target milestone.
 
 ### TargetArchitecture
 
 Contains:
 
 - CPU architecture;
-- pointer width in bits;
-- address width in bits;
+- pointer width;
+- address width;
 - endianness.
 
-This prevents Core from assuming that every target behaves like x86-64 little-endian memory.
+Core must not assume every target uses x86-64 or little-endian data.
 
 ### TargetProcess
 
@@ -151,7 +241,7 @@ Contains:
 - process name;
 - optional display name.
 
-Platform-specific fields must not be added merely because the first live plugin needs them. If future features require richer process metadata, neutral fields or plugin-owned metadata should be evaluated first.
+Backend-specific process fields should remain inside the plugin until a shared requirement justifies a neutral model extension.
 
 ### MemoryRegion
 
@@ -163,118 +253,102 @@ Contains:
 - optional region name;
 - optional module name.
 
-The protection flags currently cover read, write, execute, guard, private, and shared characteristics.
-
 ### MemoryValueType
 
-Defines the initial common memory value types planned for scanner/value infrastructure:
+Defines the common value-type identifiers used by scanner/value infrastructure. Host `0.1.3.rev1` actively uses `Int8`, `UInt8`, `Int16`, `UInt16`, `Int32`, `UInt32`, `Int64`, `UInt64`, `Float32`, `Float64`, and `ByteArray` for Exact Value scanning. `Ascii`, `Utf8`, and `Utf16` remain reserved for later string-oriented tooling because they are not ps5debug-NG scan value types.
 
-- signed/unsigned 8-, 16-, 32-, and 64-bit integers;
-- `Float32` and `Float64`;
-- byte arrays;
-- ASCII;
-- UTF-8;
-- UTF-16.
-
-Encoding/decoding logic is intentionally not implemented in this revision. It belongs to the later shared value-encoding milestone.
+Parsing, target-endian encoding, display formatting, alignment, and exact matching live in shared Core. Platform transports receive only the neutral enum plus encoded value bytes through `NativeValueScanRequest`.
 
 ## Plugin Discovery
 
 `PluginHost` is implemented in Core.
 
-Discovery currently works as follows:
+Discovery currently performs the following steps:
 
-1. Resolve the configured plugin directory.
-2. Enumerate top-level `.dll` files.
-3. Create a collectible `PluginLoadContext` for each candidate assembly.
-4. Load the assembly and inspect its loadable public types.
-5. Identify non-abstract `ITargetPlugin` implementations.
-6. Construct each plugin through its public parameterless constructor.
-7. Validate required metadata.
-8. Reject duplicate plugin ids.
-9. Return successful plugins and structured discovery errors separately.
-10. Retain load contexts only for assemblies that contributed accepted plugins.
+1. resolve the configured plugin directory;
+2. enumerate top-level `.dll` candidates;
+3. create a collectible `PluginLoadContext` per candidate;
+4. load the assembly and inspect public loadable types;
+5. find non-abstract `ITargetPlugin` implementations;
+6. instantiate plugins through public parameterless constructors;
+7. validate required metadata;
+8. validate plugin revision and Plugin API compatibility;
+9. validate connection-setting keys and labels;
+10. reject duplicate plugin ids;
+11. return accepted plugins and discovery errors separately;
+12. retain load contexts only for assemblies that contributed accepted plugins.
 
-Reloading plugins first releases the previous plugin references in the application, then unloads the old collectible load contexts and performs discovery again.
+Reloading first releases application references and target sessions, then unloads prior plugin contexts before discovery runs again.
 
 ## Assembly Identity and Dependency Resolution
 
-Plugins must share the host's `TeeKay87.MemoryEngine.PluginSdk` assembly identity. Loading a private SDK copy would cause interface type identity to differ between host and plugin even if the code is identical.
+Plugins share the host's `TeeKay87.MemoryEngine.PluginSdk` assembly identity.
 
-`PluginLoadContext` therefore returns control to the default load context when the Plugin SDK assembly is requested.
+`PluginLoadContext` returns control to the default load context when the Plugin SDK assembly is requested. Other managed and unmanaged dependencies are resolved relative to the plugin assembly with `AssemblyDependencyResolver`.
 
-Other managed and unmanaged dependencies are resolved with `AssemblyDependencyResolver` relative to the plugin entry assembly.
-
-This is the foundation for future platform plugins that require backend-specific client libraries while keeping those dependencies outside Core.
-
-## Mock Target
-
-The development plugin is intentionally implemented as a real target session rather than a metadata-only placeholder.
-
-It provides:
-
-```text
-Process:      TestGame.exe
-Process ID:   1001
-Memory base:  0x10000000
-Memory size:  0x00010000
-Architecture: x64, 64-bit pointers, 64-bit addresses, little-endian
-```
-
-Known values are initialized at stable addresses:
-
-```text
-Health  0x10000100  Float32  100.0
-Ammo    0x10000104  Int32    30
-Money   0x10000108  Int32    5000
-```
-
-Reads and writes operate on the backing memory buffer with range validation. The session exposes process, foreground-process, memory-map, memory-reader, and memory-writer services.
-
-The mock target should remain available throughout development. Future generic subsystems should use it where practical for deterministic tests before they are verified against live targets.
+This prevents duplicate SDK type identities while allowing platform plugins to carry backend-specific dependencies later.
 
 ## WPF Integration
 
-The application shell does not contain platform-name checks.
+The application does not contain platform-name checks for plugin discovery, metadata, capabilities, or connection fields.
 
-At startup it:
+For the selected plugin, the current shell can display:
 
-1. resolves `<application-directory>/Plugins`;
-2. calls `PluginHost.Discover`;
-3. creates presentation models for accepted plugins;
-4. displays plugin metadata;
-5. enumerates and displays the plugin's capability flags;
-6. surfaces discovery errors without terminating the application.
+- platform and backend;
+- independent plugin version/revision;
+- targeted Plugin API version;
+- architecture;
+- assembly path;
+- capability flags;
+- plugin-defined connection fields;
+- connection/disconnection state and errors;
+- a target-process list when the plugin advertises `ProcessEnumeration` and the connected session exposes `IProcessProvider`;
+- optional preferred-process selection through `IForegroundProcessProvider` when `ForegroundProcess` is advertised; this only chooses the Target Process row and does not implicitly replace the Active Target;
+- a row selection that is kept separate from the explicit active target selected for later memory operations;
+- active-target memory-map status when the plugin advertises `MemoryRegionEnumeration` and the connected session exposes `IMemoryMapProvider`;
+- capability-driven raw-memory read/write inspectors when the plugin advertises `MemoryRead`/`MemoryWrite` and the connected session exposes `IMemoryReader`/`IMemoryWriter`;
+- optional native First Scan acceleration when `NativeValueScanning` is advertised and `INativeValueScanner` is available;
+- optional native Next Scan refinement when `INativeValueScanRefiner` is available for the current native scan session, with the shared Core refinement path retained as fallback;
+- optional scan-time target pause when both `ProcessSuspend` and `ProcessResume` are advertised and `IProcessControl` is available.
 
-The mock plugin is built as a separate platform assembly and copied into the application's plugin output directory by the application project build.
+Connection commands operate through `ITargetPlugin.ConnectAsync`. Process enumeration operates through the existing `IProcessProvider` session service and generic `TargetProcess` model. Memory-map enumeration operates through the existing `IMemoryMapProvider` service and generic `MemoryRegion` model. Raw reads and writes operate through `IMemoryReader`/`IMemoryWriter` and caller-supplied neutral byte buffers. Optional native value scans operate through `INativeValueScanner`, and process pause/resume operates through `IProcessControl`. The UI does not open sockets, parse backend process/map/read/write/scan packets, or call platform APIs directly.
 
-## Rules for the PS5 Plugin
+The active target is presentation/session workflow state rather than a PS5-specific SDK type. When memory-region enumeration is available, activating a target loads its neutral memory map into host state; refreshing a process list refreshes the map when the same active target remains present. When memory-read or memory-write support is present, that map can be used by generic host tooling to reject clearly unmapped/non-readable reads or non-writable writes before invoking `IMemoryReader`/`IMemoryWriter`. Disconnecting clears the process selection, active target, cached active-target memory regions, and raw read/write state.
 
-The upcoming PlayStation 5 implementation must build on this foundation rather than bypass it.
+## Plugin Documentation Structure
 
-The PS5 plugin should:
+Each plugin has its own directory under:
 
-- reference `TeeKay87.MemoryEngine.PluginSdk`;
-- expose a stable PS5/ps5debug-NG plugin id;
-- report `Platform` as PlayStation 5 and `Backend` as ps5debug-NG;
-- report x86-64, 64-bit pointer/address widths, and correct endianness;
-- translate ps5debug-NG process information into `TargetProcess`;
-- translate ps5debug-NG memory maps into `MemoryRegion`;
-- implement memory operations through the shared memory service interfaces;
-- keep packet definitions, command ids, socket behavior, backend errors, and PS5-specific metadata inside the platform project.
+```text
+docs/plugins/<PluginName>/
+```
 
-No ps5debug-NG protocol type should be referenced by `TeeKay87.MemoryEngine.Core` or the WPF presentation layer.
+Only documentation belonging to that plugin should be placed in that directory.
+
+Examples of appropriate plugin-local documentation include:
+
+- backend protocol mappings;
+- plugin implementation design;
+- supported firmware/runtime information;
+- plugin-specific test plans and results;
+- plugin-specific capability notes;
+- platform-specific compatibility information.
+
+General Plugin SDK architecture, host behavior, shared scanner design, and cross-platform contracts remain outside plugin-specific directories.
 
 ## Extension Rules
 
-When adding new functionality:
+When adding functionality:
 
-1. Determine whether the operation is generic or target-specific.
-2. Add neutral models to the Plugin SDK only when they are required across the plugin boundary.
-3. Keep high-level algorithms in Core when they can operate through neutral services.
-4. Add capability flags when support may differ between plugins.
-5. Add a service contract when Core needs to invoke a target-specific low-level operation.
-6. Add deterministic mock behavior when practical so the new Core path can be regression-tested without hardware.
-7. Do not expose ps5debug-NG, Windows API, Xbox 360, or other backend-specific types through public neutral contracts.
+1. determine whether the operation is generic or target-specific;
+2. add neutral models to the SDK only when information must cross the plugin boundary;
+3. keep high-level reusable algorithms in Core;
+4. advertise capabilities only after the plugin implementation exists;
+5. add service contracts only when Core needs to invoke the operation;
+6. extend connection-setting metadata only when a real plugin requires richer input behavior;
+7. preserve independent host, plugin, and Plugin API versioning;
+8. keep plugin-specific documentation in the plugin's dedicated docs directory;
+9. add deterministic mock behavior where practical for generic regression tests;
+10. never expose backend protocol types through neutral public contracts.
 
 The Plugin SDK should remain deliberately smaller than the complete application model. Not every Core type needs to cross the plugin boundary.

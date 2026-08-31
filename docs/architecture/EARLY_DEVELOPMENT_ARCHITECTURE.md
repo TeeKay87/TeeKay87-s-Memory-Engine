@@ -225,6 +225,8 @@ A conceptual manifest could contain:
   "id": "platform.ps5.ps5debug-ng",
   "name": "PlayStation 5",
   "version": "1.0.0",
+  "revision": 1,
+  "pluginApiVersion": "1.0.0",
   "backend": "ps5debug-NG",
   "architecture": ["x86_64"],
   "capabilities": [
@@ -1096,17 +1098,31 @@ public codebase.
 
 ## 25. Early User Interface Direction
 
-Although the architecture must not be driven by UI alone, the intended
-application is a modern desktop tool rather than a visual clone of Cheat
-Engine.
+Although the architecture must not be driven by UI alone, the intended application is a modern desktop memory-development tool. Cheat Engine is an important workflow reference because its target-selection, scan-results, scan-controls, and saved-address separation is familiar and effective, but TeeKay87's Memory Engine must not become a pixel-for-pixel visual clone.
 
-The WPF shell should eventually provide common workspaces such as:
+The primary scanner workspace should deliberately preserve the recognizable workflow:
 
 ``` text
-Target / Connection
-Scanner
-Scan Results
+Application / Theme bar
+        ↓
+Target / Connection bar
+        ↓
+┌────────────────────────────────────┬─────────────────────┐
+│ Scan Results                       │ Scan Controls       │
+│ temporary scan candidates          │ First / Next / New  │
+└────────────────────────────────────┴─────────────────────┘
+        ↓
 Saved Addresses
+persistent user-selected addresses
+```
+
+The distinction between Scan Results and Saved Addresses is architectural as well as visual. Scan Results are transient candidates belonging to the active scan session. Saved Addresses are persistent user selections that may later support value editing, freezing, navigation, pointer analysis, disassembly, project/cheat integration, and export. Starting or refining a scan must not implicitly replace the saved-address table.
+
+The target/connection context should remain visible while the user works. The selected process and explicit Active Target should remain separate so merely browsing a process list cannot silently redirect future memory operations.
+
+Additional common workspaces should eventually include:
+
+``` text
 Memory Viewer
 Disassembler
 Debugger
@@ -1117,11 +1133,37 @@ Logs
 Settings
 ```
 
-The same primary UI should be used regardless of active platform.
+The same primary UI should be used regardless of active platform. Platform plugins may add metadata, commands, editors, or optional panels through controlled extension points, but should not replace the entire application UI. Generic feature availability should be driven by capabilities and session services instead of literal platform-name checks.
 
-Platform plugins may add metadata, commands, editors, or optional panels
-through controlled extension points, but should not replace the entire
-application UI.
+### 25.1 Shared WPF control styling
+
+Reusable application controls should use central WPF resources rather than copy control templates, state triggers, colors, or interaction behavior into individual views.
+
+For standard buttons, the application should maintain a small set of semantic styles such as Primary, Secondary, and Danger on top of one shared base template. The base template should own common interaction states including normal, hover, pressed, keyboard focus, default action, and disabled presentation. Disabled controls must remain legible in every supported color theme and must not fall back to operating-system chrome that conflicts with the application palette.
+
+The same central styling principle applies to frequently reused input and list controls such as TextBox, ComboBox, CheckBox, and DataGrid. Views remain responsible for local layout requirements such as margins or minimum width, while ordinary control visuals and interaction states belong to shared presentation resources.
+
+Informational badges, toggles, check boxes, menu items, and other control categories should retain their own semantics instead of being made to look or behave like ordinary buttons merely for visual consistency.
+
+Shared UI styling documentation belongs under `docs/ui/`, outside platform-plugin documentation.
+
+### 25.2 Color themes
+
+The host application should support color themes without allowing themes to redefine the UI. Theme data must therefore be external presentation data rather than executable XAML or replacement view definitions.
+
+A theme may define the shared semantic palette used by the application's WPF resources, including window/panel surfaces, text, borders, inputs, accent colors, selection, disabled states, danger states, and status colors. Layout, control templates, bindings, commands, and feature behavior remain application-owned.
+
+Theme switching should update the active WPF brush resources so an already-open workspace changes immediately without requiring a restart. The user's selected theme should be persisted between launches.
+
+The initial palette set is:
+
+``` text
+Light
+Dimmed
+Dark
+```
+
+`Dark` preserves the original early application palette, while `Dimmed` intentionally sits between Light and Dark rather than being a second near-black theme. External theme files should be validated as complete palettes so a partially defined or malformed theme cannot leave stale colors from a previously active theme. Theme-system details belong under `docs/ui/`.
 
 ------------------------------------------------------------------------
 
@@ -1180,29 +1222,30 @@ A reasonable early sequence is:
 7.  Create the basic WPF/MVVM application shell.
 8.  Implement the first PS5 ps5debug-NG plugin connection.
 9.  Implement process/foreground-target discovery.
-10. Implement memory read/write.
-11. Implement memory maps.
-12. Implement generic value encoding/decoding.
-13. Implement the generic scanner architecture.
-14. Integrate native PS5 scanning as an optional acceleration path.
-15. Implement scan result storage and virtualization.
-16. Implement universal export infrastructure.
-17. Implement saved addresses.
-18. Implement freeze/repeated writes.
-19. Implement Memory Viewer.
-20. Implement architecture-neutral disassembly contracts.
-21. Implement PS5 disassembly.
-22. Implement debugger contracts.
-23. Implement PS5 breakpoints/watchpoints.
-24. Implement Find What Writes/Accesses.
-25. Implement registers, threads, and call stack.
-26. Implement pointer support.
-27. Implement the neutral cheat-project model.
-28. Implement plugin-defined cheat operations and metadata.
-29. Implement PS5 cheat building and validation.
-30. Implement PS5-specific exporters.
-31. Add scripting only after the underlying APIs are stable enough to
-    expose safely.
+10. Establish the permanent Cheat Engine-inspired scanner workspace and shared color-theme infrastructure before continuing to add feature-specific temporary UI.
+11. Implement memory maps. **Implemented for PS5 in 0.1.1.rev11 and live-verified together with rev12 on a real PS5.**
+12. Implement raw memory read. **Implemented for PS5 in 0.1.1.rev12 and live-verified together with rev11 on a real PS5.**
+13. Implement raw memory write with read-back verification. **Implemented for PS5 in 0.1.1.rev16 / PS5 plugin 0.1.0.rev5 and live-verified through the 0.1.1.rev17 Safe Write Test. The Safe Write Test was run twice against a real PS5 and returned PASS both times.**
+14. Implement generic value encoding/decoding. **The first architecture-aware Int32 decode path is implemented inside the 0.1.2.rev1 shared scanner; broader reusable value codecs remain future work.**
+15. Implement the generic scanner architecture. **Initial implementation added in 0.1.2.rev1 for 4 Bytes / Int32 + Exact Value + First Scan + Next Scan + New Scan + cancellation/progress. Live PS5 use proved the scanner can find/change a real game value; 0.1.2.rev2 hardens cancellation so an in-flight ps5debug-NG read is fully drained before Core observes cancellation, preserving same-session reuse.**
+16. Integrate native PS5 scanning as an optional acceleration path. **First Scan acceleration was implemented in 0.1.2.rev4 / PS5 plugin 0.1.0.rev7 through Plugin API 1.1.0 `INativeValueScanner`, using negotiated ps5debug-NG TurboScan multi-segment/server-resident acceleration for Int32 Exact Value. 0.1.2.rev5 / PS5 plugin 0.1.0.rev8 / Plugin API 1.2.0 added optional `INativeValueScanRefiner` support so compatible Next Scans refine the retained resident survivor set through TurboScan COUNT/GET. 0.1.3.rev1 / PS5 plugin 0.1.0.rev9 generalizes the Exact Value path to all ps5debug-NG value types without another Plugin API bump. Native First Scan covers all eleven types; native resident Next Scan is used for integer and exact Array-of-Bytes types, while Float/Double fall back to Core so strict Exact Value semantics are not replaced by ps5debug-NG's fuzzy floating-point refinement. The generic Core scanner remains the compatibility/resource fallback.**
+17. Implement scan result storage and virtualization. **Initial bounded candidate storage and WPF virtualization/presentation cap added in 0.1.2.rev1; larger-scale long-term storage remains future work.**
+18. Implement universal export infrastructure.
+19. Implement saved addresses.
+20. Implement freeze/repeated writes.
+21. Implement the full Memory Viewer.
+22. Implement architecture-neutral disassembly contracts.
+23. Implement PS5 disassembly.
+24. Implement debugger contracts.
+25. Implement PS5 breakpoints/watchpoints.
+26. Implement Find What Writes/Accesses.
+27. Implement registers, threads, and call stack.
+28. Implement pointer support.
+29. Implement the neutral cheat-project model.
+30. Implement plugin-defined cheat operations and metadata.
+31. Implement PS5 cheat building and validation.
+32. Implement PS5-specific exporters.
+33. Add scripting only after the underlying APIs are stable enough to expose safely.
 
 This sequence may change as implementation and testing reveal
 dependencies.
@@ -1231,7 +1274,14 @@ During development:
 -   revision increases while work remains within the same version;
 -   version changes only when the functionality associated with that
     version has been completed and verified;
--   when a new version begins, revision numbering begins again at `1`.
+-   when a new version begins, revision numbering begins again at `1`;
+-   version increments should remain conservative and do not need to be
+    planned around reaching `1.0.0` at a predetermined project milestone.
+
+Platform plugins have independent version and revision numbers. A plugin
+must not inherit the host application's version simply because it ships
+with that host revision. Plugin compatibility with the host must be
+tracked separately through a Plugin API/contract version.
 
 Release ZIP files must use:
 
@@ -1314,6 +1364,12 @@ Examples include:
 -   platform-specific implementation notes.
 
 Subdirectories should be introduced as documentation grows.
+
+Every platform plugin must have its own dedicated documentation directory
+under `docs/plugins/`. Only documentation belonging to that plugin should
+be placed inside its directory. Protocol mappings, plugin-specific tests,
+platform compatibility notes, and backend implementation details belong
+there instead of being mixed into general Core documentation.
 
 This architecture guide should eventually live in an appropriate
 location under `docs/`.

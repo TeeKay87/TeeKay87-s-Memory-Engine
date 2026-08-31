@@ -9,5 +9,6 @@
     <ProjectReference Include="..\..\src\TeeKay87.MemoryEngine.Core\TeeKay87.MemoryEngine.Core.csproj" />
     <ProjectReference Include="..\..\src\TeeKay87.MemoryEngine.PluginSdk\TeeKay87.MemoryEngine.PluginSdk.csproj" />
     <ProjectReference Include="..\..\src\Plugins\TeeKay87.MemoryEngine.Platform.Mock\TeeKay87.MemoryEngine.Platform.Mock.csproj" />
+    <ProjectReference Include="..\..\src\Plugins\TeeKay87.MemoryEngine.Platform.PS5\TeeKay87.MemoryEngine.Platform.PS5.csproj" />
   </ItemGroup>
 </Project>

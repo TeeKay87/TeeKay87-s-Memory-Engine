@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Reflection;
+using TeeKay87.MemoryEngine.PluginSdk;
 using TeeKay87.MemoryEngine.PluginSdk.Contracts;
 using TeeKay87.MemoryEngine.PluginSdk.Models;
 
@@ -90,6 +91,15 @@ public sealed class PluginHost : IDisposable
                         continue;
                     }
 
+                    string? connectionSettingsError = ValidateConnectionSettings(
+                        plugin.Metadata.Id,
+                        plugin.ConnectionSettings);
+                    if (connectionSettingsError is not null)
+                    {
+                        errors.Add(new PluginDiscoveryError(assemblyPath, connectionSettingsError));
+                        continue;
+                    }
+
                     if (!pluginIds.Add(plugin.Metadata.Id))
                     {
                         errors.Add(new PluginDiscoveryError(
@@ -170,6 +180,58 @@ public sealed class PluginHost : IDisposable
         if (string.IsNullOrWhiteSpace(metadata.Backend))
         {
             return $"Plugin '{metadata.Id}' must define a backend.";
+        }
+
+        if (metadata.Version is null)
+        {
+            return $"Plugin '{metadata.Id}' must define a version.";
+        }
+
+        if (metadata.Revision < 1)
+        {
+            return $"Plugin '{metadata.Id}' must define a revision of 1 or greater.";
+        }
+
+        if (metadata.ApiVersion is null)
+        {
+            return $"Plugin '{metadata.Id}' must define a Plugin API version.";
+        }
+
+        if (!PluginApiInfo.IsCompatible(metadata.ApiVersion))
+        {
+            return $"Plugin '{metadata.Id}' targets Plugin API {metadata.ApiVersion}, but this host provides {PluginApiInfo.CurrentVersion}.";
+        }
+
+        return null;
+    }
+
+    private static string? ValidateConnectionSettings(
+        string pluginId,
+        IReadOnlyList<TargetConnectionSettingDefinition>? settings)
+    {
+        if (settings is null)
+        {
+            return $"Plugin '{pluginId}' returned a null connection-settings collection.";
+        }
+
+        HashSet<string> keys = new(StringComparer.OrdinalIgnoreCase);
+
+        foreach (TargetConnectionSettingDefinition setting in settings)
+        {
+            if (string.IsNullOrWhiteSpace(setting.Key))
+            {
+                return $"Plugin '{pluginId}' contains a connection setting with an empty key.";
+            }
+
+            if (string.IsNullOrWhiteSpace(setting.Label))
+            {
+                return $"Plugin '{pluginId}' connection setting '{setting.Key}' must define a label.";
+            }
+
+            if (!keys.Add(setting.Key))
+            {
+                return $"Plugin '{pluginId}' defines duplicate connection setting key '{setting.Key}'.";
+            }
         }
 
         return null;
