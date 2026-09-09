@@ -11,32 +11,19 @@
     <ProjectReference Include="..\TeeKay87.MemoryEngine.Core\TeeKay87.MemoryEngine.Core.csproj" />
     <ProjectReference Include="..\TeeKay87.MemoryEngine.PluginSdk\TeeKay87.MemoryEngine.PluginSdk.csproj" />
     <ProjectReference Include="..\Plugins\TeeKay87.MemoryEngine.Platform.Mock\TeeKay87.MemoryEngine.Platform.Mock.csproj"
-                      ReferenceOutputAssembly="false" />
+                      ReferenceOutputAssembly="false"
+                      DeployAsPlugin="true" />
     <ProjectReference Include="..\Plugins\TeeKay87.MemoryEngine.Platform.PS5\TeeKay87.MemoryEngine.Platform.PS5.csproj"
-                      ReferenceOutputAssembly="false" />
+                      ReferenceOutputAssembly="false"
+                      DeployAsPlugin="true" />
   </ItemGroup>
   <ItemGroup>
     <None Update="Themes\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
-  </ItemGroup>
-  <ItemGroup>
-    <PlatformPluginProject Include="..\Plugins\TeeKay87.MemoryEngine.Platform.Mock\TeeKay87.MemoryEngine.Platform.Mock.csproj" />
-    <PlatformPluginProject Include="..\Plugins\TeeKay87.MemoryEngine.Platform.PS5\TeeKay87.MemoryEngine.Platform.PS5.csproj" />
   </ItemGroup>
   <Target Name="RemoveLegacyBundledThemeFiles" AfterTargets="CopyFilesToOutputDirectory">
     <Delete Files="$(OutDir)Themes\Darker.json;$(OutDir)Themes\Darkest.json" />
   </Target>
   <Target Name="RemoveLegacyBundledThemeFilesFromPublish" AfterTargets="Publish">
     <Delete Files="$(PublishDir)Themes\Darker.json;$(PublishDir)Themes\Darkest.json" />
-  </Target>
-  <Target Name="CopyPlatformPlugins" AfterTargets="Build">
-    <MSBuild Projects="@(PlatformPluginProject)"
-             Targets="GetTargetPath"
-             Properties="Configuration=$(Configuration)">
-      <Output TaskParameter="TargetOutputs" ItemName="PlatformPluginAssemblies" />
-    </MSBuild>
-    <MakeDir Directories="$(OutDir)Plugins" />
-    <Copy SourceFiles="@(PlatformPluginAssemblies)"
-          DestinationFolder="$(OutDir)Plugins"
-          SkipUnchangedFiles="true" />
   </Target>
 </Project>

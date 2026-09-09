@@ -2,11 +2,15 @@ using System;
 using System.Buffers.Binary;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Net.Sockets;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using TeeKay87.MemoryEngine.PluginSdk.Contracts;
 using TeeKay87.MemoryEngine.PluginSdk.Models;
+using TeeKay87.MemoryEngine.PluginSdk.Scanning;
 
 namespace TeeKay87.MemoryEngine.Platform.PS5;
 
@@ -22,9 +26,10 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
     private bool _turboScanSessionActive;
     private int _turboScanProcessId;
     private ulong _turboScanResultCount;
-    private MemoryValueType? _turboScanValueType;
+    private string? _turboScanValueTypeId;
     private int _turboScanValueLength;
     private int _turboScanAlignment;
+    private long _turboScanSessionGeneration;
 
     private Ps5DebugClient(TcpClient tcpClient)
     {
@@ -298,7 +303,22 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
             .ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<ulong>> ScanValuesAsync(
+    public async Task<IReadOnlyList<NativeValueScanResult>> ScanValuesAsync(
+        int processId,
+        IReadOnlyList<MemoryRegion> memoryRegions,
+        NativeValueScanRequest request,
+        CancellationToken cancellationToken)
+    {
+        await using INativeValueScanResultStream resultStream = await StartScanValuesStreamAsync(
+                processId,
+                memoryRegions,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return await MaterializeNativeResultStreamAsync(resultStream, cancellationToken).ConfigureAwait(false);
+    }
+
+    public async Task<INativeValueScanResultStream> StartScanValuesStreamAsync(
         int processId,
         IReadOnlyList<MemoryRegion> memoryRegions,
         NativeValueScanRequest request,
@@ -308,7 +328,10 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
         ArgumentNullException.ThrowIfNull(memoryRegions);
         ArgumentNullException.ThrowIfNull(request);
 
-        ValidateNativeScanRequest(processId, request);
+        NativeScanProtocolShape protocolShape = ValidateNativeScanRequest(
+            processId,
+            request,
+            MemoryScanStage.FirstScan);
         cancellationToken.ThrowIfCancellationRequested();
 
         if (_turboScanSessionActive)
@@ -316,10 +339,10 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
             await EndActiveTurboScanSessionAsync(CancellationToken.None).ConfigureAwait(false);
         }
 
-        List<TurboScanSegment> segments = BuildTurboScanSegments(memoryRegions, request.ValueData.Length, request.Alignment);
+        List<TurboScanSegment> segments = BuildTurboScanSegments(memoryRegions, request.ValueSize, request.Alignment);
         if (segments.Count == 0)
         {
-            return Array.Empty<ulong>();
+            return new EmptyNativeValueScanResultStream();
         }
 
         await EnsureScanAuthorizationAsync(cancellationToken).ConfigureAwait(false);
@@ -329,15 +352,21 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
         BinaryPrimitives.WriteInt32LittleEndian(commandBody.AsSpan(0, sizeof(int)), processId);
         BinaryPrimitives.WriteUInt64LittleEndian(commandBody.AsSpan(4, sizeof(ulong)), 0);
         BinaryPrimitives.WriteUInt32LittleEndian(commandBody.AsSpan(12, sizeof(uint)), 0);
-        commandBody[16] = GetScanValueType(request.ValueType);
-        commandBody[17] = Ps5DebugProtocol.ScanCompareTypeExactValue;
+        commandBody[16] = GetScanValueType(request.ValueTypeId);
+        commandBody[17] = protocolShape.CompareType;
         commandBody[18] = checked((byte)request.Alignment);
         BinaryPrimitives.WriteUInt32LittleEndian(
             commandBody.AsSpan(19, sizeof(uint)),
-            checked((uint)request.ValueData.Length));
+            checked((uint)protocolShape.ComparisonDataLength));
+        uint startFlags = protocolShape.UseSnapshot
+            ? Ps5DebugProtocol.TurboScanFlagSnapshot |
+              Ps5DebugProtocol.TurboScanFlagSnapshotIncludeZeros |
+              Ps5DebugProtocol.TurboScanFlagSegments
+            : Ps5DebugProtocol.TurboScanFlagServerResident |
+              Ps5DebugProtocol.TurboScanFlagSegments;
         BinaryPrimitives.WriteUInt32LittleEndian(
             commandBody.AsSpan(23, sizeof(uint)),
-            Ps5DebugProtocol.TurboScanFlagServerResident | Ps5DebugProtocol.TurboScanFlagSegments);
+            startFlags);
 
         bool residentSessionCreated = false;
         bool keepResidentSession = false;
@@ -364,53 +393,105 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
             await _stream.WriteAsync(segmentPayload, CancellationToken.None).ConfigureAwait(false);
             await _stream.FlushAsync(CancellationToken.None).ConfigureAwait(false);
 
-            byte[] summaryBytes = new byte[Ps5DebugProtocol.TurboScanResidentSummarySize];
-            await _stream.ReadExactlyAsync(summaryBytes, CancellationToken.None).ConfigureAwait(false);
-            uint residentStored = BinaryPrimitives.ReadUInt32LittleEndian(summaryBytes.AsSpan(0, sizeof(uint)));
-            ulong resultCount = BinaryPrimitives.ReadUInt64LittleEndian(summaryBytes.AsSpan(sizeof(uint), sizeof(ulong)));
-
-            if (residentStored == 0)
+            ulong resultCount;
+            if (protocolShape.UseSnapshot)
             {
-                byte[] sentinelBytes = new byte[sizeof(ulong)];
-                await _stream.ReadExactlyAsync(sentinelBytes, CancellationToken.None).ConfigureAwait(false);
-                ulong sentinel = BinaryPrimitives.ReadUInt64LittleEndian(sentinelBytes);
-                if (sentinel != ulong.MaxValue)
+                byte[] planBytes = new byte[Ps5DebugProtocol.TurboScanSnapshotPlanSize];
+                await _stream.ReadExactlyAsync(planBytes, CancellationToken.None).ConfigureAwait(false);
+                ulong slotCount = BinaryPrimitives.ReadUInt64LittleEndian(planBytes.AsSpan(0, sizeof(ulong)));
+
+                // The payload emits one progress record per snapshot I/O window. The normal
+                // 16 MiB path produces relatively few records, but its documented allocation
+                // fallback uses smaller windows and can legitimately exceed 1,024 records on
+                // large targets. Always consume the protocol-defined stream through its
+                // sentinel before validating the summary so the shared command stream cannot
+                // be left mid-response by a host-side progress-count assumption.
+                byte[] progressBytes = new byte[sizeof(ulong)];
+                while (true)
+                {
+                    await _stream.ReadExactlyAsync(progressBytes, CancellationToken.None).ConfigureAwait(false);
+                    ulong progressValue = BinaryPrimitives.ReadUInt64LittleEndian(progressBytes);
+                    if (progressValue == ulong.MaxValue)
+                    {
+                        break;
+                    }
+                }
+
+                byte[] summaryBytes = new byte[Ps5DebugProtocol.TurboScanSnapshotSummarySize];
+                await _stream.ReadExactlyAsync(summaryBytes, CancellationToken.None).ConfigureAwait(false);
+                uint snapshotStored = BinaryPrimitives.ReadUInt32LittleEndian(summaryBytes.AsSpan(0, sizeof(uint)));
+                resultCount = BinaryPrimitives.ReadUInt64LittleEndian(summaryBytes.AsSpan(sizeof(uint), sizeof(ulong)));
+                await ReadSuccessStatusAsync("TurboScan snapshot completion", CancellationToken.None).ConfigureAwait(false);
+
+                // Validation happens only after the complete START response has been consumed.
+                // A rejected snapshot therefore remains safe for the host's shared-scanner
+                // fallback, and an invalid stored-session summary can still be closed cleanly.
+                residentSessionCreated = snapshotStored == 1;
+
+                if (snapshotStored == 0)
+                {
+                    throw new NotSupportedException(
+                        "ps5debug-NG could not create the accelerated unknown-value snapshot; use the shared scanner fallback for this scan.");
+                }
+
+                if (snapshotStored != 1 || resultCount > slotCount)
                 {
                     throw new InvalidDataException(
-                        $"ps5debug-NG TurboScan fallback returned unexpected sentinel 0x{sentinel:X16}.");
+                        $"ps5debug-NG TurboScan returned invalid snapshot state {snapshotStored} with {resultCount:N0} survivors from {slotCount:N0} slots.");
+                }
+            }
+            else
+            {
+                byte[] summaryBytes = new byte[Ps5DebugProtocol.TurboScanResidentSummarySize];
+                await _stream.ReadExactlyAsync(summaryBytes, CancellationToken.None).ConfigureAwait(false);
+                uint residentStored = BinaryPrimitives.ReadUInt32LittleEndian(summaryBytes.AsSpan(0, sizeof(uint)));
+                resultCount = BinaryPrimitives.ReadUInt64LittleEndian(summaryBytes.AsSpan(sizeof(uint), sizeof(ulong)));
+
+                if (residentStored == 0)
+                {
+                    byte[] sentinelBytes = new byte[sizeof(ulong)];
+                    await _stream.ReadExactlyAsync(sentinelBytes, CancellationToken.None).ConfigureAwait(false);
+                    ulong sentinel = BinaryPrimitives.ReadUInt64LittleEndian(sentinelBytes);
+                    await ReadSuccessStatusAsync("TurboScan completion", CancellationToken.None).ConfigureAwait(false);
+
+                    if (sentinel != ulong.MaxValue)
+                    {
+                        throw new InvalidDataException(
+                            $"ps5debug-NG TurboScan fallback returned unexpected sentinel 0x{sentinel:X16}.");
+                    }
+
+                    throw new NotSupportedException(
+                        "ps5debug-NG could not keep the accelerated scan result set server-side; use the shared scanner fallback for this scan.");
                 }
 
                 await ReadSuccessStatusAsync("TurboScan completion", CancellationToken.None).ConfigureAwait(false);
-                throw new NotSupportedException(
-                    "ps5debug-NG could not keep the accelerated scan result set server-side; use the shared scanner fallback for this scan.");
+                residentSessionCreated = residentStored == 1;
+
+                if (residentStored != 1)
+                {
+                    throw new InvalidDataException(
+                        $"ps5debug-NG TurboScan returned invalid resident state {residentStored}.");
+                }
             }
 
-            if (residentStored != 1)
-            {
-                throw new InvalidDataException(
-                    $"ps5debug-NG TurboScan returned invalid resident state {residentStored}.");
-            }
-
-            residentSessionCreated = true;
-            await ReadSuccessStatusAsync("TurboScan completion", CancellationToken.None).ConfigureAwait(false);
             cancellationToken.ThrowIfCancellationRequested();
 
-            ValidateNativeResultCount(resultCount);
-            IReadOnlyList<ulong> addresses = await FetchTurboScanAddressesAsync(
-                    resultCount,
-                    request,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
-            cancellationToken.ThrowIfCancellationRequested();
             _turboScanSessionActive = true;
             _turboScanProcessId = processId;
             _turboScanResultCount = resultCount;
-            _turboScanValueType = request.ValueType;
-            _turboScanValueLength = request.ValueData.Length;
+            _turboScanValueTypeId = request.ValueTypeId;
+            _turboScanValueLength = request.ValueSize;
             _turboScanAlignment = request.Alignment;
+            long sessionGeneration = checked(++_turboScanSessionGeneration);
+            TurboScanResultStream resultStream = new(
+                this,
+                processId,
+                resultCount,
+                request,
+                isRefinement: false,
+                sessionGeneration: sessionGeneration);
             keepResidentSession = true;
-            return addresses;
+            return resultStream;
         }
         finally
         {
@@ -431,26 +512,48 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
         }
     }
 
-    public async Task<IReadOnlyList<ulong>> RefineValuesAsync(
+    public async Task<IReadOnlyList<NativeValueScanResult>> RefineValuesAsync(
         int processId,
         IReadOnlyList<ulong> previousAddresses,
         NativeValueScanRequest request,
         CancellationToken cancellationToken)
     {
-        ObjectDisposedException.ThrowIf(_disposed, this);
         ArgumentNullException.ThrowIfNull(previousAddresses);
-        ArgumentNullException.ThrowIfNull(request);
+        await using INativeValueScanResultStream resultStream = await StartRefineValuesStreamAsync(
+                processId,
+                previousAddresses.Count,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+        return await MaterializeNativeResultStreamAsync(resultStream, cancellationToken).ConfigureAwait(false);
+    }
 
-        ValidateNativeScanRequest(processId, request);
+    public async Task<INativeValueScanResultStream> StartRefineValuesStreamAsync(
+        int processId,
+        long previousResultCount,
+        NativeValueScanRequest request,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(request);
+        if (previousResultCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(previousResultCount));
+        }
+
+        NativeScanProtocolShape protocolShape = ValidateNativeScanRequest(
+            processId,
+            request,
+            MemoryScanStage.NextScan);
+
         cancellationToken.ThrowIfCancellationRequested();
 
-        if (request.ValueType is MemoryValueType.Float32 or MemoryValueType.Float64)
+        if (IsExactValueRequest(request) &&
+            IsFloatingPointRequest(request) &&
+            !UsesPs5DebugFloatingTolerance(request))
         {
-            await EndActiveTurboScanSessionAsync(CancellationToken.None).ConfigureAwait(false);
-            cancellationToken.ThrowIfCancellationRequested();
             throw new NotSupportedException(
-                "ps5debug-NG resident TurboScan refinement uses fuzzy floating-point comparison for Float and Double. " +
-                "The shared scanner is required to preserve strict Exact Value semantics for these types.");
+                "Strict Float and Double refinement uses the shared scanner because ps5debug-NG resident TurboScan applies a relative 1e-6 tolerance.");
         }
 
         if (!_turboScanSessionActive || _turboScanProcessId != processId)
@@ -459,25 +562,23 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
                 "No compatible resident TurboScan session is available for native refinement.");
         }
 
-        if (_turboScanValueType != request.ValueType ||
-            _turboScanValueLength != request.ValueData.Length ||
+        if (!string.Equals(_turboScanValueTypeId, request.ValueTypeId, StringComparison.OrdinalIgnoreCase) ||
+            _turboScanValueLength != request.ValueSize ||
             _turboScanAlignment != request.Alignment)
         {
-            await EndActiveTurboScanSessionAsync(CancellationToken.None).ConfigureAwait(false);
             throw new NotSupportedException(
                 "The requested Value Type or width does not match the resident TurboScan session. Start a New Scan before changing Value Type.");
         }
 
-        if ((ulong)previousAddresses.Count != _turboScanResultCount)
+        if (checked((ulong)previousResultCount) != _turboScanResultCount)
         {
-            await EndActiveTurboScanSessionAsync(CancellationToken.None).ConfigureAwait(false);
             throw new NotSupportedException(
                 "The resident TurboScan survivor count no longer matches the host scan session; use the shared refinement fallback.");
         }
 
         if (_turboScanResultCount == 0)
         {
-            return Array.Empty<ulong>();
+            return new EmptyNativeValueScanResultStream();
         }
 
         cancellationToken.ThrowIfCancellationRequested();
@@ -491,11 +592,11 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
         byte[] body = new byte[Ps5DebugProtocol.TurboScanCountBodySize];
         BinaryPrimitives.WriteInt32LittleEndian(body.AsSpan(0, sizeof(int)), processId);
         BinaryPrimitives.WriteUInt64LittleEndian(body.AsSpan(4, sizeof(ulong)), 0);
-        body[12] = GetScanValueType(request.ValueType);
-        body[13] = Ps5DebugProtocol.ScanCompareTypeExactValue;
+        body[12] = GetRefinementScanValueType(request);
+        body[13] = protocolShape.CompareType;
         BinaryPrimitives.WriteUInt32LittleEndian(
             body.AsSpan(14, sizeof(uint)),
-            checked((uint)request.ValueData.Length));
+            checked((uint)protocolShape.ComparisonDataLength));
         BinaryPrimitives.WriteUInt32LittleEndian(body.AsSpan(18, sizeof(uint)), flags);
 
         bool transactionStarted = false;
@@ -512,25 +613,14 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
 
             await WriteScanComparisonDataAsync(request, CancellationToken.None).ConfigureAwait(false);
 
-            // Resident list sessions currently emit an immediate sentinel. The parser also
-            // accepts progress records so it remains correct if the server materializes or
-            // otherwise changes the resident representation in a future narrowing pass.
-            int progressRecordCount = 0;
+            byte[] progressBytes = new byte[sizeof(ulong)];
             while (true)
             {
-                byte[] progressBytes = new byte[sizeof(ulong)];
                 await _stream.ReadExactlyAsync(progressBytes, CancellationToken.None).ConfigureAwait(false);
                 ulong progressValue = BinaryPrimitives.ReadUInt64LittleEndian(progressBytes);
                 if (progressValue == ulong.MaxValue)
                 {
                     break;
-                }
-
-                progressRecordCount++;
-                if (progressRecordCount > 1024)
-                {
-                    throw new InvalidDataException(
-                        "ps5debug-NG TurboScan refinement returned an unreasonable number of progress records.");
                 }
             }
 
@@ -546,18 +636,16 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
                     $"ps5debug-NG TurboScan refinement increased the survivor count from {_turboScanResultCount:N0} to {resultCount:N0}.");
             }
 
-            ValidateNativeResultCount(resultCount);
-            cancellationToken.ThrowIfCancellationRequested();
-
-            IReadOnlyList<ulong> addresses = await FetchTurboScanAddressesAsync(
-                    resultCount,
-                    request,
-                    cancellationToken)
-                .ConfigureAwait(false);
-
             cancellationToken.ThrowIfCancellationRequested();
             _turboScanResultCount = resultCount;
-            return addresses;
+            long sessionGeneration = checked(++_turboScanSessionGeneration);
+            return new TurboScanResultStream(
+                this,
+                processId,
+                resultCount,
+                request,
+                isRefinement: true,
+                sessionGeneration: sessionGeneration);
         }
         catch
         {
@@ -770,7 +858,10 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
         cancellationToken.ThrowIfCancellationRequested();
     }
 
-    private void ValidateNativeScanRequest(int processId, NativeValueScanRequest request)
+    private NativeScanProtocolShape ValidateNativeScanRequest(
+        int processId,
+        NativeValueScanRequest request,
+        MemoryScanStage stage)
     {
         if (processId <= 0)
         {
@@ -783,69 +874,150 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
                 "The connected ps5debug-NG server does not advertise the required TurboScan capabilities.");
         }
 
-        if (request.Comparison != ValueScanComparison.ExactValue)
+        if (!Ps5NativeScanTypeMappings.TryResolve(
+                request.ScanTypeId,
+                request.ValueTypeId,
+                stage,
+                out byte compareType,
+                out int inputValueCount,
+                out Ps5NativeScanMode nativeMode))
         {
             throw new NotSupportedException(
-                "The current ps5debug-NG accelerated scan path supports Exact Value scans only.");
+                $"The PS5 plugin does not provide a semantically equivalent native {stage} mapping for Scan Type '{request.ScanTypeId}' with Value Type '{request.ValueTypeId}'.");
         }
 
-        int expectedSize = request.ValueType switch
+        if (nativeMode == Ps5NativeScanMode.SnapshotIncludeZeros &&
+            (_turboScanEngines & Ps5DebugProtocol.TurboScanEngineSnapshot) == 0)
         {
-            MemoryValueType.UInt8 or MemoryValueType.Int8 => 1,
-            MemoryValueType.UInt16 or MemoryValueType.Int16 => 2,
-            MemoryValueType.UInt32 or MemoryValueType.Int32 or MemoryValueType.Float32 => 4,
-            MemoryValueType.UInt64 or MemoryValueType.Int64 or MemoryValueType.Float64 => 8,
-            MemoryValueType.ByteArray => request.ValueData.Length,
+            throw new NotSupportedException(
+                "The connected ps5debug-NG server does not advertise the TurboScan snapshot engine required for native Unknown Initial Value scanning.");
+        }
+
+        if (request.InputValues.Count != inputValueCount)
+        {
+            throw new NotSupportedException(
+                $"The PS5 native mapping for Scan Type '{request.ScanTypeId}' requires {inputValueCount} comparison value(s), but {request.InputValues.Count} were supplied.");
+        }
+
+        int expectedSize = request.ValueTypeId switch
+        {
+            StandardMemoryValueTypeIds.UInt8 or StandardMemoryValueTypeIds.Int8 => 1,
+            StandardMemoryValueTypeIds.UInt16 or StandardMemoryValueTypeIds.Int16 => 2,
+            StandardMemoryValueTypeIds.UInt32 or StandardMemoryValueTypeIds.Int32 or StandardMemoryValueTypeIds.Float32 => 4,
+            StandardMemoryValueTypeIds.UInt64 or StandardMemoryValueTypeIds.Int64 or StandardMemoryValueTypeIds.Float64 => 8,
+            StandardMemoryValueTypeIds.ByteArray => request.ValueSize,
             _ => 0
         };
 
         if (expectedSize == 0 ||
-            request.ValueData.Length != expectedSize ||
-            request.ValueData.Length > Ps5DebugProtocol.TurboScanMaximumResidentValueLength)
+            request.ValueSize != expectedSize ||
+            request.InputValues.Any(value => value.Length != expectedSize) ||
+            request.ValueSize > Ps5DebugProtocol.TurboScanMaximumResidentValueLength)
         {
             throw new NotSupportedException(
-                "The selected Value Type or value width is not supported by the ps5debug-NG resident TurboScan path.");
+                "The selected Value Type, comparison payload, or value width is not supported by the ps5debug-NG resident TurboScan path.");
         }
 
-        int expectedAlignment = request.ValueType == MemoryValueType.ByteArray
-            ? 1
-            : expectedSize;
-        if (request.Alignment != expectedAlignment)
+        if (request.Alignment is < 1 or > byte.MaxValue)
         {
             throw new NotSupportedException(
-                $"The selected Value Type requires an alignment of {expectedAlignment} byte(s) for the ps5debug-NG TurboScan path.");
+                $"ps5debug-NG TurboScan alignment must be between 1 and {byte.MaxValue} bytes.");
         }
+
+        Endianness endianness = GetRequestedEndianness(request);
+        if (nativeMode != Ps5NativeScanMode.SnapshotIncludeZeros &&
+            endianness == Endianness.Big && request.ValueSize > 1)
+        {
+            if (IsFloatingPointRequest(request))
+            {
+                throw new NotSupportedException(
+                    "ps5debug-NG evaluates native Float and Double values as little-endian. Big-endian floating-point scans use the shared scanner fallback.");
+            }
+
+            if (!IsEndianIndependentIntegerComparison(request.ScanTypeId))
+            {
+                throw new NotSupportedException(
+                    "This ps5debug-NG native comparison interprets multi-byte integers as little-endian. The selected Big Endian scan uses the shared scanner fallback.");
+            }
+        }
+
+        return new NativeScanProtocolShape(
+            compareType,
+            inputValueCount,
+            checked(inputValueCount * expectedSize),
+            nativeMode == Ps5NativeScanMode.SnapshotIncludeZeros);
     }
 
-    private static byte GetScanValueType(MemoryValueType valueType)
+    private static bool IsEndianIndependentIntegerComparison(string scanTypeId)
     {
-        return valueType switch
+        return scanTypeId is StandardMemoryScanTypeIds.ExactValue or
+            StandardMemoryScanTypeIds.ChangedValue or
+            StandardMemoryScanTypeIds.UnchangedValue;
+    }
+
+    private static byte GetScanValueType(string valueTypeId)
+    {
+        return valueTypeId switch
         {
-            MemoryValueType.UInt8 => Ps5DebugProtocol.ScanValueTypeUInt8,
-            MemoryValueType.Int8 => Ps5DebugProtocol.ScanValueTypeInt8,
-            MemoryValueType.UInt16 => Ps5DebugProtocol.ScanValueTypeUInt16,
-            MemoryValueType.Int16 => Ps5DebugProtocol.ScanValueTypeInt16,
-            MemoryValueType.UInt32 => Ps5DebugProtocol.ScanValueTypeUInt32,
-            MemoryValueType.Int32 => Ps5DebugProtocol.ScanValueTypeInt32,
-            MemoryValueType.UInt64 => Ps5DebugProtocol.ScanValueTypeUInt64,
-            MemoryValueType.Int64 => Ps5DebugProtocol.ScanValueTypeInt64,
-            MemoryValueType.Float32 => Ps5DebugProtocol.ScanValueTypeFloat32,
-            MemoryValueType.Float64 => Ps5DebugProtocol.ScanValueTypeFloat64,
-            MemoryValueType.ByteArray => Ps5DebugProtocol.ScanValueTypeByteArray,
+            StandardMemoryValueTypeIds.UInt8 => Ps5DebugProtocol.ScanValueTypeUInt8,
+            StandardMemoryValueTypeIds.Int8 => Ps5DebugProtocol.ScanValueTypeInt8,
+            StandardMemoryValueTypeIds.UInt16 => Ps5DebugProtocol.ScanValueTypeUInt16,
+            StandardMemoryValueTypeIds.Int16 => Ps5DebugProtocol.ScanValueTypeInt16,
+            StandardMemoryValueTypeIds.UInt32 => Ps5DebugProtocol.ScanValueTypeUInt32,
+            StandardMemoryValueTypeIds.Int32 => Ps5DebugProtocol.ScanValueTypeInt32,
+            StandardMemoryValueTypeIds.UInt64 => Ps5DebugProtocol.ScanValueTypeUInt64,
+            StandardMemoryValueTypeIds.Int64 => Ps5DebugProtocol.ScanValueTypeInt64,
+            StandardMemoryValueTypeIds.Float32 => Ps5DebugProtocol.ScanValueTypeFloat32,
+            StandardMemoryValueTypeIds.Float64 => Ps5DebugProtocol.ScanValueTypeFloat64,
+            StandardMemoryValueTypeIds.ByteArray => Ps5DebugProtocol.ScanValueTypeByteArray,
             _ => throw new NotSupportedException(
-                $"{valueType} is not a ps5debug-NG scan value type.")
+                $"Value Type id '{valueTypeId}' is not supported by ps5debug-NG TurboScan.")
         };
+    }
+
+    private static byte GetRefinementScanValueType(NativeValueScanRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        // Core defines Changed/Unchanged as stored-byte comparisons. ps5debug-NG's
+        // Float/Double comparator uses IEEE equality, where an unchanged NaN is not equal
+        // to itself. Reusing the same-width unsigned type preserves the exact payload
+        // while keeping the resident record width and GET decoding unchanged.
+        if (request.ScanTypeId is StandardMemoryScanTypeIds.ChangedValue or
+            StandardMemoryScanTypeIds.UnchangedValue)
+        {
+            return request.ValueTypeId switch
+            {
+                StandardMemoryValueTypeIds.Float32 => Ps5DebugProtocol.ScanValueTypeUInt32,
+                StandardMemoryValueTypeIds.Float64 => Ps5DebugProtocol.ScanValueTypeUInt64,
+                _ => GetScanValueType(request.ValueTypeId)
+            };
+        }
+
+        return GetScanValueType(request.ValueTypeId);
     }
 
     private async Task WriteScanComparisonDataAsync(
         NativeValueScanRequest request,
         CancellationToken cancellationToken)
     {
-        await _stream.WriteAsync(request.ValueData, cancellationToken).ConfigureAwait(false);
-
-        if (request.ValueType == MemoryValueType.ByteArray)
+        foreach (ReadOnlyMemory<byte> comparisonValue in request.InputValues)
         {
-            byte[] mask = new byte[request.ValueData.Length];
+            await _stream.WriteAsync(comparisonValue, cancellationToken).ConfigureAwait(false);
+        }
+
+        if (string.Equals(
+                request.ValueTypeId,
+                StandardMemoryValueTypeIds.ByteArray,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            if (request.InputValues.Count != 1)
+            {
+                throw new NotSupportedException(
+                    "ps5debug-NG Array of Bytes native scanning requires exactly one comparison value.");
+            }
+
+            byte[] mask = new byte[request.InputValues[0].Length];
             Array.Fill(mask, (byte)1);
             await _stream.WriteAsync(mask, cancellationToken).ConfigureAwait(false);
         }
@@ -853,41 +1025,93 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
         await _stream.FlushAsync(cancellationToken).ConfigureAwait(false);
     }
 
-    private static void ValidateNativeResultCount(ulong resultCount)
+    private static async Task<IReadOnlyList<NativeValueScanResult>> MaterializeNativeResultStreamAsync(
+        INativeValueScanResultStream resultStream,
+        CancellationToken cancellationToken)
     {
-        if (resultCount > Ps5DebugProtocol.MaximumNativeScanResultCount)
+        if (resultStream.SourceResultCount > Ps5DebugProtocol.MaximumLegacyMaterializedNativeScanResultCount)
         {
             throw new InvalidDataException(
-                $"ps5debug-NG TurboScan returned {resultCount:N0} matches, exceeding the {Ps5DebugProtocol.MaximumNativeScanResultCount:N0} result safety limit.");
+                $"ps5debug-NG TurboScan returned {resultStream.SourceResultCount:N0} matches, exceeding the {Ps5DebugProtocol.MaximumLegacyMaterializedNativeScanResultCount:N0} legacy in-memory result safety limit. Use the disk-backed streaming scan path for massive result sets.");
         }
+
+        List<NativeValueScanResult> results = new(checked((int)resultStream.SourceResultCount));
+        await foreach (NativeValueScanResultBatch batch in resultStream
+                           .ReadBatchesAsync(cancellationToken)
+                           .ConfigureAwait(false))
+        {
+            for (int index = 0; index < batch.Count; index++)
+            {
+                results.Add(new NativeValueScanResult(
+                    batch.Addresses.Span[index],
+                    batch.GetCurrentValueData(index).Span));
+            }
+        }
+
+        return results;
     }
 
-    private async Task<IReadOnlyList<ulong>> FetchTurboScanAddressesAsync(
+    private IAsyncEnumerable<NativeValueScanResultBatch> FetchTurboScanResultBatchesAsync(
         ulong resultCount,
         NativeValueScanRequest request,
         CancellationToken cancellationToken)
     {
-        int valueLength = request.ValueData.Length;
+        return FetchTurboScanResultBatchesAsync(
+            0,
+            resultCount,
+            Ps5DebugProtocol.TurboScanGetBatchSize,
+            includePreviousValues: false,
+            request: request,
+            cancellationToken: cancellationToken);
+    }
+
+    private async IAsyncEnumerable<NativeValueScanResultBatch> FetchTurboScanResultBatchesAsync(
+        ulong startIndex,
+        ulong maximumRecords,
+        int maximumRecordsPerBatch,
+        bool includePreviousValues,
+        NativeValueScanRequest request,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        if (maximumRecordsPerBatch <= 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(maximumRecordsPerBatch));
+        }
+
+        if (startIndex > uint.MaxValue)
+        {
+            throw new NotSupportedException(
+                "ps5debug-NG TurboScan GET cannot address a resident result window starting beyond the 32-bit result-index range.");
+        }
+
+        int valueLength = request.ValueSize;
         int maximumRecordSize = checked(sizeof(ulong) + (valueLength * 3));
         uint payloadLimitedBatchSize = checked((uint)Math.Max(
             1,
             Ps5DebugProtocol.TurboScanGetMaximumPayloadSize / maximumRecordSize));
         uint maximumBatchSize = Math.Min(
-            checked((uint)Ps5DebugProtocol.TurboScanGetBatchSize),
+            checked((uint)Math.Min(Ps5DebugProtocol.TurboScanGetBatchSize, maximumRecordsPerBatch)),
             payloadLimitedBatchSize);
 
-        List<ulong> addresses = new(checked((int)resultCount));
         ulong fetched = 0;
-
-        while (fetched < resultCount)
+        while (fetched < maximumRecords)
         {
             cancellationToken.ThrowIfCancellationRequested();
+            ulong absoluteIndex = checked(startIndex + fetched);
+            if (absoluteIndex > uint.MaxValue)
+            {
+                throw new NotSupportedException(
+                    "ps5debug-NG TurboScan GET cannot address resident results beyond the 32-bit result-index range.");
+            }
+
             uint requestedCount = checked((uint)Math.Min(
                 (ulong)maximumBatchSize,
-                resultCount - fetched));
+                maximumRecords - fetched));
+            ulong addressableRemaining = ((ulong)uint.MaxValue + 1UL) - absoluteIndex;
+            requestedCount = checked((uint)Math.Min((ulong)requestedCount, addressableRemaining));
 
             byte[] getBody = new byte[Ps5DebugProtocol.TurboScanGetBodySize];
-            BinaryPrimitives.WriteUInt32LittleEndian(getBody.AsSpan(0, sizeof(uint)), checked((uint)fetched));
+            BinaryPrimitives.WriteUInt32LittleEndian(getBody.AsSpan(0, sizeof(uint)), checked((uint)absoluteIndex));
             BinaryPrimitives.WriteUInt32LittleEndian(getBody.AsSpan(4, sizeof(uint)), requestedCount);
             BinaryPrimitives.WriteUInt32LittleEndian(getBody.AsSpan(8, sizeof(uint)), 0);
 
@@ -918,51 +1142,383 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
             await ReadSuccessStatusAsync("TurboScan GET completion", CancellationToken.None)
                 .ConfigureAwait(false);
 
-            for (int index = 0; index < actualCount; index++)
+            if (actualCount == 0)
+            {
+                throw new InvalidDataException(
+                    "ps5debug-NG TurboScan GET returned zero records before the requested resident result window was exhausted.");
+            }
+
+            int actualCountInt = checked((int)actualCount);
+            ulong[] addresses = new ulong[actualCountInt];
+            byte[] currentValues = new byte[checked(actualCountInt * valueLength)];
+            byte[] previousValues = includePreviousValues
+                ? new byte[checked(actualCountInt * valueLength)]
+                : Array.Empty<byte>();
+            int acceptedCount = 0;
+            bool requiresStrictFloatingPointFilter =
+                IsExactValueRequest(request) &&
+                IsFloatingPointRequest(request) &&
+                !UsesPs5DebugFloatingTolerance(request);
+
+            for (int index = 0; index < actualCountInt; index++)
             {
                 ReadOnlySpan<byte> record = records.AsSpan(index * recordSize, recordSize);
                 ulong address = BinaryPrimitives.ReadUInt64LittleEndian(record[..sizeof(ulong)]);
                 ReadOnlySpan<byte> currentValue = record.Slice(sizeof(ulong), valueLength);
-                if (!TurboScanValueMatches(currentValue, request))
+
+                if (requiresStrictFloatingPointFilter &&
+                    !StrictFloatingPointValueMatches(currentValue, request))
                 {
-                    throw new InvalidDataException(
-                        $"ps5debug-NG TurboScan returned a mismatched value for address 0x{address:X}.");
+                    continue;
                 }
 
-                addresses.Add(address);
-            }
+                addresses[acceptedCount] = address;
+                currentValue.CopyTo(currentValues.AsSpan(acceptedCount * valueLength, valueLength));
+                if (includePreviousValues)
+                {
+                    ReadOnlySpan<byte> previousValue = record.Slice(sizeof(ulong) + valueLength, valueLength);
+                    previousValue.CopyTo(previousValues.AsSpan(acceptedCount * valueLength, valueLength));
+                }
 
-            if (actualCount == 0)
-            {
-                throw new InvalidDataException(
-                    "ps5debug-NG TurboScan GET returned zero records before the advertised result count was exhausted.");
+                acceptedCount++;
             }
 
             fetched += actualCount;
-        }
 
-        return addresses;
+            if (acceptedCount != addresses.Length)
+            {
+                Array.Resize(ref addresses, acceptedCount);
+                Array.Resize(ref currentValues, checked(acceptedCount * valueLength));
+                if (includePreviousValues)
+                {
+                    Array.Resize(ref previousValues, checked(acceptedCount * valueLength));
+                }
+            }
+
+            yield return includePreviousValues
+                ? new NativeValueScanResultBatch(
+                    addresses,
+                    currentValues,
+                    previousValues,
+                    valueLength,
+                    fetched)
+                : new NativeValueScanResultBatch(
+                    addresses,
+                    currentValues,
+                    valueLength,
+                    fetched);
+        }
     }
 
-    private static bool TurboScanValueMatches(
+    private static bool StrictFloatingPointValueMatches(
         ReadOnlySpan<byte> currentValue,
         NativeValueScanRequest request)
     {
-        if (currentValue.Length != request.ValueData.Length)
+        if (request.InputValues.Count != 1)
         {
             return false;
         }
 
-        return request.ValueType switch
+        ReadOnlySpan<byte> comparisonValue = request.InputValues[0].Span;
+        if (currentValue.Length != comparisonValue.Length)
         {
-            MemoryValueType.Float32 =>
-                BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(currentValue)) ==
-                BitConverter.Int32BitsToSingle(BinaryPrimitives.ReadInt32LittleEndian(request.ValueData.Span)),
-            MemoryValueType.Float64 =>
-                BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(currentValue)) ==
-                BitConverter.Int64BitsToDouble(BinaryPrimitives.ReadInt64LittleEndian(request.ValueData.Span)),
-            _ => currentValue.SequenceEqual(request.ValueData.Span)
+            return false;
+        }
+
+        Endianness endianness = GetRequestedEndianness(request);
+        return request.ValueTypeId switch
+        {
+            StandardMemoryValueTypeIds.Float32 when currentValue.Length == sizeof(float) =>
+                ReadFloat32(currentValue, endianness) == ReadFloat32(comparisonValue, endianness),
+            StandardMemoryValueTypeIds.Float64 when currentValue.Length == sizeof(double) =>
+                ReadFloat64(currentValue, endianness) == ReadFloat64(comparisonValue, endianness),
+            _ => false
         };
+    }
+
+    private static bool IsExactValueRequest(NativeValueScanRequest request)
+    {
+        return string.Equals(
+            request.ScanTypeId,
+            StandardMemoryScanTypeIds.ExactValue,
+            StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static bool IsFloatingPointRequest(NativeValueScanRequest request)
+    {
+        return request.ValueTypeId is StandardMemoryValueTypeIds.Float32 or StandardMemoryValueTypeIds.Float64;
+    }
+
+    private static bool UsesPs5DebugFloatingTolerance(NativeValueScanRequest request)
+    {
+        return request.ScanOptions.TryGetValue(
+                   StandardMemoryScanOptionIds.FloatingPointRounding,
+                   out string choiceId) &&
+               string.Equals(
+                   choiceId,
+                   StandardMemoryScanOptionChoiceIds.FloatingPointRelativeTolerance1E6,
+                   StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static Endianness GetRequestedEndianness(NativeValueScanRequest request)
+    {
+        if (request.ScanOptions.TryGetValue(
+                StandardMemoryScanOptionIds.Endianness,
+                out string choiceId) &&
+            string.Equals(
+                choiceId,
+                StandardMemoryScanOptionChoiceIds.BigEndian,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            return Endianness.Big;
+        }
+
+        return Endianness.Little;
+    }
+
+    private static float ReadFloat32(ReadOnlySpan<byte> bytes, Endianness endianness)
+    {
+        int bits = endianness == Endianness.Big
+            ? BinaryPrimitives.ReadInt32BigEndian(bytes)
+            : BinaryPrimitives.ReadInt32LittleEndian(bytes);
+        return BitConverter.Int32BitsToSingle(bits);
+    }
+
+    private static double ReadFloat64(ReadOnlySpan<byte> bytes, Endianness endianness)
+    {
+        long bits = endianness == Endianness.Big
+            ? BinaryPrimitives.ReadInt64BigEndian(bytes)
+            : BinaryPrimitives.ReadInt64LittleEndian(bytes);
+        return BitConverter.Int64BitsToDouble(bits);
+    }
+
+    private sealed class EmptyNativeValueScanResultStream : INativeValueScanResultStream
+    {
+        public ulong SourceResultCount => 0;
+
+        public async IAsyncEnumerable<NativeValueScanResultBatch> ReadBatchesAsync(
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            await Task.CompletedTask.ConfigureAwait(false);
+            yield break;
+        }
+
+        public ValueTask DisposeAsync()
+        {
+            return ValueTask.CompletedTask;
+        }
+    }
+
+    private sealed class TurboScanResultStream : INativeValueScanResultStream, INativeValueScanResidentResultSet
+    {
+        private readonly Ps5DebugClient _owner;
+        private readonly int _processId;
+        private readonly NativeValueScanRequest _request;
+        private readonly bool _isRefinement;
+        private readonly long _sessionGeneration;
+        private bool _enumerationStarted;
+        private bool _completed;
+        private bool _disposed;
+
+        public TurboScanResultStream(
+            Ps5DebugClient owner,
+            int processId,
+            ulong sourceResultCount,
+            NativeValueScanRequest request,
+            bool isRefinement,
+            long sessionGeneration)
+        {
+            _owner = owner ?? throw new ArgumentNullException(nameof(owner));
+            _request = request ?? throw new ArgumentNullException(nameof(request));
+            _processId = processId;
+            _isRefinement = isRefinement;
+            _sessionGeneration = sessionGeneration;
+            SourceResultCount = sourceResultCount;
+            Count = checked((long)sourceResultCount);
+        }
+
+        public ulong SourceResultCount { get; }
+
+        public long Count { get; }
+
+        public int ValueSize => _request.ValueSize;
+
+        public int Alignment => _request.Alignment;
+
+        public bool IsAuthoritative => !(
+            IsExactValueRequest(_request) &&
+            IsFloatingPointRequest(_request) &&
+            !UsesPs5DebugFloatingTolerance(_request));
+
+        public bool CanRefine(NativeValueScanRequest request)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            ArgumentNullException.ThrowIfNull(request);
+            return IsAuthoritative && _owner.CanRefineTurboScanResidentSession(
+                _sessionGeneration,
+                _processId,
+                SourceResultCount,
+                request);
+        }
+
+        public async IAsyncEnumerable<NativeValueScanResultBatch> ReadBatchesAsync(
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (_enumerationStarted)
+            {
+                throw new InvalidOperationException("A native TurboScan result stream can only be consumed once.");
+            }
+
+            _enumerationStarted = true;
+            await foreach (NativeValueScanResultBatch batch in _owner
+                               .FetchTurboScanResultBatchesAsync(
+                                   0,
+                                   SourceResultCount,
+                                   Ps5DebugProtocol.TurboScanGetBatchSize,
+                                   includePreviousValues: _isRefinement,
+                                   request: _request,
+                                   cancellationToken: cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                yield return batch;
+            }
+
+            _completed = true;
+        }
+
+        public async IAsyncEnumerable<NativeValueScanResultBatch> ReadResultBatchesAsync(
+            long startIndex,
+            long maximumRecords,
+            int maximumRecordsPerBatch,
+            bool includePreviousValues,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            ObjectDisposedException.ThrowIf(_disposed, this);
+            if (startIndex < 0 || startIndex > Count)
+            {
+                throw new ArgumentOutOfRangeException(nameof(startIndex));
+            }
+
+            if (maximumRecords < 0)
+            {
+                throw new ArgumentOutOfRangeException(nameof(maximumRecords));
+            }
+
+            long boundedCount = Math.Min(maximumRecords, Count - startIndex);
+            if (boundedCount == 0)
+            {
+                yield break;
+            }
+
+            EnsureCurrentResidentSession();
+            await foreach (NativeValueScanResultBatch batch in _owner
+                               .FetchTurboScanResultBatchesAsync(
+                                   checked((ulong)startIndex),
+                                   checked((ulong)boundedCount),
+                                   maximumRecordsPerBatch,
+                                   includePreviousValues,
+                                   _request,
+                                   cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                yield return batch;
+            }
+        }
+
+        public async IAsyncEnumerable<ReadOnlyMemory<ulong>> ReadAddressBatchesAsync(
+            int maximumRecordsPerBatch,
+            [EnumeratorCancellation] CancellationToken cancellationToken)
+        {
+            await foreach (NativeValueScanResultBatch batch in ReadResultBatchesAsync(
+                               0,
+                               Count,
+                               maximumRecordsPerBatch,
+                               includePreviousValues: false,
+                               cancellationToken: cancellationToken)
+                               .ConfigureAwait(false))
+            {
+                yield return batch.Addresses;
+            }
+        }
+
+        public async ValueTask DisposeAsync()
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            if (_completed || !_owner.IsCurrentTurboScanSession(_sessionGeneration))
+            {
+                return;
+            }
+
+            try
+            {
+                await _owner.EndActiveTurboScanSessionAsync(CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                _owner.ResetTurboScanSessionState();
+            }
+        }
+
+        private void EnsureCurrentResidentSession()
+        {
+            if (!_owner.IsCurrentTurboScanSession(_sessionGeneration))
+            {
+                throw new InvalidOperationException(
+                    "The native TurboScan resident result handle has been replaced by a newer scan generation.");
+            }
+        }
+    }
+
+    private bool IsCurrentTurboScanSession(long generation)
+    {
+        return _turboScanSessionActive && generation == _turboScanSessionGeneration;
+    }
+
+    private bool CanRefineTurboScanResidentSession(
+        long generation,
+        int processId,
+        ulong resultCount,
+        NativeValueScanRequest request)
+    {
+        if (_disposed ||
+            !_turboScanSessionActive ||
+            generation != _turboScanSessionGeneration ||
+            _turboScanProcessId != processId ||
+            _turboScanResultCount != resultCount ||
+            !string.Equals(_turboScanValueTypeId, request.ValueTypeId, StringComparison.OrdinalIgnoreCase) ||
+            _turboScanValueLength != request.ValueSize ||
+            _turboScanAlignment != request.Alignment)
+        {
+            return false;
+        }
+
+        if (IsExactValueRequest(request) &&
+            IsFloatingPointRequest(request) &&
+            !UsesPs5DebugFloatingTolerance(request))
+        {
+            return false;
+        }
+
+        try
+        {
+            _ = ValidateNativeScanRequest(processId, request, MemoryScanStage.NextScan);
+            return true;
+        }
+        catch (NotSupportedException)
+        {
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            return false;
+        }
     }
 
     private async Task EndActiveTurboScanSessionAsync(CancellationToken cancellationToken)
@@ -987,7 +1543,7 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
         _turboScanSessionActive = false;
         _turboScanProcessId = 0;
         _turboScanResultCount = 0;
-        _turboScanValueType = null;
+        _turboScanValueTypeId = null;
         _turboScanValueLength = 0;
         _turboScanAlignment = 0;
     }
@@ -1201,6 +1757,12 @@ internal sealed class Ps5DebugClient : IAsyncDisposable
 
         return (branding, string.IsNullOrWhiteSpace(capabilityLevel) ? null : capabilityLevel);
     }
+
+    private readonly record struct NativeScanProtocolShape(
+        byte CompareType,
+        int InputValueCount,
+        int ComparisonDataLength,
+        bool UseSnapshot);
 
     private readonly record struct TurboScanSegment(ulong Address, uint Length);
 

@@ -34,6 +34,8 @@ internal sealed class MockTargetSession :
     };
 
     private readonly byte[] _memory = new byte[MockTargetLayout.MemorySize];
+    private readonly MockDisassemblerProvider _disassembler = new();
+    private readonly MockDebuggerProvider _debugger = new(Process);
     private readonly object _memoryGate = new();
     private bool _isConnected = true;
 
@@ -52,6 +54,17 @@ internal sealed class MockTargetSession :
     public TService? GetService<TService>() where TService : class
     {
         EnsureConnected();
+
+        if (_disassembler is TService disassemblerService)
+        {
+            return disassemblerService;
+        }
+
+        if (_debugger is TService debuggerService)
+        {
+            return debuggerService;
+        }
+
         return this as TService;
     }
 
@@ -119,10 +132,15 @@ internal sealed class MockTargetSession :
         return Task.CompletedTask;
     }
 
-    public ValueTask DisposeAsync()
+    public async ValueTask DisposeAsync()
     {
+        if (!_isConnected)
+        {
+            return;
+        }
+
+        await _debugger.DisposeAsync().ConfigureAwait(false);
         _isConnected = false;
-        return ValueTask.CompletedTask;
     }
 
     private void InitializeMemory()
@@ -138,6 +156,11 @@ internal sealed class MockTargetSession :
         BinaryPrimitives.WriteInt32LittleEndian(
             _memory.AsSpan(GetOffset(MockTargetLayout.MoneyAddress, sizeof(int)), sizeof(int)),
             5000);
+
+        MockTargetLayout.CodeBytes.Span.CopyTo(
+            _memory.AsSpan(
+                GetOffset(MockTargetLayout.CodeAddress, MockTargetLayout.CodeBytes.Length),
+                MockTargetLayout.CodeBytes.Length));
     }
 
     private static void ValidateProcess(TargetProcess process)

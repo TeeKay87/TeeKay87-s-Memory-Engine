@@ -2,9 +2,9 @@
 
 ## Purpose
 
-TeeKay87's Memory Engine centralizes dimensions that must remain consistent across unrelated WPF views. The first shared metric is the standard height for normal single-line interactive controls.
+TeeKay87's Memory Engine centralizes dimensions that must remain consistent across unrelated WPF views. Shared metrics currently cover the standard height for normal single-line interactive controls and the standard width for ordinary TextBox/ComboBox inputs in the permanent main-window target header.
 
-This prevents each view or control style from inventing its own height and avoids alignment differences such as a selector being shorter than an adjacent button.
+This prevents each view or plugin-rendered field from inventing its own dimensions and avoids alignment differences such as a selector being shorter than an adjacent button or one plugin's top connection fields using unrelated widths.
 
 ## Standard Single-Line Control Height
 
@@ -21,6 +21,28 @@ UiMetrics.StandardControlHeight = 34
 ```
 
 The value is expressed in WPF device-independent units. It matches the height used by the Platform selector before the metric was centralized.
+
+## Responsive Top-Target Input Width
+
+Application `0.1.7.rev5` defines the current authoritative host metric for ordinary row-1 target inputs:
+
+```text
+UiMetrics.TopTargetInputMaxWidth = 180
+```
+
+This is a **maximum**, not a fixed width. It applies to ordinary TextBox and ComboBox inputs rendered in the permanent main target/connection row 1. The current consumers are:
+
+- Platform ComboBox;
+- every plugin-declared `ConnectionSettings` TextBox, including the PS5 host/IP and Port fields;
+- Target Process ComboBox.
+
+All of those controls share one host-computed width. At normal/wide window sizes the width is capped at 180 device-independent units. When row 1 becomes constrained, the host recalculates the common width from the target bar's actual width after its left/right padding is removed after reserving the fixed action buttons and the existing inter-control spacing/margins. The ordinary inputs then shrink together. No minimum width is imposed by this row-1 rule, so they may become narrower than 180 as necessary instead of forcing controls past the right edge of the supported main-window layout.
+
+The calculation uses the target bar's actual width and explicitly subtracts the Border's left/right padding before distributing space. This means the permanent left/right target-bar margins remain reserved automatically; the responsive field calculation does not consume or bypass them.
+
+The rule is deliberately platform-neutral. Future plugins contribute connection-setting definitions only and inherit the same responsive host sizing. Plugins must not encode one-off WPF widths for ordinary top-row TextBox/ComboBox fields. This rule does **not** apply to unrelated application-bar controls such as the Theme selector, nor to specialized editors elsewhere in the application.
+
+The target header remains a compact connection/target surface. If a future plugin requires enough configuration that the fixed two-row header becomes impractical even with responsive ordinary inputs, additional configuration belongs in a plugin/settings/details surface rather than creating a third permanent row.
 
 ## Current Consumers
 
@@ -41,7 +63,8 @@ This includes the current:
 - Connect, Disconnect, Reload Plugins, Refresh, and Set Active Target buttons;
 - scanner Value TextBox and fixed Scan Type / Value Type ComboBoxes;
 - First Scan, Next Scan, and New Scan buttons;
-- Saved Addresses action buttons.
+- Saved Addresses action buttons;
+- Memory Viewer Address TextBox plus Go To and Refresh buttons from `0.1.5.rev1`.
 
 
 ## TextBox Content Spacing
@@ -78,4 +101,7 @@ Such exceptions should be intentional and documented in the relevant shared styl
 
 ## Theme Boundary
 
-Control dimensions are host presentation metrics, not color-theme data. External JSON themes may change colors only and must not define or override `StandardControlHeight` or any other layout dimension.
+Control dimensions are host presentation metrics, not color-theme data. External JSON themes may change colors only and must not define or override `StandardControlHeight`, `TopTargetInputMaxWidth`, or any other layout dimension.
+
+
+> Host `0.1.7.rev6` builds on the fully verified rev5 baseline. Its Threads/Thread Control and passive header-status cleanup do not redesign the subsystem documented here.

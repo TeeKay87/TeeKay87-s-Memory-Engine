@@ -7,7 +7,8 @@ public sealed record MemoryScanResult(
     MemoryScanValue CurrentValue,
     MemoryScanValue? PreviousValue,
     string? RegionName,
-    string? ModuleName)
+    string? ModuleName,
+    MemoryProtection Protection)
 {
-    public MemoryValueType ValueType => CurrentValue.ValueType;
+    public string ValueTypeId => CurrentValue.ValueTypeId;
 }

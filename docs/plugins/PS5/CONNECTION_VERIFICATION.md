@@ -18,7 +18,8 @@ It returns representative ps5debug-NG responses including protocol `1.3`, platfo
 The test then verifies that:
 
 - `ConnectAsync` returns a connected session;
-- the connected session exposes the currently implemented `IProcessProvider` service;
+- the connected session exposes the currently implemented target services;
+- PS5 plugin `0.1.0.rev16` writes the successfully connected host and port through its injected `IPluginSettings` scope;
 - disposing the session transitions it to a disconnected state.
 
 Process-list wire parsing has a separate PS5 plugin verification procedure in `PROCESS_ENUMERATION_VERIFICATION.md`.
@@ -35,9 +36,10 @@ On a Windows development machine with ps5debug-NG running on a reachable PS5:
 6. verify that the UI reports `Connected.`;
 7. choose **Disconnect**;
 8. verify that the UI returns to `Not connected.`;
-9. repeat once to verify reconnect behavior.
+9. close and reopen the application and confirm the successful IP/hostname and port are pre-filled;
+10. reconnect once using the restored values.
 
-Also test at least one unavailable IP or stopped ps5debug-NG instance and confirm that the application remains running and presents the connection error rather than terminating.
+Also test at least one unavailable IP or stopped ps5debug-NG instance and confirm that the application remains running and presents the connection error rather than terminating. Restart afterward and confirm that the failed attempt did not replace the last successfully connected host/port.
 
 ## Runtime Result Recorded on 2026-08-30
 
@@ -53,5 +55,6 @@ This result verifies live connection establishment. It does not by itself verify
 | Loopback command framing and response parsing represented in tests | IMPLEMENTED |
 | Live Windows build/application launch | PASS - user verified 2026-08-30 |
 | Live PS5 connection | PASS - user verified 2026-08-30 |
+| Remember successful host/port through Core-managed plugin settings | IMPLEMENTED IN `0.1.3.rev16`; PENDING USER TEST |
 | Disconnect/reconnect against real PS5 | PENDING USER TEST |
-| Unavailable-target error handling | PENDING USER TEST |
+| Unavailable-target error handling does not replace remembered endpoint | PENDING USER TEST |

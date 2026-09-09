@@ -28,15 +28,21 @@
             <SolidColorBrush x:Key="SecondaryButtonBackgroundBrush" Color="#171F2A" />
             <SolidColorBrush x:Key="SecondaryButtonBorderBrush" Color="#263242" />
             <SolidColorBrush x:Key="SecondaryButtonTextBrush" Color="#F1F5F9" />
-            <SolidColorBrush x:Key="DisabledButtonBackgroundBrush" Color="#151D27" />
-            <SolidColorBrush x:Key="DisabledButtonBorderBrush" Color="#334155" />
-            <SolidColorBrush x:Key="DisabledButtonTextBrush" Color="#94A3B8" />
+            <SolidColorBrush x:Key="DisabledButtonBackgroundBrush" Color="#0D1218" />
+            <SolidColorBrush x:Key="DisabledButtonBorderBrush" Color="#202B38" />
+            <SolidColorBrush x:Key="DisabledButtonTextBrush" Color="#64748B" />
             <SolidColorBrush x:Key="DangerButtonBackgroundBrush" Color="#7F1D1D" />
             <SolidColorBrush x:Key="DangerButtonBorderBrush" Color="#EF4444" />
             <SolidColorBrush x:Key="DangerButtonTextBrush" Color="#FEF2F2" />
             <SolidColorBrush x:Key="ErrorTextBrush" Color="#FCA5A5" />
             <SolidColorBrush x:Key="SuccessTextBrush" Color="#86EFAC" />
+            <SolidColorBrush x:Key="SuccessMutedBrush" Color="#3886EFAC" />
             <SolidColorBrush x:Key="WarningTextBrush" Color="#FCD34D" />
+            <SolidColorBrush x:Key="DisassemblyMnemonicBrush" Color="#7DD3FC" />
+            <SolidColorBrush x:Key="DisassemblyFlowControlBrush" Color="#FDA4AF" />
+            <SolidColorBrush x:Key="DisassemblyRegisterBrush" Color="#C4B5FD" />
+            <SolidColorBrush x:Key="DisassemblyNumberBrush" Color="#FCD34D" />
+            <SolidColorBrush x:Key="DisassemblyKeywordBrush" Color="#86EFAC" />
             <SolidColorBrush x:Key="ToolTipBackgroundBrush" Color="#0F1720" />
             <SolidColorBrush x:Key="ToolTipBorderBrush" Color="#3B4A5F" />
             <SolidColorBrush x:Key="ToolTipTextBrush" Color="#F1F5F9" />

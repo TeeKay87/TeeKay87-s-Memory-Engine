@@ -40,6 +40,8 @@ The metric is shared with the implicit `TextBox` and `ComboBox` styles. It inten
 
 Button views should not set a local `Height` simply to match neighboring controls. A different button height should only be introduced for a deliberately different control form factor and must not replace the ordinary application-wide button baseline.
 
+From `0.1.7.rev4`, retained unchanged by `0.1.7.rev5`, the **outer button height remains exactly 34 units**. The shared template reduces only the ordinary button's internal vertical content padding from the older `14,8` layout value to `14,2` while retaining the same horizontal padding. `HorizontalContentAlignment=Center` and `VerticalContentAlignment=Center` remain authoritative, and the generated `AccessText` / `TextBlock` string-content elements are also explicitly vertically centered. This is a text-layout correction, not a button-size redesign: borders, corner radius, semantic colors, hover/pressed/focus behavior, and normal button height are unchanged. The smaller vertical content margin leaves adequate room for descenders such as **g, j, p, q, and y** instead of letting their lower pixels be clipped.
+
 Semantic styles should be chosen by the meaning of the action, not by the desired color.
 
 ## Interaction States
@@ -56,6 +58,10 @@ The common control template handles the states used by standard buttons througho
 The disabled state deliberately does not use WPF's operating-system button chrome. This prevents disabled buttons from becoming bright white or losing readable text in the application's dark theme.
 
 Disabled controls retain their normal layout size. Their cursor changes to the default arrow to avoid suggesting that the action can currently be clicked.
+
+From `0.1.3.rev2`, disabled-state contrast is intentionally stronger across all bundled themes. Disabled buttons use the theme-owned `DisabledBackground`, `DisabledBorder`, and `DisabledText` colors, remove hover/pressed overlays, and use the normal arrow cursor. The same semantic disabled palette is shared by other host controls so unavailable actions are visually recognizable before interaction.
+
+From `0.1.3.rev5`, the disabled button colors are also enforced directly by `ButtonBaseStyle`'s `ControlTemplate`. The rendered border and named content presenter receive the disabled background, border, and foreground brushes whenever `IsEnabled=False`. This is deliberate: semantic styles such as Primary/Secondary/Danger and workflow-local derived styles may define their own enabled Foreground/Background/BorderBrush values, so the visible disabled state must not depend solely on inherited style-setter precedence. All standard buttons therefore converge on one unmistakable disabled appearance regardless of which semantic style or command controls their enabled state.
 
 ## Theme Resources
 
@@ -118,12 +124,12 @@ The current main workspace uses the shared styles for every standard button:
 - `DangerButtonStyle` for **Disconnect** and **Cancel Scan**;
 - `SecondaryButtonStyle` for **Reload Plugins** and process **Refresh**;
 - workflow-aware Primary/Secondary styling for **First Scan** and **Next Scan**: before a scan session exists First Scan uses the active theme's Primary palette, while a successful First Scan transfers that emphasis to Next Scan;
-- `SecondaryButtonStyle` for **New Scan**, plus disabled future **Add Address**, **Edit**, and **Export** actions;
-- disabled `DangerButtonStyle` for the future **Remove** saved-address action.
+- `SecondaryButtonStyle` for **New Scan** and the active Scan Results / Saved Addresses **Export...** actions;
+- `DangerButtonStyle` for Saved Addresses **Remove/Remove All**, Memory Viewer bookmark **Remove**, **Disconnect**, **Cancel Scan**, and all application-owned **Cancel** dialog actions.
 
 From `0.1.2.rev5`, scanner emphasis follows the workflow rather than assigning Primary permanently to both scan buttons. New Scan resets the state so First Scan becomes the emphasized action again. This visual state is theme-driven and does not hard-code a color in the Scan panel.
 
-Danger is also the semantic style for stop/termination actions, not only deletion. Current themes therefore use their existing complementary red Danger palette for Disconnect and Cancel Scan, and future Abort/Exit-style actions should reuse the same semantic style unless a different application-wide meaning is deliberately introduced. Saved-address placeholders continue to provide a visual regression check for disabled-state readability in Light, Dimmed, and Dark themes.
+Danger is the semantic style for destructive **and dismissive/termination** actions, not only deletion. From `0.1.5.rev8`, this rule is applied consistently to application-owned **Remove, Remove All, Cancel, Cancel Scan, Disconnect**, and analogous Delete/Abort/Exit actions. That includes Cancel buttons in Settings, export, edit, confirmation, and operation-progress dialogs as well as the Memory Viewer bookmark Remove action. These controls always resolve the active theme's Danger palette rather than choosing a local red or falling back to Secondary styling. Future Remove/Cancel/Delete/Abort/Exit/Disconnect buttons must use `DangerButtonStyle` unless the application deliberately redefines that action's semantic role. Disabled states for current workflow actions, including capability/state-gated Export and Remove All buttons, continue to provide a visual regression check for disabled-state readability in Light, Dimmed, and Dark themes.
 
 Capability elements under **Plugin details** are informational badges implemented as `Border` elements. They are not buttons and should not receive button interaction states unless they become interactive controls in a future revision.
 
@@ -136,5 +142,13 @@ When new WPF views are added:
 3. do not introduce view-local hover, pressed, focus, or disabled colors for ordinary buttons;
 4. add a new application-wide semantic style only when an action category genuinely requires behavior or visual meaning not covered by Primary, Secondary, or Danger;
 5. keep layout decisions such as margins and `MinWidth` local when they are specific to a particular view, but reuse `UiMetrics.StandardControlHeight` for ordinary single-line buttons;
-6. preserve readable disabled content and keyboard focus indication in every future button variant;
-7. use a different control type for non-button concepts such as badges, chips, toggles, check boxes, or menu items rather than styling them to behave like standard buttons.
+6. preserve the shared centered-content rule and compact vertical content padding; do not compensate for text baseline problems by changing the standard 34-unit button height;
+7. preserve readable disabled content and keyboard focus indication in every future button variant;
+8. use a different control type for non-button concepts such as badges, chips, toggles, check boxes, or menu items rather than styling them to behave like standard buttons.
+
+### Generated text content and disabled foreground
+
+WPF may create an `AccessText` or `TextBlock` internally when a button's `Content` is a string. The shared button template therefore keeps local styles for both generated text-element types. Their normal foreground follows the containing button's semantic `Foreground`, while an ancestor `IsEnabled=False` trigger applies `DisabledButtonTextBrush` directly to the generated label. This prevents application-level text styling or WPF content materialization from leaving a disabled button label in the enabled text color.
+
+
+> Host `0.1.7.rev6` builds on the fully verified rev5 baseline. Its Threads/Thread Control and passive header-status cleanup do not redesign the subsystem documented here.

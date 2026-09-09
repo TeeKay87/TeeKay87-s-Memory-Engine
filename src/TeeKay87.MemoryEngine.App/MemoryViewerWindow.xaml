@@ -1,0 +1,328 @@
+<Window x:Class="TeeKay87.MemoryEngine.App.MemoryViewerWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:input="clr-namespace:TeeKay87.MemoryEngine.App.Input"
+        Title="{Binding WindowTitle}"
+        Width="1040"
+        Height="680"
+        MinWidth="760"
+        MinHeight="500"
+        WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
+        FontFamily="Segoe UI"
+        Loaded="MemoryViewerWindow_Loaded"
+        Closed="MemoryViewerWindow_Closed">
+    <Window.InputBindings>
+        <KeyBinding Key="Left" Modifiers="Alt" Command="{Binding BackCommand}" />
+        <KeyBinding Key="Right" Modifiers="Alt" Command="{Binding ForwardCommand}" />
+    </Window.InputBindings>
+
+    <Grid Margin="14">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <Border Grid.Row="0" Style="{StaticResource CardBorderStyle}" Padding="14,11">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+                <StackPanel>
+                    <TextBlock Text="Memory Viewer" Style="{StaticResource SectionTitleTextStyle}" />
+                    <TextBlock Margin="0,4,0,0"
+                               Text="{Binding TargetText}"
+                               Style="{StaticResource MutedTextStyle}" />
+                </StackPanel>
+                <TextBlock Grid.Column="1"
+                           VerticalAlignment="Center"
+                           Text="{Binding AccessModeText}"
+                           Style="{StaticResource MutedTextStyle}" />
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="2" Style="{StaticResource CardBorderStyle}" Padding="14">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="10" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="10" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="12" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+
+                <Grid Grid.Row="0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="18" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <Button Grid.Column="0"
+                            MinWidth="82"
+                            Command="{Binding BackCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="Go to the previous Memory Viewer address (Alt+Left)."
+                            Content="Back" />
+                    <Button Grid.Column="2"
+                            MinWidth="82"
+                            Command="{Binding ForwardCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="Go to the next Memory Viewer address (Alt+Right)."
+                            Content="Forward" />
+                    <TextBlock Grid.Column="4"
+                               VerticalAlignment="Center"
+                               Text="Address"
+                               Style="{StaticResource MutedTextStyle}" />
+                    <TextBox Grid.Column="6"
+                             MinWidth="180"
+                             Text="{Binding AddressText, UpdateSourceTrigger=PropertyChanged}"
+                             input:TextBoxInputFilter.Mode="HexAddress"
+                             ToolTip="Enter a hexadecimal address inside a readable memory region.">
+                        <TextBox.InputBindings>
+                            <KeyBinding Key="Enter" Command="{Binding GoToAddressCommand}" />
+                        </TextBox.InputBindings>
+                    </TextBox>
+                    <Button Grid.Column="8"
+                            MinWidth="82"
+                            Command="{Binding GoToAddressCommand}"
+                            Style="{StaticResource PrimaryButtonStyle}"
+                            Content="Go To" />
+                    <Button Grid.Column="10"
+                            MinWidth="82"
+                            Command="{Binding RefreshCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Content="Refresh" />
+                    <Button Grid.Column="12"
+                            MinWidth="82"
+                            IsEnabled="{Binding CanEditSelectedRow}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="EditSelectedButton_Click"
+                            ToolTip="Edit the selected row's raw bytes and verify the write."
+                            Content="Edit..." />
+                </Grid>
+
+                <Grid Grid.Row="2">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Text="Region navigation"
+                               Style="{StaticResource MutedTextStyle}" />
+                    <Button Grid.Column="2"
+                            MinWidth="98"
+                            Command="{Binding PreviousRegionCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="Go to the start of the previous readable, non-guarded memory region."
+                            Content="Previous Region" />
+                    <Button Grid.Column="4"
+                            MinWidth="92"
+                            Command="{Binding RegionStartCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="Go to the first byte of the current memory region."
+                            Content="Region Start" />
+                    <Button Grid.Column="6"
+                            MinWidth="92"
+                            Command="{Binding RegionEndCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="Go to the final byte of the current memory region."
+                            Content="Region End" />
+                    <Button Grid.Column="8"
+                            MinWidth="98"
+                            Command="{Binding NextRegionCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="Go to the start of the next readable, non-guarded memory region."
+                            Content="Next Region" />
+                </Grid>
+
+                <Grid Grid.Row="4">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="10" />
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                        <ColumnDefinition Width="8" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+                    <TextBlock Grid.Column="0"
+                               VerticalAlignment="Center"
+                               Text="Bookmarks"
+                               Style="{StaticResource MutedTextStyle}" />
+                    <Button Grid.Column="2"
+                            MinWidth="104"
+                            Command="{Binding AddBookmarkCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            ToolTip="Bookmark the current Memory Viewer origin address for this viewer window."
+                            Content="Add Current" />
+                    <ComboBox Grid.Column="4"
+                              MinWidth="180"
+                              ItemsSource="{Binding Bookmarks}"
+                              SelectedItem="{Binding SelectedBookmark, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayText"
+                              ToolTip="Bookmarks are kept for this Memory Viewer window and are not persisted after it is closed." />
+                    <Button Grid.Column="6"
+                            MinWidth="70"
+                            Command="{Binding GoToBookmarkCommand}"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Content="Go" />
+                    <Button Grid.Column="8"
+                            MinWidth="82"
+                            Command="{Binding RemoveBookmarkCommand}"
+                            Style="{StaticResource DangerButtonStyle}"
+                            Content="Remove" />
+                </Grid>
+
+                <Grid Grid.Row="6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="2*" />
+                        <ColumnDefinition Width="12" />
+                        <ColumnDefinition Width="*" />
+                    </Grid.ColumnDefinitions>
+
+                    <StackPanel Grid.Column="0">
+                        <TextBlock Text="Region / Module" Style="{StaticResource MutedTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding RegionNameText}" />
+                        <TextBlock Margin="0,2,0,0" Text="{Binding RegionRangeText}" Style="{StaticResource MutedTextStyle}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="2">
+                        <TextBlock Text="Visible range" Style="{StaticResource MutedTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding VisibleRangeText}" />
+                    </StackPanel>
+                    <StackPanel Grid.Column="4">
+                        <TextBlock Text="Protection" Style="{StaticResource MutedTextStyle}" />
+                        <TextBlock Margin="0,3,0,0" Text="{Binding ProtectionText}" />
+                    </StackPanel>
+                </Grid>
+            </Grid>
+        </Border>
+
+        <Border Grid.Row="4" Style="{StaticResource CardBorderStyle}">
+            <DataGrid x:Name="MemoryDataGrid"
+                      ItemsSource="{Binding Rows}"
+                      SelectedItem="{Binding SelectedRow, Mode=TwoWay}"
+                      AutoGenerateColumns="False"
+                      IsReadOnly="True"
+                      EnableRowVirtualization="True"
+                      EnableColumnVirtualization="True"
+                      SelectionMode="Extended"
+                      ContextMenuOpening="MemoryDataGrid_ContextMenuOpening"
+                      PreviewKeyDown="MemoryDataGrid_PreviewKeyDown"
+                      SelectionChanged="MemoryDataGrid_SelectionChanged">
+                <DataGrid.ContextMenu>
+                    <ContextMenu>
+                        <MenuItem Header="Open in Disassembler"
+                                  Tag="OpenDisassembler"
+                                  Click="OpenDisassemblerMenuItem_Click" />
+                        <Separator />
+                        <MenuItem Header="Edit Hex Bytes..."
+                                  IsEnabled="{Binding CanEdit}"
+                                  Click="EditHexBytesMenuItem_Click" />
+                        <Separator />
+                        <MenuItem Header="Copy Address" Click="CopyAddressMenuItem_Click" />
+                        <MenuItem Header="Copy Hex Bytes" Click="CopyHexBytesMenuItem_Click" />
+                        <MenuItem Header="Copy ASCII" Click="CopyAsciiMenuItem_Click" />
+                        <MenuItem Header="Copy Row" Click="CopyRowMenuItem_Click" />
+                        <Separator />
+                        <MenuItem Header="Copy Selected" Click="CopySelectedMenuItem_Click" />
+                    </ContextMenu>
+                </DataGrid.ContextMenu>
+                <DataGrid.RowStyle>
+                    <Style TargetType="{x:Type DataGridRow}" BasedOn="{StaticResource {x:Type DataGridRow}}">
+                        <Style.Triggers>
+                            <DataTrigger Binding="{Binding IsOriginRow}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource SuccessMutedBrush}" />
+                            </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsOriginRow}" Value="True" />
+                                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Background" Value="{DynamicResource SuccessMutedBrush}" />
+                            </MultiDataTrigger>
+                        </Style.Triggers>
+                    </Style>
+                </DataGrid.RowStyle>
+                <DataGrid.Columns>
+                    <DataGridTextColumn Header="Address" Width="170" Binding="{Binding Address}">
+                        <DataGridTextColumn.ElementStyle>
+                            <Style TargetType="{x:Type TextBlock}" BasedOn="{StaticResource {x:Type TextBlock}}">
+                                <Setter Property="FontFamily" Value="Consolas" />
+                            </Style>
+                        </DataGridTextColumn.ElementStyle>
+                    </DataGridTextColumn>
+                    <DataGridTemplateColumn Header="Hex Bytes" Width="*">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock FontFamily="Consolas">
+                                    <Run Text="{Binding HexPrefix, Mode=OneWay}" /><Run Text="{Binding HighlightedHexBytes, Mode=OneWay}"
+                                         Background="{DynamicResource PrimaryButtonBackgroundBrush}"
+                                         Foreground="{DynamicResource PrimaryButtonTextBrush}" /><Run Text="{Binding HexSuffix, Mode=OneWay}" />
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                    <DataGridTemplateColumn Header="ASCII" Width="190">
+                        <DataGridTemplateColumn.CellTemplate>
+                            <DataTemplate>
+                                <TextBlock FontFamily="Consolas">
+                                    <Run Text="{Binding AsciiPrefix, Mode=OneWay}" /><Run Text="{Binding HighlightedAscii, Mode=OneWay}"
+                                         Background="{DynamicResource PrimaryButtonBackgroundBrush}"
+                                         Foreground="{DynamicResource PrimaryButtonTextBrush}" /><Run Text="{Binding AsciiSuffix, Mode=OneWay}" />
+                                </TextBlock>
+                            </DataTemplate>
+                        </DataGridTemplateColumn.CellTemplate>
+                    </DataGridTemplateColumn>
+                </DataGrid.Columns>
+            </DataGrid>
+        </Border>
+
+        <Border Grid.Row="6"
+                Style="{StaticResource CardBorderStyle}"
+                Padding="12,8">
+            <Grid>
+                <TextBlock Text="{Binding StatusText}"
+                           Style="{StaticResource MutedTextStyle}"
+                           TextTrimming="CharacterEllipsis" />
+                <TextBlock HorizontalAlignment="Right"
+                           MaxWidth="520"
+                           Text="{Binding ErrorText}"
+                           Style="{StaticResource ErrorMessageTextStyle}"
+                           TextTrimming="CharacterEllipsis" />
+            </Grid>
+        </Border>
+    </Grid>
+</Window>

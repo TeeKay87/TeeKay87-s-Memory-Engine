@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -9,161 +8,188 @@ using TeeKay87.MemoryEngine.PluginSdk.Models;
 
 namespace TeeKay87.MemoryEngine.Core.Scanning;
 
-public sealed class MemoryScanner
+public sealed partial class MemoryScanner
 {
-    public const int ValueSize = sizeof(int);
     public const int DefaultChunkSize = 256 * 1024;
     public const int MaximumResultCount = 2_000_000;
     public const int MaximumReadFailureCount = 32;
     private const int ProgressReportChunkInterval = 16;
 
-    public Task<MemoryScanExecutionResult> FirstScanInt32ExactNativeAsync(
+    public MemoryScanShape GetScanShape(
+        IMemoryValueType valueType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        TargetArchitecture architecture,
+        MemoryScanOptions scanOptions)
+    {
+        ArgumentNullException.ThrowIfNull(valueType);
+        ArgumentNullException.ThrowIfNull(inputValues);
+        ArgumentNullException.ThrowIfNull(architecture);
+        ArgumentNullException.ThrowIfNull(scanOptions);
+
+        ResolveScanShape(valueType, inputValues, architecture, scanOptions, out int valueSize, out int alignment);
+        return new MemoryScanShape(valueSize, alignment);
+    }
+
+    public Task<MemoryScanExecutionResult> FirstScanNativeAsync(
         TargetProcess process,
         IReadOnlyList<MemoryRegion> memoryRegions,
         INativeValueScanner nativeScanner,
         TargetArchitecture architecture,
-        int targetValue,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
         CancellationToken cancellationToken)
     {
-        return FirstScanExactNativeAsync(
+        return FirstScanNativeAsync(
             process,
             memoryRegions,
             nativeScanner,
-            CreateInt32Value(architecture, targetValue),
-            cancellationToken);
-    }
-
-    public Task<MemoryScanExecutionResult> NextScanInt32ExactNativeAsync(
-        TargetProcess process,
-        IReadOnlyList<MemoryRegion> memoryRegions,
-        IReadOnlyList<MemoryScanResult> previousResults,
-        INativeValueScanRefiner nativeRefiner,
-        TargetArchitecture architecture,
-        int targetValue,
-        CancellationToken cancellationToken)
-    {
-        return NextScanExactNativeAsync(
-            process,
-            memoryRegions,
-            previousResults,
-            nativeRefiner,
-            CreateInt32Value(architecture, targetValue),
-            cancellationToken);
-    }
-
-    public Task<MemoryScanExecutionResult> FirstScanInt32ExactAsync(
-        TargetProcess process,
-        IReadOnlyList<MemoryRegion> memoryRegions,
-        IMemoryReader memoryReader,
-        TargetArchitecture architecture,
-        int targetValue,
-        IProgress<MemoryScanProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        return FirstScanExactAsync(
-            process,
-            memoryRegions,
-            memoryReader,
             architecture,
-            CreateInt32Value(architecture, targetValue),
-            progress,
+            valueType,
+            scanType,
+            inputValues,
+            MemoryScanOptions.Empty,
             cancellationToken);
     }
 
-    public Task<MemoryScanExecutionResult> NextScanInt32ExactAsync(
-        TargetProcess process,
-        IReadOnlyList<MemoryRegion> memoryRegions,
-        IReadOnlyList<MemoryScanResult> previousResults,
-        IMemoryReader memoryReader,
-        TargetArchitecture architecture,
-        int targetValue,
-        IProgress<MemoryScanProgress>? progress,
-        CancellationToken cancellationToken)
-    {
-        return NextScanExactAsync(
-            process,
-            memoryRegions,
-            previousResults,
-            memoryReader,
-            architecture,
-            CreateInt32Value(architecture, targetValue),
-            progress,
-            cancellationToken);
-    }
-
-    public async Task<MemoryScanExecutionResult> FirstScanExactNativeAsync(
+    public async Task<MemoryScanExecutionResult> FirstScanNativeAsync(
         TargetProcess process,
         IReadOnlyList<MemoryRegion> memoryRegions,
         INativeValueScanner nativeScanner,
-        MemoryScanValue targetValue,
+        TargetArchitecture architecture,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        MemoryScanOptions scanOptions,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentNullException.ThrowIfNull(memoryRegions);
         ArgumentNullException.ThrowIfNull(nativeScanner);
-        ArgumentNullException.ThrowIfNull(targetValue);
+        ArgumentNullException.ThrowIfNull(architecture);
+        ArgumentNullException.ThrowIfNull(valueType);
+        ArgumentNullException.ThrowIfNull(scanType);
+        ArgumentNullException.ThrowIfNull(inputValues);
+        ArgumentNullException.ThrowIfNull(scanOptions);
+
+        ValidateScanDefinition(valueType, scanType, inputValues, architecture, MemoryScanStage.FirstScan);
+        ResolveScanShape(valueType, inputValues, architecture, scanOptions, out int valueSize, out int alignment);
 
         MemoryRegion[] readableRegions = memoryRegions
-            .Where(region => IsScannableRegion(region, targetValue.Size))
+            .Where(region => IsScannableRegion(region, valueSize))
             .OrderBy(region => region.BaseAddress)
             .ToArray();
 
-        NativeValueScanRequest request = CreateNativeRequest(targetValue);
-        IReadOnlyList<ulong> addresses = await nativeScanner
+        NativeValueScanRequest request = CreateNativeRequest(
+            valueType,
+            scanType,
+            inputValues,
+            valueSize,
+            alignment,
+            scanOptions);
+        IReadOnlyList<NativeValueScanResult> nativeResults = await nativeScanner
             .ScanAsync(process, readableRegions, request, cancellationToken)
             .ConfigureAwait(false);
 
-        List<MemoryScanResult> matches = new(Math.Min(addresses.Count, MaximumResultCount));
+        List<MemoryScanResult> matches = new(Math.Min(nativeResults.Count, MaximumResultCount));
         HashSet<ulong> seen = new();
 
-        foreach (ulong address in addresses)
+        foreach (NativeValueScanResult nativeResult in nativeResults)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!IsAligned(address, targetValue.Alignment) || !seen.Add(address))
+            ulong address = nativeResult.Address;
+            if (!IsAligned(address, alignment) || !seen.Add(address))
             {
                 continue;
             }
 
-            MemoryRegion? region = FindContainingRegion(readableRegions, address, targetValue.Size);
+            if (nativeResult.CurrentValueData.Length != valueSize)
+            {
+                throw new InvalidOperationException(
+                    $"Native scanner '{scanType.DisplayName}' returned {nativeResult.CurrentValueData.Length} value bytes for '{valueType.DisplayName}', which requires {valueSize} bytes.");
+            }
+
+            MemoryRegion? region = FindContainingRegion(readableRegions, address, valueSize);
             if (region is null)
             {
                 continue;
             }
 
+            MemoryScanValue currentValue = valueType.CreateValue(
+                nativeResult.CurrentValueData.Span,
+                alignment,
+                architecture);
+
             AddResultOrThrow(
                 matches,
                 new MemoryScanResult(
                     address,
-                    targetValue,
+                    currentValue,
                     null,
                     region.Name,
-                    region.ModuleName));
+                    region.ModuleName,
+                    region.Protection));
         }
 
         return new MemoryScanExecutionResult(matches, 0);
     }
 
-    public async Task<MemoryScanExecutionResult> NextScanExactNativeAsync(
+    public Task<MemoryScanExecutionResult> NextScanNativeAsync(
         TargetProcess process,
         IReadOnlyList<MemoryRegion> memoryRegions,
         IReadOnlyList<MemoryScanResult> previousResults,
         INativeValueScanRefiner nativeRefiner,
-        MemoryScanValue targetValue,
+        TargetArchitecture architecture,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        CancellationToken cancellationToken)
+    {
+        return NextScanNativeAsync(
+            process,
+            memoryRegions,
+            previousResults,
+            nativeRefiner,
+            architecture,
+            valueType,
+            scanType,
+            inputValues,
+            MemoryScanOptions.Empty,
+            cancellationToken);
+    }
+
+    public async Task<MemoryScanExecutionResult> NextScanNativeAsync(
+        TargetProcess process,
+        IReadOnlyList<MemoryRegion> memoryRegions,
+        IReadOnlyList<MemoryScanResult> previousResults,
+        INativeValueScanRefiner nativeRefiner,
+        TargetArchitecture architecture,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        MemoryScanOptions scanOptions,
         CancellationToken cancellationToken)
     {
         ArgumentNullException.ThrowIfNull(process);
         ArgumentNullException.ThrowIfNull(memoryRegions);
         ArgumentNullException.ThrowIfNull(previousResults);
         ArgumentNullException.ThrowIfNull(nativeRefiner);
-        ArgumentNullException.ThrowIfNull(targetValue);
+        ArgumentNullException.ThrowIfNull(architecture);
+        ArgumentNullException.ThrowIfNull(valueType);
+        ArgumentNullException.ThrowIfNull(scanType);
+        ArgumentNullException.ThrowIfNull(inputValues);
+        ArgumentNullException.ThrowIfNull(scanOptions);
+
+        ValidateScanDefinition(valueType, scanType, inputValues, architecture, MemoryScanStage.NextScan);
+        ResolveScanShape(valueType, inputValues, architecture, scanOptions, out int valueSize, out int alignment);
 
         if (previousResults.Count == 0)
         {
             return new MemoryScanExecutionResult(Array.Empty<MemoryScanResult>(), 0);
         }
 
-        ValidateRefinementValueType(previousResults, targetValue);
+        ValidateRefinementValueType(previousResults, valueType.Id, valueSize, alignment);
 
         MemoryScanResult[] candidates = previousResults
             .OrderBy(result => result.Address)
@@ -172,25 +198,26 @@ public sealed class MemoryScanner
             .Select(result => result.Address)
             .ToArray();
 
-        IReadOnlyList<ulong> addresses = await nativeRefiner
+        IReadOnlyList<NativeValueScanResult> nativeResults = await nativeRefiner
             .RefineAsync(
                 process,
                 previousAddresses,
-                CreateNativeRequest(targetValue),
+                CreateNativeRequest(valueType, scanType, inputValues, valueSize, alignment, scanOptions),
                 cancellationToken)
             .ConfigureAwait(false);
 
         Dictionary<ulong, MemoryScanResult> previousByAddress = candidates
             .GroupBy(result => result.Address)
             .ToDictionary(group => group.Key, group => group.First());
-        List<MemoryScanResult> matches = new(Math.Min(addresses.Count, previousByAddress.Count));
+        List<MemoryScanResult> matches = new(Math.Min(nativeResults.Count, previousByAddress.Count));
         HashSet<ulong> seen = new();
 
-        foreach (ulong address in addresses)
+        foreach (NativeValueScanResult nativeResult in nativeResults)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            if (!IsAligned(address, targetValue.Alignment) ||
+            ulong address = nativeResult.Address;
+            if (!IsAligned(address, alignment) ||
                 !seen.Add(address) ||
                 !previousByAddress.TryGetValue(address, out MemoryScanResult? previous) ||
                 previous is null)
@@ -198,25 +225,64 @@ public sealed class MemoryScanner
                 continue;
             }
 
+            if (nativeResult.CurrentValueData.Length != valueSize)
+            {
+                throw new InvalidOperationException(
+                    $"Native scanner '{scanType.DisplayName}' returned {nativeResult.CurrentValueData.Length} value bytes for '{valueType.DisplayName}', which requires {valueSize} bytes.");
+            }
+
+            MemoryScanValue currentValue = valueType.CreateValue(
+                nativeResult.CurrentValueData.Span,
+                alignment,
+                architecture);
+
             AddResultOrThrow(
                 matches,
                 new MemoryScanResult(
                     address,
-                    targetValue,
+                    currentValue,
                     previous.CurrentValue,
                     previous.RegionName,
-                    previous.ModuleName));
+                    previous.ModuleName,
+                    previous.Protection));
         }
 
         return new MemoryScanExecutionResult(matches, 0);
     }
 
-    public async Task<MemoryScanExecutionResult> FirstScanExactAsync(
+    public Task<MemoryScanExecutionResult> FirstScanAsync(
         TargetProcess process,
         IReadOnlyList<MemoryRegion> memoryRegions,
         IMemoryReader memoryReader,
         TargetArchitecture architecture,
-        MemoryScanValue targetValue,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        IProgress<MemoryScanProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        return FirstScanAsync(
+            process,
+            memoryRegions,
+            memoryReader,
+            architecture,
+            valueType,
+            scanType,
+            inputValues,
+            MemoryScanOptions.Empty,
+            progress,
+            cancellationToken);
+    }
+
+    public async Task<MemoryScanExecutionResult> FirstScanAsync(
+        TargetProcess process,
+        IReadOnlyList<MemoryRegion> memoryRegions,
+        IMemoryReader memoryReader,
+        TargetArchitecture architecture,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        MemoryScanOptions scanOptions,
         IProgress<MemoryScanProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -224,16 +290,22 @@ public sealed class MemoryScanner
         ArgumentNullException.ThrowIfNull(memoryRegions);
         ArgumentNullException.ThrowIfNull(memoryReader);
         ArgumentNullException.ThrowIfNull(architecture);
-        ArgumentNullException.ThrowIfNull(targetValue);
+        ArgumentNullException.ThrowIfNull(valueType);
+        ArgumentNullException.ThrowIfNull(scanType);
+        ArgumentNullException.ThrowIfNull(inputValues);
+        ArgumentNullException.ThrowIfNull(scanOptions);
 
-        if (targetValue.Size > DefaultChunkSize)
+        ValidateScanDefinition(valueType, scanType, inputValues, architecture, MemoryScanStage.FirstScan);
+        ResolveScanShape(valueType, inputValues, architecture, scanOptions, out int valueSize, out int alignment);
+
+        if (valueSize > DefaultChunkSize)
         {
             throw new NotSupportedException(
-                $"Exact Value scans currently support values up to {DefaultChunkSize:N0} bytes in the shared scanner.");
+                $"Shared scans currently support values up to {DefaultChunkSize:N0} bytes per candidate.");
         }
 
         MemoryRegion[] readableRegions = memoryRegions
-            .Where(region => IsScannableRegion(region, targetValue.Size))
+            .Where(region => IsScannableRegion(region, valueSize))
             .OrderBy(region => region.BaseAddress)
             .ToArray();
 
@@ -241,21 +313,21 @@ public sealed class MemoryScanner
             0UL,
             (total, region) => SaturatingAdd(
                 total,
-                GetCandidateCount(region, targetValue.Size, targetValue.Alignment)));
+                GetCandidateCount(region, valueSize, alignment)));
 
         List<MemoryScanResult> matches = new();
         byte[] buffer = new byte[DefaultChunkSize];
         ulong processedCandidates = 0;
         int readFailures = 0;
         int chunksSinceProgressReport = 0;
-        ulong maximumCandidatesPerChunk = GetMaximumCandidatesPerChunk(targetValue.Size, targetValue.Alignment);
+        ulong maximumCandidatesPerChunk = GetMaximumCandidatesPerChunk(valueSize, alignment);
 
         foreach (MemoryRegion region in readableRegions)
         {
             cancellationToken.ThrowIfCancellationRequested();
 
-            ulong scanStart = AlignUp(region.BaseAddress, targetValue.Alignment);
-            ulong candidateCount = GetCandidateCount(region, targetValue.Size, targetValue.Alignment);
+            ulong scanStart = AlignUp(region.BaseAddress, alignment);
+            ulong candidateCount = GetCandidateCount(region, valueSize, alignment);
             ulong candidateIndex = 0;
 
             while (candidateIndex < candidateCount)
@@ -266,10 +338,10 @@ public sealed class MemoryScanner
                     maximumCandidatesPerChunk,
                     candidateCount - candidateIndex);
                 ulong chunkAddress = checked(
-                    scanStart + candidateIndex * checked((ulong)targetValue.Alignment));
+                    scanStart + candidateIndex * checked((ulong)alignment));
                 ulong readLengthValue = checked(
-                    (chunkCandidateCount - 1) * checked((ulong)targetValue.Alignment) +
-                    checked((ulong)targetValue.Size));
+                    (chunkCandidateCount - 1) * checked((ulong)alignment) +
+                    checked((ulong)valueSize));
                 int readLength = checked((int)readLengthValue);
                 bool readSucceeded = false;
 
@@ -306,23 +378,35 @@ public sealed class MemoryScanner
                     ReadOnlySpan<byte> data = buffer.AsSpan(0, readLength);
                     for (ulong localIndex = 0; localIndex < chunkCandidateCount; localIndex++)
                     {
-                        int offset = checked((int)(localIndex * checked((ulong)targetValue.Alignment)));
-                        if (!MemoryScanValueCodec.MatchesExact(
-                                data.Slice(offset, targetValue.Size),
-                                targetValue,
-                                architecture.Endianness))
+                        int offset = checked((int)(localIndex * checked((ulong)alignment)));
+                        ReadOnlySpan<byte> candidateBytes = data.Slice(offset, valueSize);
+
+                        if (!scanType.IsMatch(
+                                valueType,
+                                candidateBytes,
+                                null,
+                                inputValues,
+                                architecture,
+                                MemoryScanStage.FirstScan,
+                                scanOptions))
                         {
                             continue;
                         }
+
+                        MemoryScanValue currentValue = valueType.CreateValue(
+                            candidateBytes,
+                            alignment,
+                            architecture);
 
                         AddResultOrThrow(
                             matches,
                             new MemoryScanResult(
                                 checked(chunkAddress + (ulong)offset),
-                                targetValue,
+                                currentValue,
                                 null,
                                 region.Name,
-                                region.ModuleName));
+                                region.ModuleName,
+                                region.Protection));
                     }
                 }
 
@@ -342,13 +426,42 @@ public sealed class MemoryScanner
         return new MemoryScanExecutionResult(matches, readFailures);
     }
 
-    public async Task<MemoryScanExecutionResult> NextScanExactAsync(
+    public Task<MemoryScanExecutionResult> NextScanAsync(
         TargetProcess process,
         IReadOnlyList<MemoryRegion> memoryRegions,
         IReadOnlyList<MemoryScanResult> previousResults,
         IMemoryReader memoryReader,
         TargetArchitecture architecture,
-        MemoryScanValue targetValue,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        IProgress<MemoryScanProgress>? progress,
+        CancellationToken cancellationToken)
+    {
+        return NextScanAsync(
+            process,
+            memoryRegions,
+            previousResults,
+            memoryReader,
+            architecture,
+            valueType,
+            scanType,
+            inputValues,
+            MemoryScanOptions.Empty,
+            progress,
+            cancellationToken);
+    }
+
+    public async Task<MemoryScanExecutionResult> NextScanAsync(
+        TargetProcess process,
+        IReadOnlyList<MemoryRegion> memoryRegions,
+        IReadOnlyList<MemoryScanResult> previousResults,
+        IMemoryReader memoryReader,
+        TargetArchitecture architecture,
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        MemoryScanOptions scanOptions,
         IProgress<MemoryScanProgress>? progress,
         CancellationToken cancellationToken)
     {
@@ -357,7 +470,13 @@ public sealed class MemoryScanner
         ArgumentNullException.ThrowIfNull(previousResults);
         ArgumentNullException.ThrowIfNull(memoryReader);
         ArgumentNullException.ThrowIfNull(architecture);
-        ArgumentNullException.ThrowIfNull(targetValue);
+        ArgumentNullException.ThrowIfNull(valueType);
+        ArgumentNullException.ThrowIfNull(scanType);
+        ArgumentNullException.ThrowIfNull(inputValues);
+        ArgumentNullException.ThrowIfNull(scanOptions);
+
+        ValidateScanDefinition(valueType, scanType, inputValues, architecture, MemoryScanStage.NextScan);
+        ResolveScanShape(valueType, inputValues, architecture, scanOptions, out int valueSize, out int alignment);
 
         if (previousResults.Count == 0)
         {
@@ -365,10 +484,10 @@ public sealed class MemoryScanner
             return new MemoryScanExecutionResult(Array.Empty<MemoryScanResult>(), 0);
         }
 
-        ValidateRefinementValueType(previousResults, targetValue);
+        ValidateRefinementValueType(previousResults, valueType.Id, valueSize, alignment);
 
         MemoryRegion[] readableRegions = memoryRegions
-            .Where(region => IsScannableRegion(region, targetValue.Size))
+            .Where(region => IsScannableRegion(region, valueSize))
             .OrderBy(region => region.BaseAddress)
             .ToArray();
         MemoryScanResult[] candidates = previousResults
@@ -406,7 +525,7 @@ public sealed class MemoryScanner
                     continue;
                 }
 
-                if (!CanContainValue(region, firstCandidate.Address, targetValue.Size))
+                if (!CanContainValue(region, firstCandidate.Address, valueSize))
                 {
                     if (firstCandidate.Address >= regionEnd)
                     {
@@ -418,7 +537,7 @@ public sealed class MemoryScanner
                     continue;
                 }
 
-                if (!IsAligned(firstCandidate.Address, targetValue.Alignment))
+                if (!IsAligned(firstCandidate.Address, alignment))
                 {
                     candidateIndex++;
                     processedCandidates++;
@@ -435,13 +554,13 @@ public sealed class MemoryScanner
                 while (chunkCandidateEnd < candidates.Length)
                 {
                     MemoryScanResult candidate = candidates[chunkCandidateEnd];
-                    if (!CanContainValue(region, candidate.Address, targetValue.Size) ||
-                        !IsAligned(candidate.Address, targetValue.Alignment))
+                    if (!CanContainValue(region, candidate.Address, valueSize) ||
+                        !IsAligned(candidate.Address, alignment))
                     {
                         break;
                     }
 
-                    ulong candidateEnd = checked(candidate.Address + checked((ulong)targetValue.Size));
+                    ulong candidateEnd = checked(candidate.Address + checked((ulong)valueSize));
                     if (candidateEnd > maximumReadEnd)
                     {
                         break;
@@ -459,7 +578,7 @@ public sealed class MemoryScanner
 
                 ulong lastCandidateAddress = candidates[chunkCandidateEnd - 1].Address;
                 int readLength = checked((int)(
-                    checked(lastCandidateAddress - chunkAddress) + checked((ulong)targetValue.Size)));
+                    checked(lastCandidateAddress - chunkAddress) + checked((ulong)valueSize)));
                 bool readSucceeded = false;
 
                 try
@@ -497,23 +616,34 @@ public sealed class MemoryScanner
                     {
                         MemoryScanResult previous = candidates[index];
                         int relativeOffset = checked((int)(previous.Address - chunkAddress));
+                        ReadOnlySpan<byte> currentBytes = data.Slice(relativeOffset, valueSize);
 
-                        if (!MemoryScanValueCodec.MatchesExact(
-                                data.Slice(relativeOffset, targetValue.Size),
-                                targetValue,
-                                architecture.Endianness))
+                        if (!scanType.IsMatch(
+                                valueType,
+                                currentBytes,
+                                previous.CurrentValue,
+                                inputValues,
+                                architecture,
+                                MemoryScanStage.NextScan,
+                                scanOptions))
                         {
                             continue;
                         }
+
+                        MemoryScanValue currentValue = valueType.CreateValue(
+                            currentBytes,
+                            alignment,
+                            architecture);
 
                         AddResultOrThrow(
                             matches,
                             new MemoryScanResult(
                                 previous.Address,
-                                targetValue,
+                                currentValue,
                                 previous.CurrentValue,
                                 region.Name,
-                                region.ModuleName));
+                                region.ModuleName,
+                                region.Protection));
                     }
                 }
 
@@ -541,49 +671,144 @@ public sealed class MemoryScanner
         return new MemoryScanExecutionResult(matches, readFailures);
     }
 
-    private static NativeValueScanRequest CreateNativeRequest(MemoryScanValue targetValue)
+    private static void ValidateScanDefinition(
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        TargetArchitecture architecture,
+        MemoryScanStage stage)
     {
-        return new NativeValueScanRequest(
-            targetValue.ValueType,
-            ValueScanComparison.ExactValue,
-            targetValue.Bytes.Span,
-            targetValue.Alignment);
-    }
+        bool stageSupported = stage == MemoryScanStage.FirstScan
+            ? scanType.AvailableForFirstScan
+            : scanType.AvailableForNextScan;
 
-    private static MemoryScanValue CreateInt32Value(TargetArchitecture architecture, int targetValue)
-    {
-        if (!MemoryScanValueCodec.TryParse(
-                targetValue.ToString(CultureInfo.InvariantCulture),
-                MemoryValueType.Int32,
-                architecture,
-                out MemoryScanValue? value,
-                out string error) ||
-            value is null)
+        if (!stageSupported)
         {
-            throw new InvalidOperationException(error);
+            throw new NotSupportedException(
+                $"Scan Type '{scanType.DisplayName}' is not available for {(stage == MemoryScanStage.FirstScan ? "First Scan" : "Next Scan")}.");
         }
 
-        return value;
+        if (!scanType.SupportsValueType(valueType))
+        {
+            throw new NotSupportedException(
+                $"Scan Type '{scanType.DisplayName}' does not support Value Type '{valueType.DisplayName}'.");
+        }
+
+        if (scanType.InputValueCount is int expectedInputCount && inputValues.Count != expectedInputCount)
+        {
+            throw new InvalidOperationException(
+                $"Scan Type '{scanType.DisplayName}' requires {expectedInputCount} input value(s), but {inputValues.Count} were supplied.");
+        }
+
+        if (inputValues.Any(value =>
+                !string.Equals(value.ValueTypeId, valueType.Id, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"All scan inputs must use the selected Value Type '{valueType.DisplayName}'.");
+        }
+
+        if (!scanType.TryValidateInputValues(
+                valueType,
+                inputValues,
+                architecture,
+                stage,
+                out string validationError))
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(validationError)
+                    ? $"Scan Type '{scanType.DisplayName}' rejected the supplied input values."
+                    : validationError);
+        }
+    }
+
+    private static void ResolveScanShape(
+        IMemoryValueType valueType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        TargetArchitecture architecture,
+        MemoryScanOptions scanOptions,
+        out int valueSize,
+        out int alignment)
+    {
+        if (!valueType.TryResolveScanShape(
+                inputValues,
+                architecture,
+                out valueSize,
+                out alignment,
+                out string error))
+        {
+            throw new InvalidOperationException(
+                string.IsNullOrWhiteSpace(error)
+                    ? $"Value Type '{valueType.DisplayName}' could not resolve its scan width and alignment."
+                    : error);
+        }
+
+        if (valueSize <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Value Type '{valueType.DisplayName}' returned an invalid scan width of {valueSize}.");
+        }
+
+        if (alignment <= 0)
+        {
+            throw new InvalidOperationException(
+                $"Value Type '{valueType.DisplayName}' returned an invalid scan alignment of {alignment}.");
+        }
+
+        if (scanOptions.TryGetValue(
+                TeeKay87.MemoryEngine.PluginSdk.Scanning.StandardMemoryScanOptionIds.Alignment,
+                out string alignmentChoice) &&
+            !string.Equals(
+                alignmentChoice,
+                TeeKay87.MemoryEngine.PluginSdk.Scanning.StandardMemoryScanOptionChoiceIds.DefaultAlignment,
+                StringComparison.OrdinalIgnoreCase))
+        {
+            if (!int.TryParse(alignmentChoice, out int selectedAlignment) || selectedAlignment is < 1 or > byte.MaxValue)
+            {
+                throw new InvalidOperationException(
+                    $"The selected scan alignment '{alignmentChoice}' is not valid. Alignment must be between 1 and {byte.MaxValue} bytes.");
+            }
+
+            alignment = selectedAlignment;
+        }
+    }
+
+    private static NativeValueScanRequest CreateNativeRequest(
+        IMemoryValueType valueType,
+        IMemoryScanType scanType,
+        IReadOnlyList<MemoryScanValue> inputValues,
+        int valueSize,
+        int alignment,
+        MemoryScanOptions scanOptions)
+    {
+        return new NativeValueScanRequest(
+            valueType.Id,
+            scanType.Id,
+            valueSize,
+            alignment,
+            inputValues.Select(value => value.Bytes),
+            scanOptions);
     }
 
     private static void ValidateRefinementValueType(
         IReadOnlyList<MemoryScanResult> previousResults,
-        MemoryScanValue targetValue)
+        string valueTypeId,
+        int valueSize,
+        int alignment)
     {
-        MemoryValueType expectedType = previousResults[0].ValueType;
+        string expectedTypeId = previousResults[0].ValueTypeId;
         int expectedSize = previousResults[0].CurrentValue.Size;
         int expectedAlignment = previousResults[0].CurrentValue.Alignment;
 
-        if (targetValue.ValueType != expectedType ||
-            targetValue.Size != expectedSize ||
-            targetValue.Alignment != expectedAlignment ||
+        if (!string.Equals(valueTypeId, expectedTypeId, StringComparison.OrdinalIgnoreCase) ||
+            valueSize != expectedSize ||
+            alignment != expectedAlignment ||
             previousResults.Any(result =>
-                result.ValueType != expectedType ||
+                !string.Equals(result.ValueTypeId, expectedTypeId, StringComparison.OrdinalIgnoreCase) ||
                 result.CurrentValue.Size != expectedSize ||
                 result.CurrentValue.Alignment != expectedAlignment))
         {
             throw new InvalidOperationException(
-                "Next Scan must use the same Value Type and value width as the current scan session. Choose New Scan before changing Value Type.");
+                "Next Scan must use the same Value Type, value width, and alignment as the current scan session. Choose New Scan before changing Value Type.");
         }
     }
 

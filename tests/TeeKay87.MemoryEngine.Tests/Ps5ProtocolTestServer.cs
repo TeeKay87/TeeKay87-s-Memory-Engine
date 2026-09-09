@@ -1,5 +1,6 @@
 using System;
 using System.Buffers.Binary;
+using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Net;
@@ -28,6 +29,14 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
     private const uint CommandTurboScanGet = 0xBDAACC13;
     private const uint CommandTurboScanEnd = 0xBDAACC14;
     private const uint CommandProcessNop = 0xBDAACC06;
+    private const uint CommandDebugAttach = 0xBDBB0001;
+    private const uint CommandDebugDetach = 0xBDBB0002;
+    private const uint CommandDebugGetThreadList = 0xBDBB0005;
+    private const uint CommandDebugSuspendThread = 0xBDBB0006;
+    private const uint CommandDebugResumeThread = 0xBDBB0007;
+    private const uint CommandDebugGetRegisters = 0xBDBB0008;
+    private const uint CommandDebugContinue = 0xBDBB0010;
+    private const uint CommandDebugThreadInfo = 0xBDBB0011;
     private const uint CommandDebugProcessStop = 0xBDBB0500;
     private const uint WireStatusSuccess = 0x80000000;
     private const uint WireStatusError = 0xF0000001;
@@ -35,6 +44,10 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
     private const int ProcessEntrySize = 36;
     private const int ProcessMapNameLength = 32;
     private const int ProcessMapEntrySize = 58;
+    private const int DebuggerInterruptPort = 755;
+    private const int DebuggerInterruptPacketSize = 1184;
+    private const int DebuggerGeneralRegisterSize = 0xB0;
+    private const int DebuggerInterruptInstructionPointerOffset = 0xB8;
 
     private readonly CancellationTokenSource _cancellation = new();
     private readonly TcpListener _listener;
@@ -47,15 +60,36 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
     private readonly bool _serveNativeRefinement;
     private readonly bool _serveProcessControl;
     private readonly bool _serveFollowUpProcessList;
+    private readonly bool _serveDebugger;
+    private readonly int _debuggerSessionCount;
     private readonly int _memoryReadDelayMilliseconds;
     private readonly int _nativeScanDelayMilliseconds;
     private readonly byte _nativeValueType;
     private readonly byte _nativeAlignment;
+    private readonly byte _nativeStartCompareType;
+    private readonly byte _nativeRefinementValueType;
+    private readonly byte _nativeRefinementCompareType;
+    private readonly bool _nativeStartSnapshot;
+    private readonly int _nativeSnapshotProgressRecordCount;
+    private readonly int _nativeRefinementProgressRecordCount;
+    private readonly bool _nativeSnapshotStored;
     private readonly byte[] _nativeValueData;
+    private readonly byte[] _nativeStartComparisonData;
+    private readonly byte[] _nativeRefinementValueData;
+    private readonly byte[] _nativeRefinementReturnedCurrentValueData;
     private readonly TaskCompletionSource<bool> _memoryReadRequestReceived =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource<bool> _nativeScanRequestReceived =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskCompletionSource<bool> _debuggerAttached =
+        new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly object _debuggerEventGate = new();
+    private readonly SemaphoreSlim _debuggerEventWriteGate = new(1, 1);
+    private TcpClient? _debuggerEventClient;
+    private NetworkStream? _debuggerEventStream;
+    private readonly System.Collections.Generic.List<byte> _debuggerActions = new();
+    private readonly System.Collections.Generic.List<string> _debuggerThreadActions = new();
+    private readonly System.Collections.Generic.List<uint> _debuggerRegisterReadThreadIds = new();
 
     public Ps5ProtocolTestServer(
         bool serveProcessList = false,
@@ -66,11 +100,23 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
         bool serveNativeRefinement = false,
         bool serveProcessControl = false,
         bool serveFollowUpProcessList = false,
+        bool serveDebugger = false,
+        int debuggerSessionCount = 1,
         int memoryReadDelayMilliseconds = 0,
         int nativeScanDelayMilliseconds = 0,
         byte nativeValueType = 5,
         byte nativeAlignment = 4,
-        byte[]? nativeValueData = null)
+        byte nativeStartCompareType = 0,
+        byte? nativeRefinementValueType = null,
+        byte nativeRefinementCompareType = 0,
+        bool nativeStartSnapshot = false,
+        int nativeSnapshotProgressRecordCount = 0,
+        int nativeRefinementProgressRecordCount = 0,
+        bool nativeSnapshotStored = true,
+        byte[]? nativeValueData = null,
+        byte[]? nativeStartComparisonData = null,
+        byte[]? nativeRefinementValueData = null,
+        byte[]? nativeRefinementReturnedCurrentValueData = null)
     {
         _serveProcessList = serveProcessList;
         _serveMemoryMap = serveMemoryMap;
@@ -80,11 +126,47 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
         _serveNativeRefinement = serveNativeRefinement;
         _serveProcessControl = serveProcessControl;
         _serveFollowUpProcessList = serveFollowUpProcessList;
+        _serveDebugger = serveDebugger;
+        if (debuggerSessionCount < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(debuggerSessionCount));
+        }
+        _debuggerSessionCount = debuggerSessionCount;
         _memoryReadDelayMilliseconds = memoryReadDelayMilliseconds;
         _nativeScanDelayMilliseconds = nativeScanDelayMilliseconds;
         _nativeValueType = nativeValueType;
         _nativeAlignment = nativeAlignment;
+        _nativeStartCompareType = nativeStartCompareType;
+        _nativeRefinementValueType = nativeRefinementValueType ?? nativeValueType;
+        _nativeRefinementCompareType = nativeRefinementCompareType;
+        _nativeStartSnapshot = nativeStartSnapshot;
+        if (nativeSnapshotProgressRecordCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nativeSnapshotProgressRecordCount));
+        }
+
+        _nativeSnapshotProgressRecordCount = nativeSnapshotProgressRecordCount;
+        if (nativeRefinementProgressRecordCount < 0)
+        {
+            throw new ArgumentOutOfRangeException(nameof(nativeRefinementProgressRecordCount));
+        }
+
+        _nativeRefinementProgressRecordCount = nativeRefinementProgressRecordCount;
+        _nativeSnapshotStored = nativeSnapshotStored;
         _nativeValueData = nativeValueData?.ToArray() ?? BitConverter.GetBytes(10002);
+        _nativeStartComparisonData = nativeStartComparisonData?.ToArray() ?? _nativeValueData.ToArray();
+        _nativeRefinementValueData = nativeRefinementValueData?.ToArray() ?? BitConverter.GetBytes(10001);
+        _nativeRefinementReturnedCurrentValueData =
+            nativeRefinementReturnedCurrentValueData?.ToArray() ??
+            _nativeRefinementValueData.ToArray();
+        if (_serveNativeRefinement &&
+            _nativeRefinementReturnedCurrentValueData.Length != _nativeValueData.Length)
+        {
+            throw new ArgumentException(
+                "Native refinement GET test data must use the same byte width as the First Scan value.",
+                nameof(nativeRefinementReturnedCurrentValueData));
+        }
+
         _listener = new TcpListener(IPAddress.Loopback, 0);
         _listener.Start();
         Port = ((IPEndPoint)_listener.LocalEndpoint).Port;
@@ -99,9 +181,87 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
 
     public Task NativeScanRequestReceived => _nativeScanRequestReceived.Task;
 
+    public Task DebuggerAttached => _debuggerAttached.Task;
+
+    public IReadOnlyList<byte> DebuggerActions
+    {
+        get
+        {
+            lock (_debuggerEventGate)
+            {
+                return _debuggerActions.ToArray();
+            }
+        }
+    }
+
+    public IReadOnlyList<string> DebuggerThreadActions
+    {
+        get
+        {
+            lock (_debuggerEventGate)
+            {
+                return _debuggerThreadActions.ToArray();
+            }
+        }
+    }
+
+    public IReadOnlyList<uint> DebuggerRegisterReadThreadIds
+    {
+        get
+        {
+            lock (_debuggerEventGate)
+            {
+                return _debuggerRegisterReadThreadIds.ToArray();
+            }
+        }
+    }
+
+    public async Task SendDebuggerInterruptAsync(
+        uint threadId,
+        uint waitStatus,
+        ulong instructionPointer,
+        string threadName = "main")
+    {
+        await _debuggerAttached.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+
+        byte[] packet = new byte[DebuggerInterruptPacketSize];
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(0x000, sizeof(uint)), threadId);
+        BinaryPrimitives.WriteUInt32LittleEndian(packet.AsSpan(0x004, sizeof(uint)), waitStatus);
+        byte[] nameBytes = Encoding.UTF8.GetBytes(threadName ?? string.Empty);
+        nameBytes.AsSpan(0, Math.Min(nameBytes.Length, 39)).CopyTo(packet.AsSpan(0x008, 40));
+        BinaryPrimitives.WriteUInt64LittleEndian(
+            packet.AsSpan(DebuggerInterruptInstructionPointerOffset, sizeof(ulong)),
+            instructionPointer);
+
+        await _debuggerEventWriteGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            NetworkStream stream;
+            lock (_debuggerEventGate)
+            {
+                stream = _debuggerEventStream ??
+                    throw new InvalidOperationException("The test debugger event channel is not connected.");
+            }
+
+            await stream.WriteAsync(packet).ConfigureAwait(false);
+            await stream.FlushAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _debuggerEventWriteGate.Release();
+        }
+    }
+
     public async ValueTask DisposeAsync()
     {
         _cancellation.Cancel();
+        lock (_debuggerEventGate)
+        {
+            _debuggerEventStream?.Dispose();
+            _debuggerEventClient?.Dispose();
+            _debuggerEventStream = null;
+            _debuggerEventClient = null;
+        }
         _listener.Stop();
 
         try
@@ -115,6 +275,7 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
         {
         }
 
+        _debuggerEventWriteGate.Dispose();
         _cancellation.Dispose();
     }
 
@@ -145,7 +306,7 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
             await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
             byte[] caps = new byte[16];
             BinaryPrimitives.WriteUInt32LittleEndian(caps.AsSpan(0, sizeof(uint)), 1);
-            BinaryPrimitives.WriteUInt32LittleEndian(caps.AsSpan(4, sizeof(uint)), 0x00000004u | 0x00000010u);
+            BinaryPrimitives.WriteUInt32LittleEndian(caps.AsSpan(4, sizeof(uint)), 0x00000004u | 0x00000008u | 0x00000010u);
             BinaryPrimitives.WriteUInt32LittleEndian(caps.AsSpan(8, sizeof(uint)), 4);
             await stream.WriteAsync(caps, cancellationToken).ConfigureAwait(false);
         }
@@ -153,6 +314,10 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
         {
             await WriteUInt32Async(stream, WireStatusError, cancellationToken).ConfigureAwait(false);
         }
+
+        Task? debuggerTask = _serveDebugger
+            ? RunDebuggerAsync(cancellationToken)
+            : null;
 
         if (_serveProcessList)
         {
@@ -316,17 +481,20 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
             uint dataLength = BinaryPrimitives.ReadUInt32LittleEndian(request.AsSpan(19, sizeof(uint)));
             uint flags = BinaryPrimitives.ReadUInt32LittleEndian(request.AsSpan(23, sizeof(uint)));
 
-            if (processId != 2222 || valueType != _nativeValueType || compareType != 0 || alignment != _nativeAlignment ||
-                dataLength != _nativeValueData.Length || flags != (0x00000002u | 0x00000010u))
+            uint expectedStartFlags = _nativeStartSnapshot
+                ? 0x00000004u | 0x00000008u | 0x00000010u
+                : 0x00000002u | 0x00000010u;
+            if (processId != 2222 || valueType != _nativeValueType || compareType != _nativeStartCompareType || alignment != _nativeAlignment ||
+                dataLength != _nativeStartComparisonData.Length || flags != expectedStartFlags)
             {
                 throw new InvalidDataException(
                     $"Unexpected TurboScan START shape: pid={processId}, valueType={valueType}, compareType={compareType}, alignment={alignment}, dataLength={dataLength}, flags=0x{flags:X8}.");
             }
 
             await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
-            byte[] comparisonValue = new byte[_nativeValueData.Length];
+            byte[] comparisonValue = new byte[_nativeStartComparisonData.Length];
             await stream.ReadExactlyAsync(comparisonValue, cancellationToken).ConfigureAwait(false);
-            if (!comparisonValue.SequenceEqual(_nativeValueData))
+            if (!comparisonValue.SequenceEqual(_nativeStartComparisonData))
             {
                 throw new InvalidDataException("Unexpected TurboScan comparison value bytes.");
             }
@@ -363,13 +531,42 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
                 await Task.Delay(_nativeScanDelayMilliseconds, cancellationToken).ConfigureAwait(false);
             }
 
-            byte[] summary = new byte[12];
-            BinaryPrimitives.WriteUInt32LittleEndian(summary.AsSpan(0, sizeof(uint)), 1);
-            BinaryPrimitives.WriteUInt64LittleEndian(summary.AsSpan(4, sizeof(ulong)), 2);
-            await stream.WriteAsync(summary, cancellationToken).ConfigureAwait(false);
-            await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+            if (_nativeStartSnapshot)
+            {
+                byte[] plan = new byte[16];
+                ulong slotCount = checked((ulong)Math.Max(2, _nativeSnapshotProgressRecordCount));
+                BinaryPrimitives.WriteUInt64LittleEndian(plan.AsSpan(0, sizeof(ulong)), slotCount);
+                BinaryPrimitives.WriteUInt64LittleEndian(plan.AsSpan(sizeof(ulong), sizeof(ulong)), 0x00031000);
+                await stream.WriteAsync(plan, cancellationToken).ConfigureAwait(false);
 
-            if (_nativeScanDelayMilliseconds == 0)
+                for (int index = 0; index < _nativeSnapshotProgressRecordCount; index++)
+                {
+                    await WriteUInt64Async(stream, checked((ulong)index + 1), cancellationToken).ConfigureAwait(false);
+                }
+
+                await WriteUInt64Async(stream, ulong.MaxValue, cancellationToken).ConfigureAwait(false);
+
+                byte[] summary = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(
+                    summary.AsSpan(0, sizeof(uint)),
+                    _nativeSnapshotStored ? 1u : 0u);
+                BinaryPrimitives.WriteUInt64LittleEndian(
+                    summary.AsSpan(4, sizeof(ulong)),
+                    _nativeSnapshotStored ? 2ul : 0ul);
+                await stream.WriteAsync(summary, cancellationToken).ConfigureAwait(false);
+                await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+            }
+            else
+            {
+                byte[] summary = new byte[12];
+                BinaryPrimitives.WriteUInt32LittleEndian(summary.AsSpan(0, sizeof(uint)), 1);
+                BinaryPrimitives.WriteUInt64LittleEndian(summary.AsSpan(4, sizeof(ulong)), 2);
+                await stream.WriteAsync(summary, cancellationToken).ConfigureAwait(false);
+                await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+            }
+
+            bool nativeSessionCreated = !_nativeStartSnapshot || _nativeSnapshotStored;
+            if (_nativeScanDelayMilliseconds == 0 && nativeSessionCreated)
             {
                 byte[] get = await ExpectCommandBodyAsync(
                         stream,
@@ -406,20 +603,24 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
                     byte countCompareType = countRequest[13];
                     uint countDataLength = BinaryPrimitives.ReadUInt32LittleEndian(countRequest.AsSpan(14, sizeof(uint)));
                     uint countFlags = BinaryPrimitives.ReadUInt32LittleEndian(countRequest.AsSpan(18, sizeof(uint)));
-                    if (countPid != 2222 || baseAddress != 0 || countValueType != 5 || countCompareType != 0 ||
-                        countDataLength != sizeof(int) || countFlags != 0x00000002u)
+                    if (countPid != 2222 || baseAddress != 0 || countValueType != _nativeRefinementValueType || countCompareType != _nativeRefinementCompareType ||
+                        countDataLength != _nativeRefinementValueData.Length || countFlags != 0x00000002u)
                     {
                         throw new InvalidDataException(
                             $"Unexpected TurboScan COUNT shape: pid={countPid}, base=0x{baseAddress:X}, valueType={countValueType}, compareType={countCompareType}, dataLength={countDataLength}, flags=0x{countFlags:X8}.");
                     }
 
                     await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
-                    byte[] nextValueBytes = new byte[sizeof(int)];
+                    byte[] nextValueBytes = new byte[_nativeRefinementValueData.Length];
                     await stream.ReadExactlyAsync(nextValueBytes, cancellationToken).ConfigureAwait(false);
-                    int nextValue = BinaryPrimitives.ReadInt32LittleEndian(nextValueBytes);
-                    if (nextValue != 10001)
+                    if (!nextValueBytes.SequenceEqual(_nativeRefinementValueData))
                     {
-                        throw new InvalidDataException($"Unexpected TurboScan refinement value {nextValue}; expected 10001.");
+                        throw new InvalidDataException("Unexpected TurboScan refinement value bytes.");
+                    }
+
+                    for (int index = 0; index < _nativeRefinementProgressRecordCount; index++)
+                    {
+                        await WriteUInt64Async(stream, checked((ulong)index + 1), cancellationToken).ConfigureAwait(false);
                     }
 
                     await WriteUInt64Async(stream, ulong.MaxValue, cancellationToken).ConfigureAwait(false);
@@ -442,13 +643,22 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
 
                     await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
                     await WriteUInt32Async(stream, 1, cancellationToken).ConfigureAwait(false);
-                    await WriteTurboGetRecordAsync(stream, 0x0000000200000080, BitConverter.GetBytes(10001), BitConverter.GetBytes(10002), cancellationToken).ConfigureAwait(false);
+                    await WriteTurboGetRecordAsync(
+                            stream,
+                            0x0000000200000080,
+                            _nativeRefinementReturnedCurrentValueData,
+                            _nativeValueData,
+                            cancellationToken)
+                        .ConfigureAwait(false);
                     await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
                 }
             }
 
-            await ExpectCommandAsync(stream, CommandTurboScanEnd, cancellationToken).ConfigureAwait(false);
-            await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+            if (nativeSessionCreated)
+            {
+                await ExpectCommandAsync(stream, CommandTurboScanEnd, cancellationToken).ConfigureAwait(false);
+                await WriteUInt32Async(stream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         if (_serveProcessControl)
@@ -462,6 +672,247 @@ internal sealed class Ps5ProtocolTestServer : IAsyncDisposable
             await ExpectCommandAsync(stream, CommandProcessList, cancellationToken).ConfigureAwait(false);
             await WriteProcessListAsync(stream, cancellationToken).ConfigureAwait(false);
         }
+
+        if (debuggerTask is not null)
+        {
+            await debuggerTask.ConfigureAwait(false);
+        }
+    }
+
+    private async Task RunDebuggerAsync(CancellationToken cancellationToken)
+    {
+        for (int sessionIndex = 0; sessionIndex < _debuggerSessionCount; sessionIndex++)
+        {
+            using TcpClient commandClient = await _listener
+                .AcceptTcpClientAsync(cancellationToken)
+                .ConfigureAwait(false);
+            using NetworkStream commandStream = commandClient.GetStream();
+
+            byte[] attach = await ExpectCommandBodyAsync(
+                    commandStream,
+                    CommandDebugAttach,
+                    sizeof(int),
+                    cancellationToken)
+                .ConfigureAwait(false);
+            int processId = BinaryPrimitives.ReadInt32LittleEndian(attach);
+            if (processId != 2222)
+            {
+                throw new InvalidDataException($"Unexpected debugger attach PID {processId}; expected 2222.");
+            }
+
+            TcpClient eventClient = new();
+            eventClient.NoDelay = true;
+            await eventClient.ConnectAsync(IPAddress.Loopback, DebuggerInterruptPort, cancellationToken).ConfigureAwait(false);
+            NetworkStream eventStream = eventClient.GetStream();
+            lock (_debuggerEventGate)
+            {
+                _debuggerEventClient = eventClient;
+                _debuggerEventStream = eventStream;
+            }
+
+            await WriteUInt32Async(commandStream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+            _debuggerAttached.TrySetResult(true);
+
+            bool detached = false;
+            while (!detached && !cancellationToken.IsCancellationRequested)
+            {
+                byte[] header = new byte[12];
+                await commandStream.ReadExactlyAsync(header, cancellationToken).ConfigureAwait(false);
+                uint magic = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(0, sizeof(uint)));
+                uint command = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(4, sizeof(uint)));
+                uint bodyLength = BinaryPrimitives.ReadUInt32LittleEndian(header.AsSpan(8, sizeof(uint)));
+                if (magic != PacketMagic)
+                {
+                    throw new InvalidDataException($"Unexpected debugger packet magic 0x{magic:X8}.");
+                }
+
+
+                if (command == CommandDebugGetThreadList)
+                {
+                    if (bodyLength != 0)
+                    {
+                        throw new InvalidDataException($"Debugger thread-list sent {bodyLength} bytes; expected 0.");
+                    }
+
+                    await WriteUInt32Async(commandStream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+                    uint[] threadIds = { 0x101, 0x102, 0x103 };
+                    await WriteUInt32Async(commandStream, checked((uint)threadIds.Length), cancellationToken).ConfigureAwait(false);
+                    byte[] payload = new byte[threadIds.Length * sizeof(uint)];
+                    for (int index = 0; index < threadIds.Length; index++)
+                    {
+                        BinaryPrimitives.WriteUInt32LittleEndian(
+                            payload.AsSpan(index * sizeof(uint), sizeof(uint)),
+                            threadIds[index]);
+                    }
+                    await commandStream.WriteAsync(payload, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (command == CommandDebugThreadInfo)
+                {
+                    if (bodyLength != sizeof(uint))
+                    {
+                        throw new InvalidDataException($"Debugger thread-info sent {bodyLength} bytes; expected 4.");
+                    }
+
+                    byte[] body = new byte[sizeof(uint)];
+                    await commandStream.ReadExactlyAsync(body, cancellationToken).ConfigureAwait(false);
+                    uint threadId = BinaryPrimitives.ReadUInt32LittleEndian(body);
+                    string name = threadId switch
+                    {
+                        0x101 => "MainThread",
+                        0x102 => "Worker",
+                        0x103 => "Render",
+                        _ => string.Empty
+                    };
+
+                    if (name.Length == 0)
+                    {
+                        await WriteUInt32Async(commandStream, WireStatusError, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    await WriteUInt32Async(commandStream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+                    byte[] response = new byte[40];
+                    BinaryPrimitives.WriteUInt32LittleEndian(response.AsSpan(0, sizeof(uint)), threadId);
+                    BinaryPrimitives.WriteUInt32LittleEndian(response.AsSpan(sizeof(uint), sizeof(uint)), 10 + threadId);
+                    byte[] nameBytes = Encoding.UTF8.GetBytes(name);
+                    nameBytes.AsSpan(0, Math.Min(nameBytes.Length, 31)).CopyTo(response.AsSpan(8, 32));
+                    await commandStream.WriteAsync(response, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (command == CommandDebugGetRegisters)
+                {
+                    if (bodyLength != sizeof(uint))
+                    {
+                        throw new InvalidDataException($"Debugger register read sent {bodyLength} bytes; expected 4.");
+                    }
+
+                    byte[] body = new byte[sizeof(uint)];
+                    await commandStream.ReadExactlyAsync(body, cancellationToken).ConfigureAwait(false);
+                    uint threadId = BinaryPrimitives.ReadUInt32LittleEndian(body);
+                    if (threadId is not (0x101 or 0x102 or 0x103))
+                    {
+                        await WriteUInt32Async(commandStream, WireStatusError, cancellationToken).ConfigureAwait(false);
+                        continue;
+                    }
+
+                    lock (_debuggerEventGate)
+                    {
+                        _debuggerRegisterReadThreadIds.Add(threadId);
+                    }
+
+                    await WriteUInt32Async(commandStream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+                    await commandStream.WriteAsync(BuildDebuggerRegisterBlob(threadId), cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (command == CommandDebugSuspendThread || command == CommandDebugResumeThread)
+                {
+                    if (bodyLength != sizeof(uint))
+                    {
+                        throw new InvalidDataException($"Debugger thread-control sent {bodyLength} bytes; expected 4.");
+                    }
+
+                    byte[] body = new byte[sizeof(uint)];
+                    await commandStream.ReadExactlyAsync(body, cancellationToken).ConfigureAwait(false);
+                    uint threadId = BinaryPrimitives.ReadUInt32LittleEndian(body);
+                    if (threadId is not (0x101 or 0x102 or 0x103))
+                    {
+                        throw new InvalidDataException($"Unexpected debugger thread id 0x{threadId:X}.");
+                    }
+
+                    lock (_debuggerEventGate)
+                    {
+                        _debuggerThreadActions.Add(
+                            $"{(command == CommandDebugSuspendThread ? "suspend" : "resume")}:0x{threadId:X}");
+                    }
+                    await WriteUInt32Async(commandStream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (command == CommandDebugContinue)
+                {
+                    if (bodyLength != 4)
+                    {
+                        throw new InvalidDataException($"Debugger continue sent {bodyLength} bytes; expected 4.");
+                    }
+
+                    byte[] body = new byte[4];
+                    await commandStream.ReadExactlyAsync(body, cancellationToken).ConfigureAwait(false);
+                    lock (_debuggerEventGate)
+                    {
+                        _debuggerActions.Add(body[0]);
+                    }
+                    await WriteUInt32Async(commandStream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+                    continue;
+                }
+
+                if (command == CommandDebugDetach)
+                {
+                    if (bodyLength != 0)
+                    {
+                        throw new InvalidDataException($"Debugger detach sent {bodyLength} bytes; expected 0.");
+                    }
+
+                    await WriteUInt32Async(commandStream, WireStatusSuccess, cancellationToken).ConfigureAwait(false);
+                    detached = true;
+                    continue;
+                }
+
+                throw new InvalidDataException($"Unexpected debugger command 0x{command:X8}.");
+            }
+
+            lock (_debuggerEventGate)
+            {
+                _debuggerEventStream?.Dispose();
+                _debuggerEventClient?.Dispose();
+                _debuggerEventStream = null;
+                _debuggerEventClient = null;
+            }
+        }
+    }
+
+    private static byte[] BuildDebuggerRegisterBlob(uint threadId)
+    {
+        byte[] registers = new byte[DebuggerGeneralRegisterSize];
+        ulong seed = 0x1000000000000000UL + threadId;
+
+        static void Write64(byte[] target, int offset, ulong value) =>
+            BinaryPrimitives.WriteUInt64LittleEndian(target.AsSpan(offset, sizeof(ulong)), value);
+        static void Write32(byte[] target, int offset, uint value) =>
+            BinaryPrimitives.WriteUInt32LittleEndian(target.AsSpan(offset, sizeof(uint)), value);
+        static void Write16(byte[] target, int offset, ushort value) =>
+            BinaryPrimitives.WriteUInt16LittleEndian(target.AsSpan(offset, sizeof(ushort)), value);
+
+        Write64(registers, 0x00, seed + 0x0F); // r15
+        Write64(registers, 0x08, seed + 0x0E); // r14
+        Write64(registers, 0x10, seed + 0x0D); // r13
+        Write64(registers, 0x18, seed + 0x0C); // r12
+        Write64(registers, 0x20, seed + 0x0B); // r11
+        Write64(registers, 0x28, seed + 0x0A); // r10
+        Write64(registers, 0x30, seed + 0x09); // r9
+        Write64(registers, 0x38, seed + 0x08); // r8
+        Write64(registers, 0x40, seed + 0x06); // rdi
+        Write64(registers, 0x48, seed + 0x05); // rsi
+        Write64(registers, 0x50, 0x7000000000000100UL + threadId); // rbp
+        Write64(registers, 0x58, seed + 0x02); // rbx
+        Write64(registers, 0x60, seed + 0x04); // rdx
+        Write64(registers, 0x68, seed + 0x03); // rcx
+        Write64(registers, 0x70, seed + 0x01); // rax
+        Write32(registers, 0x78, 0x12);
+        Write16(registers, 0x7C, 0x20);
+        Write16(registers, 0x7E, 0x30);
+        Write32(registers, 0x80, 0x34);
+        Write16(registers, 0x84, 0x40);
+        Write16(registers, 0x86, 0x50);
+        Write64(registers, 0x88, 0x0000000000420000UL + threadId);
+        Write64(registers, 0x90, 0x33);
+        Write64(registers, 0x98, 0x202);
+        Write64(registers, 0xA0, 0x7000000000000000UL + threadId);
+        Write64(registers, 0xA8, 0x2B);
+        return registers;
     }
 
     private static void ValidateTurboSegment(ReadOnlySpan<byte> segment, ulong expectedAddress, uint expectedLength)

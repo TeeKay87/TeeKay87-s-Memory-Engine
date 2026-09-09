@@ -1,19 +1,3 @@
-namespace TeeKay87.MemoryEngine.PluginSdk.Models;
-
-public enum MemoryValueType
-{
-    Int8,
-    UInt8,
-    Int16,
-    UInt16,
-    Int32,
-    UInt32,
-    Int64,
-    UInt64,
-    Float32,
-    Float64,
-    ByteArray,
-    Ascii,
-    Utf8,
-    Utf16
-}
+// Intentionally retained as an upgrade tombstone.
+// The rev2 MemoryValueType enum was replaced by plugin-owned IMemoryValueType definitions in Plugin API 2.0.0.
+// Keeping this source path ensures an incremental source-package extraction overwrites the obsolete enum source.

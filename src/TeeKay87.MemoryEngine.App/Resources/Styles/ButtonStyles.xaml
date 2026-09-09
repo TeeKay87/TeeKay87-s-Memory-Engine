@@ -6,7 +6,7 @@
         <Setter Property="Background" Value="{DynamicResource SecondaryButtonBackgroundBrush}" />
         <Setter Property="BorderBrush" Value="{DynamicResource SecondaryButtonBorderBrush}" />
         <Setter Property="BorderThickness" Value="1" />
-        <Setter Property="Padding" Value="14,8" />
+        <Setter Property="Padding" Value="14,2" />
         <Setter Property="Height" Value="{x:Static application:UiMetrics.StandardControlHeight}" />
         <Setter Property="HorizontalContentAlignment" Value="Center" />
         <Setter Property="VerticalContentAlignment" Value="Center" />
@@ -32,12 +32,43 @@
                                         CornerRadius="4"
                                         Opacity="0"
                                         IsHitTestVisible="False" />
-                                <ContentPresenter Margin="{TemplateBinding Padding}"
+                                <ContentPresenter x:Name="ButtonContent"
+                                                  Margin="{TemplateBinding Padding}"
                                                   TextElement.Foreground="{TemplateBinding Foreground}"
                                                   HorizontalAlignment="{TemplateBinding HorizontalContentAlignment}"
                                                   VerticalAlignment="{TemplateBinding VerticalContentAlignment}"
                                                   RecognizesAccessKey="True"
-                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}" />
+                                                  SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}">
+                                    <ContentPresenter.Resources>
+                                        <!--
+                                            WPF may materialize string button content as AccessText or TextBlock.
+                                            Give both generated text elements a local style so application-level
+                                            text styles cannot override the button's semantic/disabled foreground.
+                                        -->
+                                        <Style TargetType="{x:Type AccessText}">
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                            <Setter Property="Foreground"
+                                                    Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                                             Value="False">
+                                                    <Setter Property="Foreground" Value="{DynamicResource DisabledButtonTextBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                        <Style TargetType="{x:Type TextBlock}">
+                                            <Setter Property="VerticalAlignment" Value="Center" />
+                                            <Setter Property="Foreground"
+                                                    Value="{Binding Foreground, RelativeSource={RelativeSource AncestorType={x:Type Button}}}" />
+                                            <Style.Triggers>
+                                                <DataTrigger Binding="{Binding IsEnabled, RelativeSource={RelativeSource AncestorType={x:Type Button}}}"
+                                                             Value="False">
+                                                    <Setter Property="Foreground" Value="{DynamicResource DisabledButtonTextBrush}" />
+                                                </DataTrigger>
+                                            </Style.Triggers>
+                                        </Style>
+                                    </ContentPresenter.Resources>
+                                </ContentPresenter>
                             </Grid>
                         </Border>
 
@@ -64,6 +95,9 @@
                             <Setter TargetName="FocusBorder" Property="Opacity" Value="1" />
                         </Trigger>
                         <Trigger Property="IsEnabled" Value="False">
+                            <Setter TargetName="ButtonBorder" Property="Background" Value="{DynamicResource DisabledButtonBackgroundBrush}" />
+                            <Setter TargetName="ButtonBorder" Property="BorderBrush" Value="{DynamicResource DisabledButtonBorderBrush}" />
+                            <Setter TargetName="ButtonContent" Property="TextElement.Foreground" Value="{DynamicResource DisabledButtonTextBrush}" />
                             <Setter TargetName="InteractionOverlay" Property="Opacity" Value="0" />
                             <Setter TargetName="FocusBorder" Property="Opacity" Value="0" />
                         </Trigger>

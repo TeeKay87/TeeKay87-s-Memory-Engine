@@ -66,6 +66,17 @@ public sealed class ThemeManager
             ["PressedOverlay"] = "ButtonPressedOverlayBrush"
         });
 
+    private static readonly IReadOnlyDictionary<string, (string ResourceKey, string FallbackPaletteKey)> OptionalPaletteResourceKeys =
+        new ReadOnlyDictionary<string, (string ResourceKey, string FallbackPaletteKey)>(
+            new Dictionary<string, (string ResourceKey, string FallbackPaletteKey)>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["DisassemblyMnemonic"] = ("DisassemblyMnemonicBrush", "Accent"),
+                ["DisassemblyFlowControl"] = ("DisassemblyFlowControlBrush", "WarningText"),
+                ["DisassemblyRegister"] = ("DisassemblyRegisterBrush", "SuccessText"),
+                ["DisassemblyNumber"] = ("DisassemblyNumberBrush", "WarningText"),
+                ["DisassemblyKeyword"] = ("DisassemblyKeywordBrush", "SecondaryText")
+            });
+
     private readonly ResourceDictionary _applicationResources;
     private readonly string _themeDirectory;
     private readonly ThemePreferenceStore _preferenceStore;
@@ -221,6 +232,23 @@ public sealed class ThemeManager
             _applicationResources[resourceKey] = brush;
         }
 
+        foreach (KeyValuePair<string, (string ResourceKey, string FallbackPaletteKey)> entry in OptionalPaletteResourceKeys)
+        {
+            Color color = theme.Colors[entry.Key];
+            SolidColorBrush brush = new(color);
+            brush.Freeze();
+            _applicationResources[entry.Value.ResourceKey] = brush;
+        }
+
+        Color successColor = theme.Colors["SuccessText"];
+        SolidColorBrush successMutedBrush = new(Color.FromArgb(
+            0x38,
+            successColor.R,
+            successColor.G,
+            successColor.B));
+        successMutedBrush.Freeze();
+        _applicationResources["SuccessMutedBrush"] = successMutedBrush;
+
         ActiveTheme = theme.Descriptor;
 
         if (persistSelection)
@@ -305,6 +333,20 @@ public sealed class ThemeManager
             }
 
             colors[paletteKey] = ParseColor(value, paletteKey, path);
+        }
+
+        foreach (KeyValuePair<string, (string ResourceKey, string FallbackPaletteKey)> entry in OptionalPaletteResourceKeys)
+        {
+            string paletteKey = entry.Key;
+            if (normalizedColors.TryGetValue(paletteKey, out string? value) &&
+                !string.IsNullOrWhiteSpace(value))
+            {
+                colors[paletteKey] = ParseColor(value, paletteKey, path);
+            }
+            else
+            {
+                colors[paletteKey] = colors[entry.Value.FallbackPaletteKey];
+            }
         }
 
         string canonicalThemeId = ResolveThemeId(definition.Id)

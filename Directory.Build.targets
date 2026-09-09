@@ -1,0 +1,44 @@
+<Project>
+  <PropertyGroup>
+    <PlatformPluginOutputDirectory Condition="'$(PlatformPluginOutputDirectory)' == ''">$(OutDir)Plugins</PlatformPluginOutputDirectory>
+  </PropertyGroup>
+
+  <Target Name="GetPluginDeploymentFiles"
+          DependsOnTargets="Build"
+          Returns="@(PluginDeploymentFile)">
+    <ItemGroup>
+      <PluginDeploymentFile Include="$(TargetPath)" />
+      <PluginDeploymentFile Include="$(TargetDir)$(AssemblyName).deps.json"
+                            Condition="Exists('$(TargetDir)$(AssemblyName).deps.json')" />
+      <PluginDeploymentFile Include="@(ReferenceCopyLocalPaths)"
+                            Condition="'%(ReferenceCopyLocalPaths.Filename)' != 'TeeKay87.MemoryEngine.PluginSdk'" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CopyPlatformPluginDeployments"
+          AfterTargets="Build">
+    <ItemGroup>
+      <PlatformPluginDeploymentProject Include="@(ProjectReference)"
+                                       Condition="'%(ProjectReference.DeployAsPlugin)' == 'true'" />
+    </ItemGroup>
+
+    <MSBuild Projects="@(PlatformPluginDeploymentProject)"
+             Targets="GetPluginDeploymentFiles"
+             Properties="Configuration=$(Configuration)"
+             Condition="'@(PlatformPluginDeploymentProject)' != ''">
+      <Output TaskParameter="TargetOutputs" ItemName="PlatformPluginFiles" />
+    </MSBuild>
+
+    <RemoveDuplicates Inputs="@(PlatformPluginFiles)"
+                      Condition="'@(PlatformPluginFiles)' != ''">
+      <Output TaskParameter="Filtered" ItemName="PlatformPluginDeploymentFiles" />
+    </RemoveDuplicates>
+
+    <MakeDir Directories="$(PlatformPluginOutputDirectory)"
+             Condition="'@(PlatformPluginDeploymentFiles)' != ''" />
+    <Copy SourceFiles="@(PlatformPluginDeploymentFiles)"
+          DestinationFolder="$(PlatformPluginOutputDirectory)"
+          SkipUnchangedFiles="true"
+          Condition="'@(PlatformPluginDeploymentFiles)' != ''" />
+  </Target>
+</Project>

@@ -30,5 +30,6 @@ public enum TargetCapabilities : ulong
     StepExecution = 1UL << 21,
     CheatApplication = 1UL << 22,
     CheatValidation = 1UL << 23,
-    CheatExport = 1UL << 24
+    CheatExport = 1UL << 24,
+    ThreadControl = 1UL << 25
 }

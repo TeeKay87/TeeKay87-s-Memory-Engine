@@ -1,25 +1,45 @@
 using System;
+using System.Collections.Generic;
+using System.Linq;
 
 namespace TeeKay87.MemoryEngine.PluginSdk.Models;
 
-public enum ValueScanComparison
-{
-    ExactValue
-}
-
 public sealed class NativeValueScanRequest
 {
-    private readonly byte[] _valueData;
+    private readonly IReadOnlyList<ReadOnlyMemory<byte>> _inputValues;
 
     public NativeValueScanRequest(
-        MemoryValueType valueType,
-        ValueScanComparison comparison,
-        ReadOnlySpan<byte> valueData,
-        int alignment)
+        string valueTypeId,
+        string scanTypeId,
+        int valueSize,
+        int alignment,
+        IEnumerable<ReadOnlyMemory<byte>> inputValues)
+        : this(
+            valueTypeId,
+            scanTypeId,
+            valueSize,
+            alignment,
+            inputValues,
+            MemoryScanOptions.Empty)
     {
-        if (valueData.IsEmpty)
+    }
+
+    public NativeValueScanRequest(
+        string valueTypeId,
+        string scanTypeId,
+        int valueSize,
+        int alignment,
+        IEnumerable<ReadOnlyMemory<byte>> inputValues,
+        MemoryScanOptions scanOptions)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(valueTypeId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(scanTypeId);
+        ArgumentNullException.ThrowIfNull(inputValues);
+        ArgumentNullException.ThrowIfNull(scanOptions);
+
+        if (valueSize <= 0)
         {
-            throw new ArgumentException("Native value scans require comparison data.", nameof(valueData));
+            throw new ArgumentOutOfRangeException(nameof(valueSize));
         }
 
         if (alignment <= 0)
@@ -27,17 +47,25 @@ public sealed class NativeValueScanRequest
             throw new ArgumentOutOfRangeException(nameof(alignment));
         }
 
-        ValueType = valueType;
-        Comparison = comparison;
+        ValueTypeId = valueTypeId;
+        ScanTypeId = scanTypeId;
+        ValueSize = valueSize;
         Alignment = alignment;
-        _valueData = valueData.ToArray();
+        ScanOptions = scanOptions;
+        _inputValues = Array.AsReadOnly(inputValues
+            .Select(value => (ReadOnlyMemory<byte>)value.ToArray())
+            .ToArray());
     }
 
-    public MemoryValueType ValueType { get; }
+    public string ValueTypeId { get; }
 
-    public ValueScanComparison Comparison { get; }
+    public string ScanTypeId { get; }
+
+    public int ValueSize { get; }
 
     public int Alignment { get; }
 
-    public ReadOnlyMemory<byte> ValueData => _valueData;
+    public MemoryScanOptions ScanOptions { get; }
+
+    public IReadOnlyList<ReadOnlyMemory<byte>> InputValues => _inputValues;
 }

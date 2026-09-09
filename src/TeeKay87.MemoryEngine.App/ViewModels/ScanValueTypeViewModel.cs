@@ -1,14 +1,17 @@
-using TeeKay87.MemoryEngine.Core.Scanning;
-using TeeKay87.MemoryEngine.PluginSdk.Models;
+using System;
+using TeeKay87.MemoryEngine.PluginSdk.Contracts;
 
 namespace TeeKay87.MemoryEngine.App.ViewModels;
 
-public sealed record ScanValueTypeViewModel(MemoryValueType ValueType, string DisplayName)
+public sealed record ScanValueTypeViewModel(IMemoryValueType ValueType)
 {
-    public static ScanValueTypeViewModel Create(MemoryValueType valueType)
-    {
-        return new ScanValueTypeViewModel(valueType, MemoryScanValueCodec.GetDisplayName(valueType));
-    }
+    public string Id => ValueType.Id;
+
+    public string DisplayName => ValueType.DisplayName;
+
+    public string Description => ValueType.Description;
+
+    public string InputDescription => ValueType.InputDescription;
 
     public override string ToString() => DisplayName;
 }

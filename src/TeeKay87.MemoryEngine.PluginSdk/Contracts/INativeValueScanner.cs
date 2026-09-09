@@ -7,7 +7,7 @@ namespace TeeKay87.MemoryEngine.PluginSdk.Contracts;
 
 public interface INativeValueScanner
 {
-    Task<IReadOnlyList<ulong>> ScanAsync(
+    Task<IReadOnlyList<NativeValueScanResult>> ScanAsync(
         TargetProcess process,
         IReadOnlyList<MemoryRegion> memoryRegions,
         NativeValueScanRequest request,

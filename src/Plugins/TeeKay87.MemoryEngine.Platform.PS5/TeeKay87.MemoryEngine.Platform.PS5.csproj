@@ -3,8 +3,10 @@
     <TargetFramework>net9.0</TargetFramework>
     <AssemblyName>TeeKay87.MemoryEngine.Platform.PS5</AssemblyName>
     <RootNamespace>TeeKay87.MemoryEngine.Platform.PS5</RootNamespace>
+    <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\..\TeeKay87.MemoryEngine.PluginSdk\TeeKay87.MemoryEngine.PluginSdk.csproj" />
+    <PackageReference Include="Iced" Version="1.21.0" />
   </ItemGroup>
 </Project>

@@ -17,16 +17,25 @@ internal sealed class Ps5TargetSession :
     IMemoryWriter,
     INativeValueScanner,
     INativeValueScanRefiner,
+    INativeValueScanStreamProvider,
+    INativeValueScanStreamRefiner,
+    INativeScanTypeMappingProvider,
     IProcessControl
 {
+    private static readonly IDisassemblerProvider DisassemblerProvider = new Ps5X64DisassemblerProvider();
+
     private readonly Ps5DebugClient _client;
+    private readonly Ps5ConcurrentMemoryWriter _concurrentMemoryWriter;
+    private readonly Ps5DebuggerProvider _debuggerProvider;
     private IReadOnlyList<TargetProcess> _lastProcesses = Array.Empty<TargetProcess>();
     private bool _disposed;
 
-    public Ps5TargetSession(PluginMetadata plugin, Ps5DebugClient client)
+    public Ps5TargetSession(PluginMetadata plugin, Ps5DebugClient client, string host, int port)
     {
         Plugin = plugin ?? throw new ArgumentNullException(nameof(plugin));
         _client = client ?? throw new ArgumentNullException(nameof(client));
+        _concurrentMemoryWriter = new Ps5ConcurrentMemoryWriter(host, port);
+        _debuggerProvider = new Ps5DebuggerProvider(host, port);
     }
 
     public PluginMetadata Plugin { get; }
@@ -35,12 +44,31 @@ internal sealed class Ps5TargetSession :
 
     public bool IsConnected => !_disposed && _client.IsConnected;
 
+    public IReadOnlyList<NativeScanTypeMapping> NativeScanTypeMappings => Ps5NativeScanTypeMappings.All;
+
     public TService? GetService<TService>() where TService : class
     {
         ObjectDisposedException.ThrowIf(_disposed, this);
 
+        if (typeof(TService) == typeof(IConcurrentMemoryWriter))
+        {
+            return _concurrentMemoryWriter as TService;
+        }
+
+        if (typeof(TService) == typeof(IDisassemblerProvider))
+        {
+            return DisassemblerProvider as TService;
+        }
+
+        if (typeof(TService) == typeof(IDebuggerProvider))
+        {
+            return _debuggerProvider as TService;
+        }
+
         if ((typeof(TService) == typeof(INativeValueScanner) ||
-             typeof(TService) == typeof(INativeValueScanRefiner)) &&
+             typeof(TService) == typeof(INativeValueScanRefiner) ||
+             typeof(TService) == typeof(INativeValueScanStreamProvider) ||
+             typeof(TService) == typeof(INativeValueScanStreamRefiner)) &&
             !_client.SupportsTurboValueScan)
         {
             return null;
@@ -158,7 +186,7 @@ internal sealed class Ps5TargetSession :
             .ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<ulong>> ScanAsync(
+    public async Task<IReadOnlyList<NativeValueScanResult>> ScanAsync(
         TargetProcess process,
         IReadOnlyList<MemoryRegion> memoryRegions,
         NativeValueScanRequest request,
@@ -185,7 +213,34 @@ internal sealed class Ps5TargetSession :
             .ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyList<ulong>> RefineAsync(
+    public async Task<INativeValueScanResultStream> StartScanAsync(
+        TargetProcess process,
+        IReadOnlyList<MemoryRegion> memoryRegions,
+        NativeValueScanRequest request,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(process);
+        ArgumentNullException.ThrowIfNull(memoryRegions);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (process.Id > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(process),
+                $"Process id {process.Id} is outside the ps5debug-NG signed 32-bit PID range.");
+        }
+
+        return await _client
+            .StartScanValuesStreamAsync(
+                checked((int)process.Id),
+                memoryRegions,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<NativeValueScanResult>> RefineAsync(
         TargetProcess process,
         IReadOnlyList<ulong> previousAddresses,
         NativeValueScanRequest request,
@@ -207,6 +262,33 @@ internal sealed class Ps5TargetSession :
             .RefineValuesAsync(
                 checked((int)process.Id),
                 previousAddresses,
+                request,
+                cancellationToken)
+            .ConfigureAwait(false);
+    }
+
+    public async Task<INativeValueScanResultStream> StartRefineAsync(
+        TargetProcess process,
+        INativeValueScanCandidateSource previousResults,
+        NativeValueScanRequest request,
+        CancellationToken cancellationToken)
+    {
+        ObjectDisposedException.ThrowIf(_disposed, this);
+        ArgumentNullException.ThrowIfNull(process);
+        ArgumentNullException.ThrowIfNull(previousResults);
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (process.Id > int.MaxValue)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(process),
+                $"Process id {process.Id} is outside the ps5debug-NG signed 32-bit PID range.");
+        }
+
+        return await _client
+            .StartRefineValuesStreamAsync(
+                checked((int)process.Id),
+                previousResults.Count,
                 request,
                 cancellationToken)
             .ConfigureAwait(false);
@@ -260,6 +342,8 @@ internal sealed class Ps5TargetSession :
         }
 
         _disposed = true;
+        await _debuggerProvider.DisposeAsync().ConfigureAwait(false);
+        await _concurrentMemoryWriter.DisposeAsync().ConfigureAwait(false);
         await _client.DisposeAsync().ConfigureAwait(false);
     }
 

@@ -1,297 +1,294 @@
-# Memory Scanner Foundation
+# Memory Scanner Architecture
 
 ## Purpose
 
-The initial shared memory scanner begins in **TeeKay87's Memory Engine 0.1.2.rev1** after the complete low-level target-access chain was live-verified against a real PlayStation 5.
+This document describes the scanner architecture retained by TeeKay87's Memory Engine `0.1.5.rev8`, including Core-owned Scan Type semantics, plugin-owned Value Types/options, disk-backed/backend-resident result storage, optional native streaming acceleration, memory-map Protection presentation, and the complete-result boundary consumed by universal export.
 
-The scanner is a Core subsystem. Platform plugins continue to provide target access through neutral Plugin SDK services; they do not own the ordinary value-matching algorithm.
+## Architectural Rule
 
-Current data paths:
-
-```text
-Generic path
-Active Target
-    ↓
-neutral MemoryRegion map + IMemoryReader
-    ↓
-Core MemoryScanner
-    ↓
-MemoryScanResult candidates
-
-Optional native acceleration
-Active Target
-    ↓
-INativeValueScanner
-    ↓
-plugin/backend target-side scan
-    ↓
-matching addresses
-    ↓
-Core validation/normalization
-    ↓
-MemoryScanResult candidates
-```
-
-The generic scanner remains the cross-platform definition of the current value-scan behavior. A plugin-native scanner is an optional acceleration service. Backend packets, command ids, and raw platform data remain inside the plugin.
-
-## Current Exact Value Support
-
-Host `0.1.3.rev1` expands the scanner from the original Int32-only milestone to the complete value-type set exposed by ps5debug-NG:
-
-| UI value type | Core type | ps5debug-NG wire id | Width / alignment |
-| --- | --- | ---: | --- |
-| 1 Byte (Unsigned) | `UInt8` | 0 | 1 / 1 |
-| 1 Byte (Signed) | `Int8` | 1 | 1 / 1 |
-| 2 Bytes (Unsigned) | `UInt16` | 2 | 2 / 2 |
-| 2 Bytes (Signed) | `Int16` | 3 | 2 / 2 |
-| 4 Bytes (Unsigned) | `UInt32` | 4 | 4 / 4 |
-| 4 Bytes (Signed) | `Int32` | 5 | 4 / 4 |
-| 8 Bytes (Unsigned) | `UInt64` | 6 | 8 / 8 |
-| 8 Bytes (Signed) | `Int64` | 7 | 8 / 8 |
-| Float | `Float32` | 8 | 4 / 4 |
-| Double | `Float64` | 9 | 8 / 8 |
-| Array of Bytes | `ByteArray` | 10 | variable / 1 |
-
-The current comparison mode remains **Exact Value**. Integer fields accept decimal and `0x`-prefixed hexadecimal input. Float and Double use invariant decimal notation. Array of Bytes accepts hexadecimal bytes in spaced or compact form and is currently bounded to 4,096 bytes so the same value can remain resident in the PS5 TurboScan path.
-
-Array of Bytes currently uses an exact all-bytes mask. ps5debug-NG supports mask-driven byte arrays, but wildcard syntax is deliberately deferred until the scanner exposes AOB-specific input semantics rather than overloading the first Exact Value implementation.
-
-The Value Type selector is editable before First Scan and locked for the active scan session. New Scan unlocks it. This prevents a Next Scan from silently changing type or width relative to the existing candidate set.
-
-## Region Eligibility
-
-The generic scanner currently scans regions that:
+The scanner now has a deliberate split between universal comparison behavior and platform-specific representation/transport:
 
 ```text
-Read  = true
-Guard = false
-Size >= selected value width
+Core
+    owns MemoryScanTypeCatalog and standard Scan Type predicates
+    coordinates regions, sessions, storage, progress, and refinement
+    stores neutral temporary result records
+
+Plugin
+    supplies concrete Value Types
+    supplies optional Scan Options
+    owns platform/native scan acceleration and mappings
+
+Plugin SDK
+    supplies the neutral contracts, optional Value Type comparison/input companions,
+    and stable Scan Type ids used across the native boundary
+
+WPF
+    renders Core Scan Types plus active-plugin Value Types/options
+    applies optional plugin-owned Value Type live-input policy
+    materializes only a bounded result preview
 ```
 
-Writable and executable status do not exclude a region from value scanning. Those flags are neutral memory attributes and can become user-selectable filters later.
+Value Types remain plugin-owned because parsing/representation can differ by platform. Exact Value uses `IMemoryValueType.ValuesEqual` for typed equality. Changed Value and Unchanged Value compare the raw fixed-width bytes stored by the previous scan, while ordered/delta predicates use the optional `IMemoryValueComparer`. This keeps snapshot change detection representation-stable for IEEE-754 NaN payloads without changing Exact Value or ordered floating-point semantics.
 
-The scanner consumes the Active Target memory map already cached by the host. It does not request or parse a platform-specific memory map itself.
+## Current PS5 Scan Definitions
 
-## Alignment
-
-Numeric scans use their natural width as the absolute address alignment: 1, 2, 4, or 8 bytes. Array of Bytes uses one-byte candidate alignment so an exact sequence can start at any byte address.
-
-Alignment is part of `MemoryScanValue` / `NativeValueScanRequest`, allowing Core and optional native implementations to apply the same candidate-start rule.
-
-## Endianness
-
-Integer and floating-point value encoding/decoding uses `TargetArchitecture.Endianness` supplied by the active target session. Byte arrays are preserved byte-for-byte.
-
-The Core scanner therefore does not globally assume little-endian memory. This keeps the same scanner compatible with future big-endian targets such as an Xbox 360 backend.
-
-## Read Chunking
-
-The scanner reads target memory in bounded chunks instead of allocating an entire process region at once.
-
-Current chunk size:
+PS5 plugin `0.1.0.rev25` currently supplies:
 
 ```text
-256 KiB
+1 Byte (Unsigned)
+1 Byte
+2 Bytes (Unsigned)
+2 Bytes
+4 Bytes (Unsigned)
+4 Bytes
+8 Bytes (Unsigned)
+8 Bytes
+Float
+Double
+Array of Bytes
 ```
 
-The 4096-byte cap used by the temporary Raw Memory Read diagnostic UI is not reused by the scanner.
+Scan Types are supplied by Core for every plugin. Plugin API `2.7.0` lets a connected plugin publish semantic native mappings for the Core predicates it can accelerate without changing their meaning. PS5 plugin `0.1.0.rev25` retains the verified mapping behavior and maps compatible Core predicates to ps5debug-NG compare operations or snapshot mode and lets unsupported/mismatched cases use the shared reader-based fallback. Signed integer helpers use the unsuffixed display names above; unsigned alternatives remain explicit. PS5 continues to declare the stable signed Int32 id (`standard.int32`) as its default Value Type, so the UI initializes to `4 Bytes`. The plugin also declares Endianness, Alignment, Floating-point rounding, and Pause target while scanning behavior through plugin/capability-owned surfaces. Rev25 changes only the separate debugger integration/API target; scanner semantics remain the verified rev22-rev24 behavior. Plugin API `2.8.0` adds optional generic Scan Option presentation/applicability metadata: PS5 uses a toggle presentation for Endianness and limits Floating-point rounding visibility to Exact Value with Float/Double.
 
-Chunking is calculated in candidate space from the selected value width and alignment. Each read contains every byte required for its candidate starts, so wider values and one-byte-aligned byte arrays are not lost at Core chunk boundaries.
+## Shared First Scan
 
-## First Scan
+The shared reader path receives neutral process/region data, `IMemoryReader`, target architecture, the selected plugin-defined Value Type, Core-owned Scan Type, parsed input values, and scan options.
 
-The generic First Scan:
+Core:
 
-1. receives the current Active Target, neutral memory map, `IMemoryReader`, target architecture, and parsed `MemoryScanValue`;
-2. filters the memory map to regions that can contain the selected width;
-3. reads each eligible region in bounded candidate-aware chunks;
-4. compares candidates using the selected value type, width, alignment, and target endianness;
-5. retains addresses equal to the requested Exact Value;
-6. reports progress and candidate count;
-7. returns the complete temporary candidate set to the host.
+1. validates the Core Scan Type / plugin Value Type combination;
+2. resolves value width and alignment through the Value Type and options;
+3. filters readable, non-Guard regions;
+4. reads bounded 256 KiB chunks;
+5. evaluates candidates through the selected Scan Type;
+6. writes every match to the active `IScanResultWriter` when disk-backed storage is available;
+7. materializes only the configured WPF preview count.
 
-First Scan results have no previous value.
+The disk-backed path does not use `MemoryScanner.MaximumResultCount` as its data limit. The historical two-million constant remains only on legacy list/in-memory paths retained for compatibility.
 
-### Native First Scan acceleration
+## Shared Next Scan
 
-From `0.1.2.rev4`, Core can also perform an Exact Value operation through the optional Plugin SDK `INativeValueScanner` service. From `0.1.3.rev1`, the same neutral path carries every supported ps5debug-NG value type through `NativeValueScanRequest`. Core supplies both the neutral scannable `MemoryRegion` set and the encoded value/type/alignment request; the plugin returns matching addresses only.
+Disk-backed Next Scan receives an `IScanResultSet` representing the complete previous committed generation.
 
-Core still owns the shared result semantics. Returned native addresses are:
+Core validates the stored value width/alignment, then sequentially reads every stored candidate, reads its current target bytes, evaluates the selected Next Scan predicate, writes surviving candidates into a replacement result generation, and materializes only the bounded preview.
 
-- de-duplicated;
-- required to satisfy the selected value type's alignment rule;
-- checked against the currently cached neutral readable/non-guarded memory map;
-- constrained by the same 2,000,000-result safety boundary;
-- converted to the same `MemoryScanResult` model used by the generic scanner.
+A result outside the first 50,000 displayed rows is therefore still eligible to survive Next Scan.
 
-For PS5, plugin `0.1.0.rev9` implements this service through ps5debug-NG TurboScan. Core passes its neutral readable/non-guarded region set to the optional service; the plugin negotiates server-resident multi-segment support, authenticates scanning, executes the comparison on the target, and fetches only survivor address/value records. This directly addresses the real-console rev3 measurement where the generic First Scan took approximately `07:04.3` while Next Scan was effectively instant.
+The previous committed generation remains authoritative until the replacement writer successfully commits. Cancellation or failure during refinement cannot promote a partial replacement file.
 
-The current TurboScan resident Exact Value path does not expose a host-consumed incremental percentage stream. The host therefore presents indeterminate progress plus elapsed time for that path. If TurboScan support is absent or a resident result set cannot be retained, the host uses the same shared Core First Scan as before.
+## Disk-Backed Result Records
 
-## Next Scan
+Rev13 stores temporary scan candidates using a compact binary format under the active scan-session directory.
 
-Next Scan refines the existing candidate set rather than scanning every address again.
+Each file contains:
 
-The shared Core refinement implementation remains the compatibility baseline. Candidates are ordered by address and associated with the current readable memory map; Core reads only chunks that contain existing candidates. Each surviving result stores:
+- format magic/version;
+- value width;
+- alignment;
+- committed record count;
+- repeated fixed-size records containing a 64-bit address and current-value bytes.
 
-```text
-Address
-CurrentValue
-PreviousValue
-RegionName
-ModuleName
-```
+The active scan metadata records the referenced result filename, result generation, count, width, and alignment. A new generation is flushed and validated before metadata is changed to reference it.
 
-`PreviousValue` is the candidate value from the preceding scan. A candidate survives only when its newly read value, interpreted with the active scan type/width/endianness rules, equals the new Exact Value. The Value Type and width must remain compatible with the First Scan session.
+The storage files remain disposable implementation state. They are scoped to the current application-session and scan-session GUIDs and are never treated as persistent user data.
 
-### Native Next Scan refinement
+## UI Result Boundary
 
-From `0.1.2.rev5`, Core can also refine an existing native result set through the optional Plugin SDK `INativeValueScanRefiner` service. Core encodes the new comparison value through the same target-endian `NativeValueScanRequest`, passes the previous absolute address list for session-consistency checking, and normalizes returned survivor addresses against the previous host result dictionary. The new host result keeps region/module context and sets `PreviousValue` from the preceding host-side `CurrentValue`.
-
-For PS5 plugin `0.1.0.rev9`, a successful TurboScan First Scan intentionally leaves the server-resident survivor set alive on the command connection. Integer and exact Array-of-Bytes Next Scan use TurboScan COUNT (`0xBDAACC12`) with `TS_SERVER_RESIDENT`, optionally add `TS_RESCAN_ALIASING` when the connected server advertises that engine, then fetch the new survivor addresses through TurboScan GET. Float/Double Next Scan closes the resident session and uses the shared Core refiner because current ps5debug-NG resident refinement applies fuzzy floating-point equality and therefore cannot represent Memory Engine's strict Exact Value semantics.
-
-If the selected type requires strict Float/Double fallback, or if the resident result count no longer agrees with the host candidate count, the target-side session is closed and native refinement reports `NotSupportedException`; the host then runs the unchanged shared Core Next Scan. This preserves exact comparison semantics and avoids continuing with divergent target/host state.
-
-The current PS5 resident list refinement response sends no useful percentage records, so the host displays indeterminate progress for native Next Scan. The shared Core fallback continues to report determinate percentage progress.
-
-If the Active Target changes, the host clears the scan session and asks an available native refiner to release target-side state first. A process-list refresh that retains the same Active Target may keep the scan session and resident PS5 survivor set.
-
-## Optional Process Pause
-
-Plugin API `1.1.0` adds the optional `IProcessControl` service. When a plugin advertises both `ProcessSuspend` and `ProcessResume`, the Scan panel exposes **Pause target while scanning**.
-
-The option is Off by default. When enabled, the host suspends the current Active Target immediately before First Scan or Next Scan and attempts to resume it in a `finally` path after success, cancellation, or ordinary failure. This orchestration is capability-driven; Core does not contain PS5-specific process-control logic.
-
-A resume failure is surfaced as a scan error because leaving a target suspended is operationally significant.
-
-## Cancellation and Command Coordination
-
-The host owns a cancellation token for the active scan operation.
-
-While a scan is running, operations that can invalidate target/session state are blocked, including:
-
-- Disconnect;
-- process Refresh;
-- Set Active Target;
-- Raw Memory Read;
-- Raw Memory Write;
-- Safe Write Test.
-
-**Cancel Scan** requests cancellation without disposing the target session. A cancelled Next Scan preserves the previous complete result set. A cancelled First Scan does not publish a partial candidate set.
-
-Cancellation is cooperative across the neutral `IMemoryReader` boundary. Core checks the cancellation token before each scanner read and passes the token to the plugin, but a transport is allowed to define a later safe cancellation boundary when abandoning an in-flight operation would corrupt protocol framing.
-
-This became necessary during live PS5 rev1 testing. ps5debug-NG uses one shared framed TCP command stream. Cancelling `ReadExactlyAsync` after a `CMD_PROC_READ` request had already been sent could leave the remainder of that command's response on the stream. The next command then interpreted target bytes as its status word.
-
-From host rev2 / PS5 plugin rev6, the PS5 client therefore:
-
-1. checks caller cancellation before a read/write command starts;
-2. once the command starts, completes the full framed read/write transaction without mid-response cancellation;
-3. returns to Core;
-4. Core observes the requested cancellation before issuing another scanner read.
-
-This can make Cancel Scan wait for the current memory-read request to finish, but the existing TCP session remains synchronized and reusable. The rule is PS5 transport behavior, not a PS5 condition inside Core.
-
-The same principle applies to PS5 TurboScan. There is no asynchronous abort opcode for an already-running resident START/COUNT transaction on the shared connection. Rev5 therefore reports the cancellation request immediately in the status bar, finishes consuming the current target operation to a clean protocol boundary, closes any resident session that can no longer be safely continued, and only then returns cancellation. The button is responsive even when cancellation itself must be deferred for transport safety.
-
-## Failure Handling
-
-Individual target read failures are counted so an isolated inaccessible range does not immediately destroy an otherwise useful scan.
-
-To prevent a disconnected or badly stale target from causing thousands of repeated failing requests, the current scanner stops after:
-
-```text
-32 memory-read failures
-```
-
-The host surfaces the error and instructs the user to refresh the target memory map and verify connection health.
-
-## Result Safety Limit
-
-The initial Core scanner refuses to retain more than:
-
-```text
-2,000,000 candidates
-```
-
-This prevents an extremely broad value such as zero from unintentionally consuming unbounded host memory during the early scanner milestone.
-
-The limit is a current implementation safety boundary, not part of the Plugin SDK contract and not a statement about the long-term scanner architecture.
-
-## WPF Result Presentation
-
-The Core retains the complete candidate set up to the safety limit.
-
-The WPF Scan Results DataGrid uses row/column virtualization and materializes at most the first:
+The WPF Scan Results table materializes at most:
 
 ```text
 50,000 rows
 ```
 
-for display. The header continues to report the complete Core candidate count. Next Scan always refines the complete candidate set, not merely the displayed subset.
+The total result count is tracked separately as a 64-bit value. When the complete set is larger than the preview, the UI reports the true count and states that only the first 50,000 results are shown.
 
-This separation avoids creating hundreds of thousands or millions of WPF presentation objects simply to perform a Core operation.
+This presentation limit is not a scan-session data limit.
 
-From `0.1.2.rev2`, address presentation is compact rather than fixed-width: redundant high-order zeroes are omitted while the complete significant hexadecimal address remains visible. Scan Result rows also expose presentation-layer context actions for copying the address/value and transferring an address to the temporary Raw Memory Write diagnostic. These actions operate on `MemoryScanResult` data and do not change Core scanner storage.
+From rev30, the DataGrid also uses row virtualization as the boundary for live current-value refresh. Only `ScanResultViewModel` rows that are currently realized in the viewport are registered with the shared live-value scheduler. Their displayed `Value` is reread through neutral `IMemoryReader`; off-screen preview rows are not periodically read, and the live refresh never changes result membership, total count, or the stored/native Previous-scan baseline.
 
-Scan status, errors, progress, and elapsed time are presented in the application's permanent status bar. Generic Core scans use percentage progress from `MemoryScanProgress`; native scans without a backend progress stream use an indeterminate progress presentation. Timing remains presentation/session state owned by the host.
+### Universal export consumption
 
-## Core Models
+Application `0.1.4.rev1` reuses the scanner's existing complete-result abstractions for export. **All Results** streams the authoritative complete set and never treats the 50,000-row WPF preview as the data source merely because the set is large. Displayed/Selected scopes intentionally work from materialized presentation rows. From `0.1.4.rev3`, `MemoryScanResult` also carries the neutral `MemoryProtection` of its containing region for presentation; materialized rows refresh that value when the Active Target memory map is reloaded. Complete disk-backed/backend-resident exports derive Protection from the supplied memory map by address/range instead of widening the compact result records. No Scan Type predicate, result-membership rule, native mapping, or scan-storage format is changed by the export integration.
 
-The current scanner implementation is located under:
+
+## Legacy In-Memory Safety Boundary
+
+The existing constant remains:
 
 ```text
-src/TeeKay87.MemoryEngine.Core/Scanning/
+MemoryScanner.MaximumResultCount = 2,000,000
 ```
 
-Key types:
+It protects legacy APIs that must materialize an entire result list in memory. It no longer rejects the disk-backed shared/streaming path.
+
+This distinction is important for the live PS5 scalability case discovered earlier:
+
+```text
+Value Type: 1 Byte (Signed)
+Value: 50
+Native PS5 result count: 16,211,407
+```
+
+Rev13 is designed to receive/store such a result set in bounded batches rather than build 16 million `MemoryScanResult` objects.
+
+## Native Scan Contracts
+
+Plugin API `2.2.0` retains the earlier list-based native contracts:
+
+```text
+INativeValueScanner
+INativeValueScanRefiner
+```
+
+and adds optional streaming contracts:
+
+```text
+INativeValueScanStreamProvider
+INativeValueScanResultStream
+INativeValueScanStreamRefiner
+INativeValueScanCandidateSource
+NativeValueScanResultBatch
+```
+
+Plugin API `2.9.0` adds the optional complete-result companion:
+
+```text
+INativeValueScanResidentResultSet
+```
+
+A normal streaming result advertises its source-result count and yields bounded batches containing absolute addresses plus packed current-value bytes. `NativeValueScanResultBatch` can also carry packed Previous-value bytes when a resident backend exposes the previous scan baseline directly. Core validates batch width, mapped/readable address membership, alignment, strict ascending order, duplicate addresses, and source-window completeness before accepting those records.
+
+`IScanResultSet` implements `INativeValueScanCandidateSource`, so a plugin that needs the previous candidate addresses can consume them in bounded batches without Core constructing a giant address list. `INativeValueScanResidentResultSet` extends that candidate-source boundary with stable Value Size/alignment, authoritative membership, bounded result-window reads, and a `CanRefine(...)` query. Core can therefore treat a complete backend-resident set as authoritative without first copying every row into the host.
+
+## PS5 Native First Scan
+
+The current PS5 plugin probes ps5debug-NG TurboScan runtime capabilities. When server-resident multi-segment scanning is available, the session exposes both legacy and streaming native services.
+
+The streaming path:
+
+1. authenticates TurboScan;
+2. maps the plugin-owned Value Type plus Core Scan Type id/options to supported ps5debug-NG behavior;
+3. submits the readable region list as disjoint TurboScan segments;
+4. keeps the successful native result set resident server-side;
+5. exposes that session through `INativeValueScanResidentResultSet` when the native membership is already semantically authoritative;
+6. when the complete count exceeds the 50,000-row presentation ceiling, fetches only the bounded TurboScan GET preview and keeps the rest target-resident;
+7. when the result set is small or cannot remain authoritative natively, consumes bounded result batches into the existing Core disk-backed writer;
+8. retains only the WPF preview as `MemoryScanResult` objects in either representation.
+
+The legacy `INativeValueScanner` surface remains available for compatibility but still refuses to materialize more than 2,000,000 native records into one list. The host scan workflow prefers the streaming service when present.
+
+For snapshot-based Unknown Initial Value, ps5debug-NG returns a plan followed by a sentinel-terminated sequence of 64-bit progress records, then a snapshot summary and final status. The host does not impose a progress-record-count limit: large snapshots may legitimately emit more than 1,024 records when the target falls back from its normal large snapshot I/O buffers to smaller windows. The client drains the complete response through the sentinel, summary, and final status before it validates snapshot acceptance. A target-side `snapshot_ok == 0` therefore becomes a synchronized `NotSupportedException` and Core fallback rather than leaving unread TurboScan bytes on the shared command connection.
+
+## PS5 Native Next Scan
+
+Compatible resident TurboScan refinement uses `INativeValueScanStreamRefiner` together with the API 2.9 resident-result handle.
+
+Before native refinement, Core and the PS5 plugin require the resident result count, process, Value Type, width, alignment, active TurboScan generation, and semantic mapping to remain compatible. TurboScan COUNT narrows the target-resident set without uploading the previous address list. For Float/Double Changed Value and Unchanged Value only, the PS5 client transmits the same-width unsigned integer wire Value Type (`UInt32`/`UInt64`) on COUNT. ps5debug-NG then compares the four/eight stored bytes rather than applying IEEE-754 `==`/`!=`, so an unchanged NaN payload is not treated as changed. The resident session width is unchanged and GET results continue to be decoded as the user-selected Float/Double Value Type. The replacement resident handle becomes the authoritative generation, and TurboScan GET is used only for the bounded UI window that is actually required. For Next Scan preview rows, GET transports both current and target-stored previous values so the `Previous` column is preserved without a local previous-generation file.
+
+When a requested predicate cannot be refined natively, Core does not discard the scan session. It first materializes the complete current resident set through bounded result windows into the transactional disk-backed writer, resets/releases the backend resident session, and then performs the existing shared disk-backed refinement. Large materialization uses the reusable modal operation-progress component and can be cancelled without publishing a partial generation.
+
+If a native refinement returns 50,000 or fewer survivors, rev30 may materialize that small replacement immediately into the normal disk-backed representation; larger authoritative replacements remain resident. This keeps the host-side representation proportional to the amount of data actually needed while preserving the same complete-result semantics.
+
+The resident START/COUNT operation is authoritative for survivor membership. The PS5 client therefore does not run a second integer, Array-of-Bytes, or tolerant floating-point Exact Value predicate against the value payload returned by GET. Strict Float/Double First Scan remains the deliberate exception because ps5debug-NG's native comparison is tolerant while the host's default Strict mode requires exact equality; such a stream is marked non-authoritative and follows the existing host filtering/materialization path.
+
+## Floating-Point Semantics
+
+ps5debug-NG native Float/Double Exact Value comparison uses relative `1e-6` tolerance.
+
+The PS5 plugin exposes that behavior explicitly. In default **Strict** mode, incompatible native refinement is closed and the host uses shared Core refinement. Selecting **ps5debug-NG tolerance (1e-6)** intentionally keeps native semantics.
+
+Strict host-side filtering can make the host committed count differ from the native resident count. The next native refinement then detects the mismatch and safely falls back to shared disk-backed refinement.
+
+## Scan Session State
+
+The host storage session is independent from any plugin-native resident session.
+
+- each application launch has a new application-session GUID;
+- each First Scan has a new scan-session GUID;
+- compatible Next Scans retain that logical scan-session GUID;
+- each successful refinement publishes a new result generation inside the same session;
+- New Scan, Active Target replacement, plugin reload, or ViewModel disposal invalidates/releases the session;
+- failed/cancelled First Scan discards its incomplete session;
+- failed/cancelled Next Scan preserves the previous committed generation.
+
+Value Type remains locked after successful First Scan because changing type/width would invalidate stored records. Scan Type availability is governed by Core stage/value compatibility and the selector is explicitly re-enabled when each scan leaves the running state, allowing the next refinement predicate to change without New Scan. Plugin-defined Scan Options keep their own lock policy: PS5 Endianness and Alignment lock with the session, while Floating-point rounding remains changeable because it affects only Exact Value comparison semantics.
+
+## Progress and Cancellation
+
+Shared scans report candidate progress through `MemoryScanProgress`, whose result count is now 64-bit.
+
+Large native result transfers use the reusable host modal operation-progress component. The dialog reports received/stored counts and can request cancellation. Cancellation is linked to the actual scan token; the dialog does not simply disappear while storage/protocol work continues.
+
+PS5 still observes its transaction-safe cancellation rules: once a framed command has started, the client drains the protocol transaction where necessary before surfacing cancellation so the shared TCP stream remains reusable.
+
+## Read Failure Handling
+
+Shared target reads retain the established maximum of 32 read failures before the scan aborts with guidance to refresh the map/check connection health.
+
+## Key Core Types
 
 ```text
 MemoryScanner
-MemoryScanResult
+MemoryScanShape
 MemoryScanExecutionResult
 MemoryScanProgress
-ScanResultLimitExceededException
+MemoryScanResult
+IScanResultStorageSession
+IScanResultWriter
+IScanResultSet
+ScanResultFileWriter
+ScanResultFileSet
 ```
 
-These types remain in Core because the generic scan algorithm and scan-session state do not cross the platform-plugin boundary.
+Public plugin-side scan contracts remain under `TeeKay87.MemoryEngine.PluginSdk`.
 
-Plugin API `1.1.0` was introduced in `0.1.2.rev4` for `INativeValueScanner` and `IProcessControl`. Plugin API `1.2.0` was introduced in `0.1.2.rev5` for the optional `INativeValueScanRefiner` contract. Host `0.1.3.rev1` does not require another Plugin API bump because the existing `MemoryValueType` enum and generic native scan request already contain every value type required by ps5debug-NG. The concrete parsing/display models remain in Core. Existing plugins targeting older minor versions within Plugin API major version 1 remain compatible under the same-major/older-minor compatibility rule.
+## Verification
 
-## Verification Target
+Rev13 adds deterministic verification for:
 
-The deterministic Mock plugin provides known values:
+- replacement-generation transactional behavior;
+- Next Scan using a candidate beyond the first 50,000 materialized rows;
+- a synthetic 2,000,001-record native stream committing and re-reading the complete set with only a 32-row preview;
+- PS5 streaming service capability exposure/hiding.
 
-```text
-Health: 0x10000100 = 100.0f
-Ammo:   0x10000104 = 30
-Money:  0x10000108 = 5000
-```
+The original `16,211,407` signed-byte result remains the regression reference. Rev14 subsequently live-verified the same massive-result path with `10,874,862` PS5 results: First Scan committed successfully and the UI remained bounded to 50,000 rows. Rev15's remaining live acceptance point is successful resident Next Scan over the complete stored set.
 
-The verification executable now tests the shared scanner by:
+## Later Scanner Work
 
-1. running First Scan for Int32 `30`;
-2. confirming the Ammo address is returned;
-3. changing Ammo through the existing neutral `IMemoryWriter` to `25`;
-4. running Next Scan for Int32 `25`;
-5. confirming only the Ammo candidate remains;
-6. confirming Current = `25` and Previous = `30`.
+Rev13 deliberately does not add infinite scrolling or arbitrary browsing through millions of results. Future work may add paging/virtualized random access, additional Core scan predicates or plugin-defined value representations, and later memory-viewer/debugging workflows without changing the current complete-set/preview separation.
 
-This test exercises the same Core scanner that the PS5 UI uses without requiring a live console.
 
-## Next Scanner Milestones
+## Core Scan Type Catalog (0.1.3.rev26)
 
-After rev5 native First/Next Scan refinement and the updated scan workflow are live-verified, scanner development can expand incrementally. Likely next steps include:
+Core owns the standard comparison catalog so all platform plugins receive the same scan workflow automatically.
 
-- additional integer and floating-point value codecs;
-- Unknown Initial Value;
-- Changed / Unchanged;
-- Increased / Decreased;
-- Increased By / Decreased By;
-- configurable alignment/Fast Scan;
-- writable/executable/private/shared filters;
-- selected region/module ranges;
-- improved large-result storage;
-- Saved Addresses integration.
+| Scan Type | First | Next | Operands | Notes |
+| --- | :---: | :---: | ---: | --- |
+| Exact Value | Yes | Yes | 1 | Value Type equality / selected floating Exact option |
+| Fuzzy Value | Yes | Yes | 1 | Float/Double only; absolute difference `< 1.0` |
+| Bigger Than | Yes | Yes | 1 | Ordered fixed-width values |
+| Smaller Than | Yes | Yes | 1 | Ordered fixed-width values |
+| Between | Yes | Yes | 2 | Inclusive lower/upper bounds |
+| Unknown Initial Value | Yes | No | 0 | Keeps every fixed-width candidate, including zero |
+| Unknown Initial Low Value | Yes | No | 1 | Keeps positive nonzero numeric values up to a positive upper limit |
+| Increased Value | No | Yes | 0 | Compares against previous scan value |
+| Decreased Value | No | Yes | 0 | Compares against previous scan value |
+| Changed Value | No | Yes | 0 | Raw stored bytes differ from previous scan |
+| Unchanged Value | No | Yes | 0 | Raw stored bytes match previous scan |
+| Increased By | No | Yes | 1 | Exact directional positive delta |
+| Decreased By | No | Yes | 1 | Exact directional positive delta |
 
-Native/plugin-side scanning is now an implemented optional acceleration path for PS5 First Scan and Next Scan refinement. The shared Core scanner remains the fallback and continues to define the common result/refinement behavior. Future scanner work should preserve this separation rather than moving shared scan-session semantics into platform plugins.
+The disk-backed record format already stores each candidate's current bytes. During Next Scan those stored bytes become the candidate's previous snapshot, so snapshot comparisons do not require a new in-memory dictionary or a new result-file record layout. Unknown Initial Value therefore writes `address + current value bytes` for every eligible fixed-width candidate and later refinement compares current target bytes against those stored bytes.
+
+`Between` uses two user operands and the host presents those two editors side-by-side in the Scan panel. Snapshot predicates that do not need an operand hide the Value editor. Ordered/delta predicates require a fixed-width Value Type that implements `IMemoryValueComparer`; standard numeric types satisfy that requirement. Variable-width Array of Bytes remains an Exact Value representation in the current scanner.
+
+## Native Scan Type Mapping
+
+Native acceleration is selected through the optional Plugin API `2.7.0` `INativeScanTypeMappingProvider`. Core remains authoritative for Scan Type meaning; the plugin table states only which Core ids have semantically equivalent native implementations for the current platform, stage, and Value Type. `NativeScanTypeResolver` uses that table before the host requests a native scanner service. A missing mapping routes directly to the shared scanner, while a mapped request can still return `NotSupportedException` for runtime capability/option/resource constraints and fall back safely.
+
+The native id carried by `NativeScanTypeMapping` is opaque to Core. This allows PS5, PC, Xbox 360, and future plugins to use unrelated backend enums/opcodes while sharing the same Core Scan Type vocabulary.
+
+For PS5, Unknown Initial Value is accelerated through TurboScan snapshot mode with explicit zero inclusion rather than direct ps5debug-NG `compareType 11`, preserving Core's include-zero semantics. Increased By/Decreased By remain Core fallback because upstream target-width wrapping is not fully equivalent to Core's directional non-wrapping semantics. Floating Unknown Initial Low also remains Core fallback because ps5debug-NG compares absolute magnitude for that mode.
+
+See [`NATIVE_SCAN_TYPE_MAPPING.md`](NATIVE_SCAN_TYPE_MAPPING.md) for the generic contract and exact current PS5 mapping table.

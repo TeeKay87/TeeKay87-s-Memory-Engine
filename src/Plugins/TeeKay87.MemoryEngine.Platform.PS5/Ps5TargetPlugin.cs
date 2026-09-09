@@ -9,8 +9,12 @@ using TeeKay87.MemoryEngine.PluginSdk.Models;
 
 namespace TeeKay87.MemoryEngine.Platform.PS5;
 
-public sealed class Ps5TargetPlugin : ITargetPlugin
+public sealed class Ps5TargetPlugin : ITargetPlugin, IPluginSettingsConsumer
 {
+    private IPluginSettings? _settings;
+    private IReadOnlyList<TargetConnectionSettingDefinition> _connectionSettings =
+        Ps5ConnectionSettings.CreateDefinitions(settings: null);
+
     public PluginMetadata Metadata { get; } = new(
         Id: Ps5PluginInfo.Id,
         Name: Ps5PluginInfo.Name,
@@ -19,7 +23,7 @@ public sealed class Ps5TargetPlugin : ITargetPlugin
         Version: Ps5PluginInfo.SemanticVersion,
         Revision: Ps5PluginInfo.Revision,
         ApiVersion: Ps5PluginInfo.TargetApiVersion,
-        Description: "Connects TeeKay87's Memory Engine to a PlayStation 5 running ps5debug-NG and exposes process enumeration, preferred game-process selection, memory maps, raw memory access, native Exact Value scanning/refinement across all ps5debug-NG value types, and process pause/resume.",
+        Description: "Connects TeeKay87's Memory Engine to a PlayStation 5 running ps5debug-NG and exposes process enumeration, preferred game-process selection, memory maps, raw memory access, plugin-driven scan options, semantic native Scan Type acceleration with Core fallback, process pause/resume, x86-64 disassembly, debugger attach/pause/continue/detach, thread enumeration/control, and read-only general-purpose register snapshots through a dedicated ps5debug-NG debugger transport.",
         Architecture: new TargetArchitecture(
             CpuArchitecture.X64,
             pointerWidthBits: 64,
@@ -35,10 +39,26 @@ public sealed class Ps5TargetPlugin : ITargetPlugin
         TargetCapabilities.MemoryWrite |
         TargetCapabilities.ProcessSuspend |
         TargetCapabilities.ProcessResume |
-        TargetCapabilities.NativeValueScanning;
+        TargetCapabilities.NativeValueScanning |
+        TargetCapabilities.Disassembly |
+        TargetCapabilities.Debugger |
+        TargetCapabilities.ThreadEnumeration |
+        TargetCapabilities.ThreadControl |
+        TargetCapabilities.RegisterAccess;
 
-    public IReadOnlyList<TargetConnectionSettingDefinition> ConnectionSettings =>
-        Ps5ConnectionSettings.Definitions;
+    public IReadOnlyList<TargetConnectionSettingDefinition> ConnectionSettings => _connectionSettings;
+
+    public IReadOnlyList<IMemoryValueType> SupportedValueTypes => Ps5ScanDefinitions.ValueTypes;
+
+    public IReadOnlyList<IMemoryScanOption> SupportedScanOptions => Ps5ScanDefinitions.ScanOptions;
+
+    public string DefaultValueTypeId => Ps5ScanDefinitions.DefaultValueTypeId;
+
+    public void AttachSettings(IPluginSettings settings)
+    {
+        _settings = settings ?? throw new ArgumentNullException(nameof(settings));
+        _connectionSettings = Ps5ConnectionSettings.CreateDefinitions(_settings);
+    }
 
     public async Task<ITargetSession> ConnectAsync(
         TargetConnectionOptions options,
@@ -59,10 +79,16 @@ public sealed class Ps5TargetPlugin : ITargetPlugin
             throw new ArgumentException("The ps5debug-NG port must be a number between 1 and 65535.", nameof(options));
         }
 
+        string normalizedHost = host.Trim();
+        string normalizedPort = port.ToString(CultureInfo.InvariantCulture);
+
         Ps5DebugClient client = await Ps5DebugClient
-            .ConnectAsync(host.Trim(), port, cancellationToken)
+            .ConnectAsync(normalizedHost, port, cancellationToken)
             .ConfigureAwait(false);
 
-        return new Ps5TargetSession(Metadata, client);
+        _settings?.TrySetString(Ps5ConnectionSettings.SavedHostKey, normalizedHost);
+        _settings?.TrySetString(Ps5ConnectionSettings.SavedPortKey, normalizedPort);
+
+        return new Ps5TargetSession(Metadata, client, normalizedHost, port);
     }
 }

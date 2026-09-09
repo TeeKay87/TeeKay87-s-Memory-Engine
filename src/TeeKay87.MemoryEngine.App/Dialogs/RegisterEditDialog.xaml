@@ -1,0 +1,97 @@
+<Window x:Class="TeeKay87.MemoryEngine.App.Dialogs.RegisterEditDialog"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Width="560"
+        MinWidth="520"
+        MaxWidth="760"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
+        Loaded="RegisterEditDialog_Loaded">
+    <Border Margin="18"
+            Padding="18"
+            Style="{StaticResource CardBorderStyle}">
+        <Grid>
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="8" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="8" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="12" />
+                <RowDefinition Height="Auto" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="1" />
+                <RowDefinition Height="16" />
+                <RowDefinition Height="Auto" />
+            </Grid.RowDefinitions>
+
+            <StackPanel>
+                <TextBlock Text="Edit Register"
+                           Style="{StaticResource SectionTitleTextStyle}" />
+                <TextBlock x:Name="RegisterDetailsTextBlock"
+                           Margin="0,4,0,0"
+                           Style="{StaticResource MutedTextStyle}" />
+            </StackPanel>
+
+            <TextBlock Grid.Row="2"
+                       Text="Current value"
+                       FontWeight="SemiBold" />
+            <TextBox x:Name="CurrentValueTextBox"
+                     Grid.Row="4"
+                     IsReadOnly="True"
+                     FontFamily="Consolas" />
+
+            <TextBlock Grid.Row="6"
+                       Text="New value"
+                       FontWeight="SemiBold" />
+            <TextBox x:Name="NewValueTextBox"
+                     Grid.Row="8"
+                     FontFamily="Consolas" />
+
+            <Border Grid.Row="10"
+                    Padding="10,8"
+                    Background="{DynamicResource AccentMutedBrush}"
+                    BorderBrush="{DynamicResource BorderBrush}"
+                    BorderThickness="1"
+                    CornerRadius="4">
+                <TextBlock Text="Register writes are allowed only while the debugger target is paused. After writing, the debugger rereads the selected thread and requires the register value to match exactly."
+                           TextWrapping="Wrap"
+                           Style="{StaticResource MutedTextStyle}" />
+            </Border>
+
+            <TextBlock x:Name="ValidationTextBlock"
+                       Grid.Row="12"
+                       Foreground="{DynamicResource ErrorTextBrush}"
+                       TextWrapping="Wrap" />
+
+            <Border Grid.Row="14"
+                    Height="1"
+                    Background="{DynamicResource BorderBrush}" />
+
+            <StackPanel Grid.Row="16"
+                        HorizontalAlignment="Right"
+                        Orientation="Horizontal">
+                <Button MinWidth="96"
+                        Style="{StaticResource DangerButtonStyle}"
+                        IsCancel="True"
+                        Content="Cancel" />
+                <Button MinWidth="122"
+                        Margin="8,0,0,0"
+                        Style="{StaticResource PrimaryButtonStyle}"
+                        Click="WriteButton_Click"
+                        Content="Write &amp; Verify" />
+            </StackPanel>
+        </Grid>
+    </Border>
+</Window>

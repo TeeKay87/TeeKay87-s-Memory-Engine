@@ -1,5 +1,2921 @@
 # Changelog
 
+## TeeKay87's Memory Engine 0.1.7.rev7 - Registers and Stop Context
+
+### Baseline and Revision Scope
+
+- Advanced the host from the verified `0.1.7.rev6` baseline to `0.1.7.rev7` while remaining inside the active `0.1.7` Debugger feature block.
+- Rev6 passed **101/101** automated Windows checks and all focused Mock/live-PS5 verification gates except individual PS5 thread Suspend/Resume. The client request follows the documented ps5debug-NG `CMD_DEBUG_SUSPEND_THREAD` wire format, but the tested backend returns on-wire `CMD_ERROR` (`0xF0000001`). The failure is clean: the game, console, debugger attachment, thread enumeration, whole-target Pause/Continue, memory traffic, and reconnect flows remain usable.
+- Added the project-wide external bug-report location `docs/bug-reports/` and recorded the ps5debug-NG thread-control failure as an issue-ready report. This is an external-backend blocker rather than a reason to remove the already-implemented neutral ThreadControl path.
+- Rev7 implements the next debugger milestone: neutral register snapshots for the selected paused thread, safe writable-register handling where a backend supports it, semantic stop-context roles, and direct current-instruction navigation into the existing Disassembler.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev7 - Registers and Stop Context`.
+
+### Added — Plugin API 2.13 Register Value Encoding
+
+- Advanced the public Plugin API from `2.12.0` to `2.13.0` with additive `DebuggerRegisterValueEncoding` metadata. The existing seven-parameter `DebuggerRegister` constructor is retained unchanged and forwards to the new encoding-aware overload with `Bytes`, preserving the previous compiled constructor surface for compatible plugins.
+- `DebuggerRegister` can now describe whether its byte payload should be treated as opaque bytes, an unsigned little-endian integer, or an unsigned big-endian integer.
+- Kept architecture names, native register structures, register widths, protocol ids, and backend layouts outside the shared host. WPF formats and parses through neutral width/encoding metadata rather than hard-coding x86-64 register rules.
+- Existing debugger contracts remain intact; the API change is limited to the additional register-value interpretation metadata required by the rev7 presentation/editing pipeline.
+
+### Added — Shared Registers and Stop Context Workspace
+
+- Added a capability-driven **Registers** section to the existing modeless Debugger workspace. It is shown only when the target advertises `RegisterAccess` and the attached debugger session supplies `IDebuggerRegisterService`.
+- Register snapshots are requested only while the debugger is Paused and a valid thread is selected. They are cleared when the target resumes, detaches, becomes stale, or otherwise loses a valid paused stop context.
+- Added neutral Register / Value / Group presentation, explicit register Refresh, selected-register tracking, and state-safe command gating.
+- Added semantic handling for `DebuggerRegisterRole.InstructionPointer`, `StackPointer`, and `FramePointer`. The host does not search for names such as RIP/RSP/RBP.
+- Added current-instruction display and **Disassembler...** navigation through the existing Disassembler launcher. No debugger-local disassembly viewer or platform-specific address route was introduced.
+- Current-instruction state is cleared when a refreshed snapshot has no semantic instruction-pointer row, and navigation availability is gated through the target's normal Disassembler capability/service path so a stale or unsupported address action is never presented as usable.
+- Added a reusable register value codec that formats and parses fixed-width neutral register values without truncating wider values or assuming host architecture.
+- The unsigned hexadecimal parser prefixes a zero nibble before `BigInteger` hex parsing so values with the top bit set remain unsigned instead of being misread through two's-complement sign semantics.
+- Added a register edit dialog for writable rows. The dialog rejects malformed or width-incompatible input, requires an actual value change, performs the backend write, refreshes the snapshot, and verifies the exact read-back bytes before reporting success.
+
+### Added — Deterministic Mock Register Backend
+
+- Advanced the Mock plugin from `1.0.0.rev9` to `1.0.0.rev10` and retargeted it to Plugin API `2.13.0`.
+- Mock now advertises `RegisterAccess` in addition to `Debugger`, `ThreadEnumeration`, and `ThreadControl`.
+- Added deterministic per-thread 64-bit register snapshots for Main, Worker, and Render while the target is Paused.
+- Added neutral semantic roles for frame pointer, stack pointer, and instruction pointer and explicit little-endian unsigned value encoding.
+- Mock register rows are writable so the shared edit/write/read-back workflow can be exercised safely without a physical target.
+- Register access is rejected while Running, detached, stale, or disposed, preserving the debugger's stop-context ownership rules.
+
+### Added — PS5 General Register Snapshots
+
+- Advanced the PS5 plugin from `0.1.0.rev26` to `0.1.0.rev27` and retargeted it to Plugin API `2.13.0`.
+- PS5 now advertises `RegisterAccess` and exposes read-only general-register snapshots while the debugger is Paused.
+- Added plugin-private ps5debug-NG `CMD_DEBUG_GET_REGISTERS` (`0xBDBB0008`) support with a 4-byte LWP request and the backend's 176-byte amd64 general-register response.
+- Added plugin-private mapping for the FreeBSD amd64 `struct reg` layout, including general-purpose registers, segment/control fields, RIP, RFLAGS, RSP, and SS. Only neutral `DebuggerRegister` rows cross the plugin boundary.
+- Mapped RIP/RSP/RBP to the neutral semantic instruction-pointer, stack-pointer, and frame-pointer roles used by the host.
+- PS5 register rows are intentionally read-only in rev7. The upstream SETREGS path has not been hardware-verified and is not exposed merely because ps5debug-NG contains a command handler for it.
+- Floating-point/SIMD and debug-register state remain outside rev7 and are reserved for the next ordered debugger milestone.
+
+### External Bug Report — ps5debug-NG Thread Suspend/Resume
+
+- Added `docs/bug-reports/ps5debug-ng-thread-suspend-returns-cmd-error.md` with the live reproduction from rev6 verification.
+- The report records the actual process/thread used, exact wire status, request framing, observable safety behavior, relevant server handler, and the distinction between a confirmed backend rejection and a suspected underlying ptrace-argument issue.
+- The existing Memory Engine suspend/resume client code remains unchanged. If ps5debug-NG fixes the handler behind the same `0xBDBB0006` / `0xBDBB0007` contract, the current client path can be retested without a protocol redesign.
+
+### Verification Coverage
+
+- Preserved the rev6 verification registry and added six rev7 checks for **107** total registrations:
+  1. `Mock debugger register snapshots and writes`;
+  2. `Debugger workspace register panel source contract`;
+  3. `Debugger register value codec source contract`;
+  4. `Debugger register edit dialog source contract`;
+  5. `Debugger current instruction Disassembler integration`;
+  6. `PS5 debugger general register snapshot protocol`.
+- Updated plugin metadata/capability expectations to Mock `1.0.0.rev10`, PS5 `0.1.0.rev27`, Plugin API `2.13.0`, and `Debugger + ThreadEnumeration + ThreadControl + RegisterAccess` for both built-in debugger backends.
+- Added deterministic PS5 protocol-fixture coverage for `0xBDBB0008`, the 4-byte selected thread id, status framing, and the complete 176-byte register block.
+- Added source-level host-neutrality checks so platform register names, LWP terminology, ptrace details, and PS5 protocol ids stay out of shared WPF register presentation code.
+- Rev7 is not considered verified until a clean Windows run reports **107/107** and the focused Mock/live-PS5 register runtime gates pass. PS5 register writing is explicitly outside the rev7 acceptance boundary.
+
+### Documentation
+
+- Updated `README.md`, debugger architecture, Plugin SDK foundation, built-in plugin documentation, UI documentation, and the full development action plan for the rev7 register milestone.
+- Updated the rev6 verification record with the completed **101/101** result and the external ps5debug-NG ThreadControl blocker observed during live hardware testing.
+- Added `docs/testing/APP_0.1.7_REV7_SOURCE_REVIEW.md` and `docs/testing/APP_0.1.7_REV7_VERIFICATION.md` for the source gate and Windows/runtime acceptance of this revision.
+
+## TeeKay87's Memory Engine 0.1.7.rev6 - Threads and Thread Control
+
+### Baseline and Revision Scope
+
+- Advanced the host application from the fully verified `0.1.7.rev5` baseline to `0.1.7.rev6` while remaining inside the active `0.1.7` Debugger feature block.
+- Recorded rev5 as fully accepted: Windows verification passed **97/97**, the focused responsive-header/button/Mock runtime checks passed, and the complete live-PS5 debugger acceptance passed for capability gating, Attach, TCP 755 callback establishment, repeated Pause/Continue, dedicated-transport isolation, explicit Detach/Reattach from Running and Paused states, window-close cleanup, connection-generation invalidation, multiple Debugger-window exclusivity/recovery, and the PS5 regression smoke test. The opportunistic natural async-interrupt check was not safely triggerable and remains explicitly deferred rather than failed.
+- Rev6 implements the next debugger milestone from `docs/TeeKay87_Memory_Engine_Full_Development_Action_Plan.md`: shared thread enumeration/selection and capability-gated per-thread Suspend/Resume, first through the deterministic Mock backend and then through the real ps5debug-NG PS5 backend.
+- Rev6 also applies the already-requested main-workspace cleanup by removing the passive `Memory map: <n> region(s) loaded.` presentation text from the permanent target header. The Active Target memory-map load, stored region collection, error reporting, Memory Viewer, Disassembler, scanner, and all region-dependent behavior remain unchanged.
+- Plugin API remains **2.12.0** because `IDebuggerThreadService`, `IDebuggerThreadControlService`, `DebuggerThreadInfo`, `DebuggerThreadState`, `TargetCapabilities.ThreadEnumeration`, and `TargetCapabilities.ThreadControl` were deliberately introduced and verified in rev1 for this later consumer revision.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev6 - Threads and Thread Control`.
+
+### Added — Shared Debugger Thread Workspace
+
+- Added a generic **Threads** pane to the existing modeless Debugger workspace. The pane is host-owned and appears only when the active plugin advertises `TargetCapabilities.ThreadEnumeration`.
+- Added a read-only, selectable, virtualized thread table with neutral **Thread**, **Name**, and **State** columns. Thread ids are presented as hexadecimal opaque ids; WPF does not know whether a backend calls them LWPs, thread handles, or another platform-specific identifier.
+- Added **Refresh** for explicit re-enumeration through `IDebuggerThreadService`.
+- Added **Suspend** and **Resume** controls that are visible only when `TargetCapabilities.ThreadControl` is advertised and are routed exclusively through `IDebuggerThreadControlService`.
+- Per-thread Suspend/Resume is enabled only while the overall debugger target is in the neutral Running state. Whole-target Paused/Stopped state therefore cannot accidentally be mixed with a per-thread control request.
+- Thread selection is preserved by neutral thread id across refreshes whenever that id is still present. If it disappears, selection falls back to the first current thread.
+- The thread list is populated automatically after successful Attach and refreshed after whole-target Pause/Continue so its neutral state presentation follows the current debugger execution state.
+- Thread rows are cleared on explicit Detach and stale-target invalidation. Existing debugger target/process/connection-generation ownership rules remain authoritative.
+- Added `DebuggerThreadViewModel` as a presentation-only wrapper around the already-public neutral `DebuggerThreadInfo` model. No platform-specific field, register structure, protocol token, or handle type is introduced into the host UI.
+
+### Added — Deterministic Mock Thread Backend
+
+- Advanced the Mock plugin from `1.0.0.rev8` to `1.0.0.rev9`, still targeting Plugin API `2.12.0`.
+- Mock now advertises `ThreadEnumeration` and `ThreadControl` in addition to its already-verified coarse `Debugger` capability.
+- The attached Mock debugger session implements both `IDebuggerThreadService` and `IDebuggerThreadControlService` directly and exposes a deterministic three-thread set:
+  - `0x1` — `Main`;
+  - `0x2` — `Worker`;
+  - `0x3` — `Render`.
+- Threads enumerate as Running while the target runs and Stopped while the whole target is paused. A thread explicitly suspended through the per-thread service retains the distinct neutral Suspended state across whole-target Pause/Continue transitions until it is resumed.
+- Mock per-thread control rejects unknown ids, duplicate suspend, resume of a non-suspended thread, detached/disposed use, and per-thread control while the whole debugger target is not Running.
+- Existing deterministic Mock Pause/Continue events, instruction pointer, attachment exclusivity, target cleanup, memory/scanner/disassembly behavior, and all previously verified services remain unchanged.
+
+### Added — PS5 Thread Enumeration and Thread Control
+
+- Advanced the PS5 plugin from `0.1.0.rev25` to `0.1.0.rev26`, still targeting Plugin API `2.12.0`.
+- PS5 now advertises `ThreadEnumeration` and `ThreadControl` alongside the rev25 `Debugger` capability. RegisterAccess, Breakpoints, Watchpoints, CallStack, and StepExecution remain intentionally unadvertised.
+- Extended the plugin-private dedicated debugger command client with current ps5debug-NG thread commands:
+  - `CMD_DEBUG_GET_THREAD_LIST = 0xBDBB0005`;
+  - `CMD_DEBUG_SUSPEND_THREAD = 0xBDBB0006`;
+  - `CMD_DEBUG_RESUME_THREAD = 0xBDBB0007`;
+  - `CMD_DEBUG_THREAD_INFO = 0xBDBB0011`.
+- Thread-list enumeration validates normal status framing, reads the returned `uint32` count and 32-bit thread ids, enforces a defensive upper bound of 65,536 entries, and keeps the entire list-plus-info sequence serialized on the dedicated debugger command stream.
+- For each enumerated thread, the PS5 plugin opportunistically requests the current 40-byte thread-info record (`thread id`, `priority`, `tdname[32]`). The neutral host consumes only id/name/state in rev6; priority remains plugin-private until a public neutral model needs it.
+- A thread-info failure for an otherwise valid enumerated thread does not discard that thread. It is retained with an empty optional name so basic thread enumeration remains usable.
+- Per-thread Suspend/Resume transmits only the plugin-private 32-bit backend thread id and requires the overall debugger target to be Running.
+- Because current ps5debug-NG thread-list/thread-info replies do not expose an individual execution-state field, the PS5 plugin maps neutral thread state from verified debugger-session state plus successful Suspend/Resume operations it owns. Backend ids and FreeBSD LWP terminology do not cross into Plugin SDK/Core/WPF.
+- Successful local suspension ownership is reconciled against every new backend thread list so ids that have exited disappear from the suspended set rather than remaining stale.
+- Existing rev25 Attach/Detach/Pause/Continue, TCP 755 async event handling, debugger exclusivity, transport isolation, and cleanup logic are preserved and extended rather than duplicated.
+
+### Changed — Main Workspace Passive Memory-Map Status Cleanup
+
+- Removed the permanent-row binding that rendered `SelectedPlugin.MemoryRegionStatusText`, including text such as `Memory map: 1 region loaded.` or `Memory map: 1418 regions loaded.`.
+- Kept the actual Active Target memory-map enumeration and `ActiveMemoryRegions` assignment intact.
+- Kept `MemoryRegionErrorText` visible so real memory-map failures remain actionable instead of being hidden with the passive success prose.
+- Kept the verified two-row header order, 180-unit responsive row-1 input maximum, protected side padding, connection-state indicator, button height/text alignment, and Plugin details placement unchanged.
+
+### Verification Coverage
+
+- Preserved all **97** verification registrations from the fully verified rev5 baseline; no previous registration was removed.
+- Added exactly four rev6 checks:
+  1. `Mock debugger thread enumeration and control`;
+  2. `Debugger workspace thread panel source contract`;
+  3. `PS5 debugger thread enumeration and control protocol`;
+  4. `Main workspace passive memory-map status removal`.
+- Updated existing plugin metadata/debugger capability checks to require exactly `Debugger + ThreadEnumeration + ThreadControl` from the debugger-capability family for Mock/PS5 while continuing to reject premature register/breakpoint/watchpoint/call-stack/step advertisement.
+- Updated independent plugin-version expectations to Mock `1.0.0.rev9` and PS5 `0.1.0.rev26`; Plugin API remains `2.12.0`.
+- Extended the PS5 protocol test server with the real thread-list, thread-info, suspend-thread, and resume-thread wire shapes and records the per-thread control commands for verification.
+- The verification registry therefore increases from **97** to **101** checks. Rev6 is not considered verified until a clean Windows Release build passes **101/101** and the focused Mock/live-PS5 thread runtime gates pass.
+
+### Documentation
+
+- Updated `README.md` to identify rev6 as the current candidate and rev5 as fully verified, describe the new Threads pane and both new backend consumers, and record the passive memory-map status removal.
+- Updated `docs/architecture/DEBUGGER_ARCHITECTURE.md` with the rev6 host thread-workspace behavior, capability/service boundary, state rules, Mock deterministic fixture, and PS5 state-mapping limitation.
+- Updated `docs/architecture/PLUGIN_SDK_FOUNDATION.md` to document the first production consumers of the thread contracts introduced in API `2.12.0` and the capability/service rules future plugins must follow.
+- Updated `docs/ui/MAIN_WORKSPACE.md` to make clear that passive successful memory-map counts do not belong in the permanent target header while errors remain visible.
+- Updated the dedicated Mock and PS5 plugin documentation for versions `1.0.0.rev9` and `0.1.0.rev26` and their new advertised thread capabilities.
+- Updated `docs/plugins/PS5/PS5DEBUG_NG_PROTOCOL_MAPPING.md` with the exact thread-list/thread-info/Suspend/Resume debugger commands and response framing used by rev6.
+- Updated `docs/TeeKay87_Memory_Engine_Full_Development_Action_Plan.md` to close rev5 as fully verified, mark rev6 Threads/Thread Control as the current implementation candidate, and retain Registers/Stop Context as the next debugger milestone.
+- Added `docs/testing/APP_0.1.7_REV6_VERIFICATION.md` and `docs/testing/APP_0.1.7_REV6_SOURCE_REVIEW.md`.
+
+## TeeKay87's Memory Engine 0.1.7.rev5 - Responsive Target Header Input Sizing
+
+### Baseline and Revision Scope
+
+- Advanced the host application from `0.1.7.rev4` to `0.1.7.rev5` while remaining inside the active `0.1.7` Debugger feature block.
+- Rev4 was built and visually reviewed on Windows before its automated/live-PS5 acceptance was completed. That review confirmed the intended permanent two-row target/header composition and the shared button text-alignment correction, but exposed one remaining presentation defect: fixed 240-unit ordinary row-1 inputs could extend beyond the target bar's right edge when the main window was narrowed.
+- Rev5 supersedes rev4 as the package to verify. It preserves the complete rev3 PS5 debugger transport/session implementation, the rev4 two-row action order, the rev4 shared button text fix, Plugin API `2.12.0`, Mock plugin `1.0.0.rev8`, and PS5 plugin `0.1.0.rev25` unchanged.
+- Rev5 changes only host target-header sizing/presentation, verification coverage, application metadata, and documentation. No scanner, Saved Addresses, Memory Viewer, Disassembler, debugger backend, plugin protocol, Core debugger contract, Plugin SDK contract, theme color, or button visual/interaction behavior is redesigned.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev5 - Responsive Target Header Input Sizing`.
+
+### Changed — Responsive Row-1 Target Input Sizing
+
+- Replaced the rev4 fixed `UiMetrics.TopTargetInputWidth = 240` rule with `UiMetrics.TopTargetInputMaxWidth = 180`.
+- The 180-unit value is now explicitly a **maximum**, not a fixed width.
+- Platform, every ordinary plugin-declared connection TextBox/ComboBox rendered from `ConnectionSettings`, and Target Process share one host-computed runtime width.
+- At normal/wide window sizes the shared width is capped at 180 device-independent units. No row-1 minimum width is imposed, so those ordinary inputs may shrink below 180 whenever horizontal space becomes constrained.
+- Added a host-owned `TopTargetInputWidth` dependency property on `MainWindow`. All ordinary row-1 input containers bind to this one value, ensuring Platform, plugin connection fields, and Target Process remain equal-width while resizing.
+- Added first-row layout recalculation through `TopTargetFirstRow_LayoutUpdated`. The calculation starts from the target bar's actual width after its left/right padding is removed, counts the currently rendered plugin connection fields, detects whether process controls are present, reserves fixed action-button widths, and reserves the existing row/inter-control margins before dividing the remaining width evenly across ordinary inputs.
+- The responsive calculation clamps available input space at zero and the final common width at `UiMetrics.TopTargetInputMaxWidth`, giving the row an effective sizing range of `0..180` instead of a fixed 240-unit value.
+- The calculation uses `TargetConnectionBar.ActualWidth` and explicitly subtracts `TargetConnectionBar.Padding.Left` and `.Right` from the available content width. The existing `Padding="14,8"` therefore remains protected and cannot be consumed by responsive field growth.
+- Existing horizontal spacing is preserved: the plugin-input lane keeps its leading margin and per-input separation, Connect/Disconnect retain their margins, and Target Process/Refresh retain their existing spacing. The change does not compress or remove those visual boundaries.
+- The PS5 Port field no longer has any special width behavior. Like Platform, PS5 host/IP, and Target Process, it uses the same responsive common width and the same 180-unit maximum.
+- Future plugins inherit this behavior automatically through the generic host renderer. Ordinary TextBox/ComboBox connection fields in row 1 must not introduce plugin-specific WPF widths or minimums; extensive configuration still belongs in plugin/settings/details surfaces rather than a third permanent target row.
+
+### Preserved — Permanent Two-Row Header and Button Presentation
+
+- Kept the permanent first-row order exactly as established in rev4: **Platform -> plugin-declared connection inputs -> Connect -> Disconnect -> Target Process -> Refresh -> Set Active Target**.
+- Kept the permanent second-row order exactly as established in rev4: **Reload Plugins -> Disassembler... -> Debugger...**, with future top-level action/tool buttons appended to that same row.
+- Kept the main-window default width at `1460` and existing `MinWidth=1100`; rev5 solves the narrower-window overflow through responsive field sizing rather than by raising the minimum window width.
+- Kept the redundant `Active <process>` text and passive process-count/enumeration prose removed.
+- Kept the Connected/Not connected indicator at the far left of the bottom status bar with the existing theme-aware success/danger presentation.
+- Kept every ordinary button at `UiMetrics.StandardControlHeight = 34` and retained rev4's `14,2` internal padding plus explicit horizontal/vertical text centering. No button height, semantic style, border geometry, corner radius, hover/pressed/focus behavior, or per-view width is changed by rev5.
+
+### Preserved — Rev3 PS5 Debugger Candidate
+
+- Kept PS5 plugin `0.1.0.rev25` and Plugin API `2.12.0` unchanged.
+- Kept the dedicated PS5 debugger command connection, TCP 755 callback listener/event socket, attach/detach, stop-go Pause/Continue, fixed 1184-byte interrupt parsing, neutral event translation, debugger ownership/exclusivity, and cleanup behavior byte-identical to rev4.
+- Kept the verified rev1 Core debugger coordinator/contracts and complete Plugin SDK byte-identical to rev4.
+- Kept the fully verified rev2 Mock plugin/debugger backend byte-identical to rev4.
+- No advanced PS5 debugger capability is newly advertised. ThreadEnumeration, ThreadControl, RegisterAccess, Breakpoints, Watchpoints, CallStack, and StepExecution remain later work.
+
+### Verification Coverage
+
+- Preserved all **96** verification registrations from the rev4 candidate; no prior check name is removed.
+- Updated the existing `Main workspace two-row target header standard` check so the same registration now requires `UiMetrics.TopTargetInputMaxWidth = 180`, the shared responsive width binding for Platform/plugin fields/Target Process, and the existing two-row/order contract.
+- Added exactly one new registration: `Main workspace responsive target input widths`.
+- The new source contract checks that the first row is wired to responsive recalculation, uses the target bar's padded content width and dynamic plugin-input count, reserves fixed connection-action widths, clamps available space at zero, caps the final common width at 180, applies the shared maximum to all ordinary row-1 inputs, and does not use that maximum as a minimum width.
+- The verification registry therefore increases from **96** to **97** checks. Rev5 is not considered verified until a clean Windows Release build passes all **97/97** checks.
+- Runtime/UI acceptance now explicitly includes resizing both Mock and PS5 layouts from the normal/default width down to the existing `MinWidth=1100` and back up, confirming equal-width ordinary inputs, a hard 180-unit maximum, shared shrink behavior below 180, intact left/right target-bar padding, no overlap, no right-edge overflow, and immediate recalculation when switching plugins.
+- The inherited live PS5 debugger Attach/Pause/Continue/Detach, TCP 755 cleanup/reconnect, dedicated-transport isolation, stale-session, multiple-window, and regression gates remain required because rev3/rev4 were superseded before that hardware acceptance was completed.
+
+### Documentation
+
+- Updated `README.md` to identify rev5 as the current candidate, explain the 180-unit maximum/no-minimum responsive sizing rule, and point to the rev5 verification/source-review documents.
+- Updated `docs/ui/CONTROL_METRICS.md` so the permanent top-input standard is documented as a responsive common width capped at `TopTargetInputMaxWidth = 180`, including the rule that target-bar left/right padding remains reserved.
+- Updated `docs/ui/MAIN_WORKSPACE.md` with the responsive first-row behavior while preserving the permanent two-row order.
+- Updated `docs/architecture/PLUGIN_SDK_FOUNDATION.md` so future plugin authors know that ordinary row-1 connection fields inherit host-computed responsive sizing and must not encode one-off WPF widths/minimums.
+- Updated debugger/disassembly/export/Memory Viewer and Mock/PS5 living documentation to identify rev5 as the current host while making clear that those subsystems are unchanged.
+- Marked the rev4 verification/source-review documents as historical/superseded records rather than rewriting them as completed acceptance.
+- Updated `TeeKay87_Memory_Engine_Full_Development_Action_Plan.md` so rev5 is the current candidate and later debugger milestones shift forward by one revision: Threads/Thread Control now begins at rev6.
+- Added `docs/testing/APP_0.1.7_REV5_VERIFICATION.md` and `docs/testing/APP_0.1.7_REV5_SOURCE_REVIEW.md` as the authoritative rev5 acceptance/source-review records.
+
+## TeeKay87's Memory Engine 0.1.7.rev4 - Two-Row Target Header and Button Alignment
+
+### Baseline and Revision Scope
+
+- Advanced the host application from `0.1.7.rev3` to `0.1.7.rev4` while remaining inside the active `0.1.7` Debugger feature block.
+- Rev3 was **not** marked verified before this revision. Its first real PS5 debugger transport implementation remains the active debugger candidate, but the initial rev3 main-target layout did not match the intended permanent two-row design during the first Windows UI review.
+- Rev4 therefore supersedes rev3 as the package to verify. It preserves the rev3 PS5 debugger transport/session implementation and PS5 plugin `0.1.0.rev25` unchanged, then corrects only shared host UI presentation, button-content layout, verification coverage, version metadata, and documentation.
+- Kept Plugin API `2.12.0`, Mock plugin `1.0.0.rev8`, and PS5 plugin `0.1.0.rev25` unchanged. No new plugin contract or platform-specific capability is introduced by rev4.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev4 - Two-Row Target Header and Button Alignment`.
+
+### Changed — Permanent Two-Row Target Header
+
+- Rebuilt the normal main-window target/connection surface so it has exactly **two permanent control rows** instead of the three-row rev3 arrangement.
+- Established the first-row order as:
+  1. **Platform**;
+  2. zero or more plugin-declared connection inputs;
+  3. **Connect**;
+  4. **Disconnect**;
+  5. **Target Process** when process enumeration is supported;
+  6. **Refresh**;
+  7. **Set Active Target**.
+- Moved the generic plugin connection fields (`SelectedPlugin.ConnectionSettings`) from the former third connection row into the first row immediately after Platform. PS5 host/IP and Port therefore appear before Connect/Disconnect, matching the intended connection-first workflow without adding platform-specific XAML.
+- Moved **Connect** and **Disconnect** into the same first row and aligned them to the bottom of the labeled TextBox/ComboBox controls so all interactive controls share the existing 34-unit baseline.
+- Moved **Target Process**, **Refresh**, and **Set Active Target** after the connection actions on that same first row. Selected Process and Active Target semantics are unchanged: choosing a process still does not activate it until Set Active Target is executed.
+- Rebuilt the second row as a left-aligned horizontal action lane with the permanent order **Reload Plugins -> Disassembler... -> Debugger...**. Future top-level host/tool action buttons are to be appended to this same row rather than creating another permanent row.
+- Preserved the existing memory-region status and collapsible **Plugin details** surface on the second-row area without changing the required action order.
+- Preserved the rev3 removal of the redundant `Active <process>` text and passive process-count/enumeration prose, plus the rev3 binary Connected/Not connected indicator at the far left of the bottom status bar.
+- Kept connection/process/memory-region error TextBlocks below the permanent rows. These remain collapsed when empty and therefore do not create a third normal control row.
+- Increased only the main window's default startup width from `1380` to `1460` units so the fixed 240-unit PS5 first-row inputs and existing action buttons fit the intended two-row composition at startup. The existing `MinWidth=1100` remains unchanged, so this does not remove the user's ability to resize the window more narrowly.
+
+### Added — Shared 240-Unit Top Input Standard
+
+- Added `UiMetrics.TopTargetInputWidth = 240` as the single host-owned width metric for ordinary TextBox/ComboBox controls in the main target/connection header.
+- Applied the 240-unit width to the **Platform** ComboBox.
+- Applied the same 240-unit width to every generic plugin-declared connection input rendered from `ITargetPlugin.ConnectionSettings`. This includes both PS5 **IP address / host name** and **Port**; Port no longer receives a narrower special-case width.
+- Applied the same 240-unit width to the **Target Process** ComboBox.
+- Deliberately kept this rule in host presentation rather than plugin metadata. Future platform plugins contribute connection-setting definitions only; they do not declare WPF widths or create platform-specific layout branches.
+- Documented that the permanent target header is a compact connection/target surface. A future plugin that requires extensive extra configuration should place additional options in an appropriate settings/details workflow instead of forcing a third permanent target row or introducing one-off input widths.
+- The application-bar Theme ComboBox is not part of this target/plugin input standard and retains its existing application-bar sizing.
+
+### Changed — Shared Button Text Layout
+
+- Preserved `UiMetrics.StandardControlHeight = 34` for every ordinary application button. Rev4 does **not** make buttons shorter or taller.
+- Preserved the existing Primary/Secondary/Danger semantic styles, background/border/text brushes, corner radii, focus border, hover overlay, pressed overlay, disabled-state palette, cursor rules, and per-view button widths/margins.
+- Reduced only the shared ordinary button's internal content padding from `14,8` to `14,2`, keeping the existing 14-unit horizontal padding while providing more usable vertical space inside the unchanged 34-unit outer button.
+- Kept `HorizontalContentAlignment=Center` and `VerticalContentAlignment=Center` authoritative in `ButtonBaseStyle`.
+- Added explicit `VerticalAlignment=Center` to both generated string-content types (`AccessText` and `TextBlock`) inside the common button `ContentPresenter`. This prevents WPF-generated button labels from sitting too high in the template and leaves enough room for descenders such as `g`, `j`, `p`, `q`, and `y`.
+- Reduced the one remaining normal-height local Select All button override in the export dialog from `8,3` to `8,2` so it follows the same compact vertical-content rule. The deliberately smaller 28-unit Saved Address row Remove button already used `8,2` and remains unchanged.
+- No button interaction behavior or semantic meaning changes in rev4; this is strictly a content-layout correction inside the existing visual system.
+
+### Preserved — Rev3 PS5 Debugger Candidate
+
+- Kept all rev3 PS5 debugger production files and behavior unchanged: dedicated debugger command connection, TCP 755 listener/callback, attach/detach, stop-go Pause/Continue, fixed 1184-byte interrupt parsing, neutral event mapping, debugger ownership/exclusivity, transport cleanup, and target-session disposal behavior.
+- Kept the verified rev1 Core debugger coordinator/contracts and complete Plugin SDK unchanged.
+- Kept the fully verified rev2 Mock debugger backend unchanged.
+- Kept all existing scanner, Saved Addresses, Memory Viewer, Disassembler, universal export, themes, settings, and PS5 primary memory/scan/disassembly transports unchanged except for the shared button-content template that intentionally affects button text layout application-wide.
+- No new advanced PS5 debugger capability is advertised. ThreadEnumeration, ThreadControl, RegisterAccess, Breakpoints, Watchpoints, CallStack, and StepExecution remain outside this revision.
+
+### Verification Coverage
+
+- Preserved all **94** verification registrations present in the rev3 candidate.
+- Updated the existing `Main workspace target controls and connection status layout` source contract so it validates the corrected row order rather than the superseded rev3 arrangement.
+- Added `Main workspace two-row target header standard`, which verifies that the target strip contains one permanent first-row marker and one permanent second-row marker, that `UiMetrics.TopTargetInputWidth` is centralized at `240`, that Platform/plugin connection inputs/Target Process all consume that metric, and that plugin connection fields precede Connect.
+- Added `Shared button content alignment and vertical padding`, which verifies that standard button height still comes from `UiMetrics.StandardControlHeight`, ordinary shared padding is `14,2`, horizontal/vertical content alignment remains centered, and generated AccessText/TextBlock labels receive explicit vertical centering.
+- Added the shared button style and UI metrics source files as verification fixtures.
+- The verification registry therefore increases from **94** to **96** checks. Rev4 is not considered verified until a clean Windows Release build passes all **96/96** checks.
+- Because rev4 supersedes rev3 before live acceptance, the rev4 runtime gate also includes the full PS5 debugger Attach/Pause/Continue/Detach, TCP 755 cleanup/reconnect, dedicated-transport isolation, and regression acceptance originally prepared for rev3.
+
+### Documentation
+
+- Updated `README.md` to identify rev4 as the current candidate and describe the permanent two-row target-header and 240-unit input-width standard.
+- Updated `docs/ui/MAIN_WORKSPACE.md` with the exact row order and the rule that future tool/action buttons stay on row 2.
+- Updated `docs/ui/CONTROL_METRICS.md` with `UiMetrics.TopTargetInputWidth = 240` and the future-plugin rendering rule.
+- Updated `docs/ui/BUTTON_STYLES.md` to state explicitly that button height remains 34 units and only internal vertical text padding/alignment changed.
+- Updated `docs/architecture/PLUGIN_SDK_FOUNDATION.md` so future plugin authors know that connection-setting fields are host-rendered at 240 units on row 1 and must not introduce platform-specific WPF widths.
+- Updated the full development action plan so rev4 is the current debugger candidate and later debugger milestones shift forward by one revision.
+- Added rev4 source-review and verification documents. Retained the rev3 verification/source-review documents as historical records and annotated their status to make clear that rev3 was superseded before Windows/UI/live-PS5 acceptance.
+
+## TeeKay87's Memory Engine 0.1.7.rev3 - PS5 Debug Transport and Target UI Cleanup
+
+### Verified Baseline
+
+- Advanced the application from `0.1.7.rev2` to `0.1.7.rev3` while remaining inside the active `0.1.7` Debugger feature block.
+- Recorded `0.1.7.rev2 - Debugger Workspace and Mock Backend` as fully verified: the complete Windows suite passed **89/89** checks and every focused Mock Debugger runtime/UI acceptance step passed, including capability gating, modeless open, explicit attach, deterministic pause/resume events, event-history clearing, detach/reattach, window-close cleanup, disconnect/connection-generation invalidation, Active Target lifetime coverage, multiple-window exclusivity/recovery, and regression smoke testing of Scan, Memory Viewer, Disassembler, Saved Addresses, read/write, themes, and connect/disconnect behavior.
+- Preserved Plugin API `2.12.0`, the verified rev1 Core/SDK debugger foundation, and Mock plugin `1.0.0.rev8` unchanged. Rev3 consumes the existing debugger contracts rather than extending or duplicating them.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev3 - PS5 Debug Transport and Target UI Cleanup`.
+
+### Added — PS5 Debugger Provider and Dedicated Transport
+
+- Advanced the PlayStation 5 plugin from `0.1.0.rev24` / API `2.11.0` to `0.1.0.rev25` / API `2.12.0` because it now consumes the debugger contracts introduced in Plugin API 2.12.
+- Added `TargetCapabilities.Debugger` to the PS5 plugin and exposed `IDebuggerProvider` from each connected `Ps5TargetSession`. No advanced debugger capability is advertised yet: thread enumeration/control, register access, breakpoints, watchpoints, call stacks, and stepping remain unavailable until their dedicated revisions implement and verify those services.
+- Added a plugin-owned `Ps5DebuggerProvider` that permits one active debugger session per connected PS5 target session, validates the signed ps5debug-NG PID range, releases completed sessions cleanly, and disposes the active debugger before the owning target session closes.
+- Added a dedicated plugin-local debugger command transport through `Ps5DebuggerCommandClient`, owned by `Ps5DebuggerProvider` / `Ps5DebuggerSession`. It does not reuse the normal `Ps5DebugClient` memory/scan command stream or the concurrent Frozen-write connection. Each debugger attachment owns its own command TCP connection to the configured ps5debug-NG server.
+- Added the required ps5debug-NG async debugger listener on TCP `755`. The listener is started before `CMD_DEBUG_ATTACH` is sent so the console can establish its documented outbound interrupt connection during attach. Listener/socket ownership remains entirely inside the PS5 plugin.
+- Added PS5 protocol constants for `CMD_DEBUG_ATTACH` (`0xBDBB0001`), `CMD_DEBUG_DETACH` (`0xBDBB0002`), debugger wire status values, TCP 755, and the fixed 1184-byte interrupt packet layout required by the current ps5debug-NG protocol.
+- Added fixed-packet interrupt decoding for thread id, wait status, thread name, and instruction pointer. The FreeBSD/x86-64 register block offset used to obtain the instruction pointer remains plugin-private; Core/WPF receives only neutral debugger event fields.
+- Added explicit PS5 debugger Pause/Continue through ps5debug-NG `CMD_DEBUG_CONTINUE` / stop-go (`0xBDBB0010`) over the debugger-owned command transport; action `1` pauses and action `0` resumes. Pause maps to the neutral `Paused/PauseRequested` event and Continue maps to `Resumed` without modifying the general non-debugger `IProcessControl` implementation.
+- Added explicit backend detach and asynchronous transport cleanup. Closing/disposal tears down the event socket and dedicated command connection and releases provider ownership so a later debugger window can attach again.
+- Added clear diagnostics for unavailable TCP 755, debugger command connection failures, already-attached backend status, attach failures, and a missing outbound event connection/firewall path.
+
+### Added — PS5 Debugger Session Event Mapping
+
+- Added a PS5 `IDebuggerSession` implementation that begins in neutral `Running` state after a successful backend attach and tracks `Running`, `Paused`, and `Detached` without exposing ps5debug-NG-specific state types to the host.
+- Async ps5debug-NG interrupt packets are translated into neutral `Paused` events with `DebuggerStopReason.Signal`, optional thread id, optional instruction pointer, and a readable signal/thread message.
+- Rechecked current upstream event-dispatch semantics before packaging: ps5debug-NG sends the interrupt packet and resumes its application layer, but does not issue `PT_CONTINUE` for the traced stop at that point. The ptrace stop remains pending until stop-go action `0`, so the neutral post-interrupt state is correctly `Paused` rather than `Running`.
+- Unexpected loss of the async event channel maps the backend session to neutral `Unknown`/Attached state with a backend event so Pause/Continue are disabled while Detach remains available for deterministic cleanup; intentional detach/disposal suppresses that diagnostic event.
+- Session disposal unsubscribes transport callbacks before teardown, attempts backend detach when still attached, and always closes the dedicated transport even if backend detach fails.
+
+### Changed — Main Target/Connection UI
+
+- Moved the **Target Process** ComboBox onto the same top target row as the **Platform** ComboBox. **Refresh** and **Set Active Target** now sit on that same row beside the process selector.
+- Kept **Disassembler...** and **Debugger...** on the second target row and left-aligned them as the first actions on that row. Connection-setting fields plus Connect/Disconnect/Reload Plugins remain on the following compact connection row so the top process row does not become cramped at supported window widths.
+- Removed the visible `Active <process>` summary from the main workspace. Selected process and Active Target remain separate internal states; only the redundant text presentation was removed.
+- Removed the visible `Connect to enumerate processes`, `1 process loaded`, and `<n> processes loaded` process-status presentation from the main window. The existing ViewModel status remains available internally for operation/error coordination, but it is no longer rendered as permanent UI prose.
+- Moved the connection state to the far left of the permanent bottom status bar. `Connected` is presented with the existing theme-aware success border plus muted success background; `Not connected` uses the existing danger border with the normal theme background. The indicator is driven only by the generic `IsConnected` state, displays only `Connected` / `Not connected`, and contains no platform-specific styling branch.
+- Preserved connection errors, process errors, memory-region status/errors, scan status/progress, general application status, and the right-aligned application version field.
+
+### Preserved Functionality and Boundaries
+
+- Kept Plugin API `2.12.0` unchanged because rev3 requires no new public debugger model or service contract.
+- Kept Mock plugin `1.0.0.rev8` byte-for-byte unchanged. Its already verified deterministic debugger backend remains the regression/reference implementation.
+- Kept the rev1 Core `DebuggerSessionCoordinator`, debugger identity/event contracts, and Plugin SDK debugger types unchanged. PS5 is implemented as a consumer of those verified shared abstractions.
+- Preserved the existing PS5 primary connection/handshake, process enumeration, memory maps, memory read/write, native TurboScan, process-control, concurrent Frozen-write transport, and Iced disassembly paths. The new debugger connection is intentionally separate from those established transports.
+- Preserved Active Target semantics: choosing a process in the moved ComboBox still does not activate it until **Set Active Target** is used.
+- Preserved the capability-driven Debugger entry and host stale-session protections introduced and verified in rev2.
+
+### Verification Coverage
+
+- Extended the verification registry from **89** to **94** checks without removing or weakening any prior check.
+- Updated plugin version/capability checks for PS5 `0.1.0.rev25`, Plugin API `2.12.0`, and the newly advertised coarse Debugger capability.
+- Added **PS5 debugger provider lifecycle and exclusivity** coverage for service discovery, one-active-session enforcement, ownership release, and reattach after disposal.
+- Added **PS5 debugger attach pause continue detach protocol** coverage using a dedicated protocol fixture that validates the separate command connection, exact attach PID, stop-go actions `1`/`0`, state transitions, neutral Pause/Resume events, and explicit detach.
+- Added **PS5 debugger async interrupt channel** coverage for the TCP 755 callback path and fixed 1184-byte packet translation, including thread id, signal, and instruction pointer.
+- Added **PS5 debugger dedicated transport isolation** coverage proving the ordinary PS5 process command stream remains usable while a debugger session is attached on its own command socket.
+- Added **Main workspace target controls and connection indicator layout** source coverage for the new top-row selectors/actions, removal of the Active/process-status presentations, and the bottom red/green connection indicator.
+- The first authoritative rev3 gate is a clean Windows Release build plus **94/94** automated checks. This must be followed by the focused UI regression and live-PS5 debugger acceptance in `docs/testing/APP_0.1.7_REV3_VERIFICATION.md`; rev3 is not considered verified until those runtime/hardware gates pass.
+
+### Documentation
+
+- Updated `README.md` for the current rev3 behavior, fully verified rev2 baseline, PS5 debugger ownership, plugin/API versions, and compact target/status UI.
+- Updated the full development action plan so rev2 is recorded as verified and rev3 is the current candidate before thread work begins.
+- Updated `docs/architecture/DEBUGGER_ARCHITECTURE.md` with PS5 transport ownership, attach/event-channel sequencing, event translation, cleanup, and rev3 non-goals.
+- Updated `docs/ui/MAIN_WORKSPACE.md` with the new selector/action rows and bottom connection-state indicator.
+- Updated the PS5 plugin README and ps5debug-NG protocol mapping with the debugger command/event subset implemented by rev25.
+- Added `docs/testing/APP_0.1.7_REV3_VERIFICATION.md` and `docs/testing/APP_0.1.7_REV3_SOURCE_REVIEW.md` for the Windows/UI/live-hardware gate and pre-package source-boundary review.
+
+
+## TeeKay87's Memory Engine 0.1.7.rev2 - Debugger Workspace and Mock Backend
+
+### Verified Baseline
+
+- Advanced the host application from `0.1.7.rev1` to `0.1.7.rev2` while remaining inside the active `0.1.7` Debugger feature block.
+- Recorded `0.1.7.rev1 - Debugger Contracts and Core Foundation` as verified after the complete Windows verification suite passed **84/84** checks. No live debugger hardware acceptance was required for rev1 because it contained no platform debugger backend or user-facing debugger workspace.
+- Preserved the verified Plugin API `2.12.0` debugger contracts and Core `DebuggerSessionCoordinator` implementation unchanged. Rev2 consumes that foundation instead of introducing a parallel debugger lifecycle.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev2 - Debugger Workspace and Mock Backend`.
+
+### Added — Capability-Driven Debugger Workspace
+
+- Added the first modeless WPF **Debugger** workspace. The main target strip exposes **Debugger...** only when the selected plugin advertises `TargetCapabilities.Debugger`, and the button becomes usable only for a connected current Active Target when the host is not inside another conflicting foreground target operation.
+- Bound every Debugger window permanently to the plugin id, process id/name, and connection generation captured when the window is opened. A disconnected/reconnected or changed target cannot silently reuse an older Debugger window.
+- Added explicit **Attach**, **Pause**, **Continue**, and **Detach** commands routed through the verified Core `DebuggerSessionCoordinator`. The WPF layer does not call a platform debugger implementation directly.
+- Added a virtualized read-only debugger event table with session-local sequence, local timestamp, event kind, execution state, stop reason, thread id, instruction pointer, and neutral message columns.
+- Added **Clear Events** with the application-wide destructive/danger semantic. The event presentation is bounded to the newest 2,000 rows so a long-lived debugger window cannot grow its WPF collection without limit.
+- Added UI-thread dispatch for asynchronous Core debugger state/events and command-state refresh when connection/Active Target state changes.
+- Kept the new workspace architecture-neutral. It contains no ps5debug-NG packet knowledge, PS5 checks, x86/x64 register-name logic, or platform-specific transport assumptions.
+
+### Added — Host Debugger Session Ownership and Target Safety
+
+- Added host-side registration of active `DebuggerSessionCoordinator` instances to `PluginViewModel`. This gives the target owner an explicit lifetime relationship with every modeless Debugger window using that target session.
+- Debugger coordinators are disposed before the owning target session is replaced, disconnected, the Active Target is changed, or the plugin ViewModel itself is disposed. A modeless window therefore cannot keep a backend debugger attachment alive after its target becomes invalid.
+- Separated immutable debugger-target identity from temporary command availability. Target identity depends on plugin/process/connection generation and connected-session validity; it does not become stale merely because an unrelated foreground operation temporarily disables creation of a new debugger attachment.
+- Starting a new debugger attachment still requires the stricter `CanOpenDebugger` operational gate. This prevents an old-but-current detached window from attaching in the middle of an incompatible target operation while preserving valid attached-session event identity.
+- Debugger windows revalidate the captured identity before operations and again when events reach the UI, so stale events are ignored rather than projected into a new target context.
+
+### Added — Deterministic Mock Debugger Backend
+
+- Advanced the In-Memory Test Target plugin from `1.0.0.rev7` / API `2.11.0` to `1.0.0.rev8` / API `2.12.0` because the plugin now consumes the debugger contracts introduced in rev1.
+- Added `TargetCapabilities.Debugger` to Mock and exposed a real `IDebuggerProvider` from its connected target session. No advanced debugger capability is advertised yet: thread enumeration/control, register access, breakpoints/watchpoints, call stack, and stepping remain disabled until their corresponding revisions implement them.
+- Added a deterministic `IDebuggerSession` for the existing `TestGame.exe` fixture. Attach begins in `Running`, Pause transitions to `Paused`, Continue returns to `Running`, and Detach/disposal returns to `Detached`.
+- Pause emits one neutral `Paused` event with `PauseRequested`, deterministic thread id `1`, instruction pointer `0x10000400`, and message `Mock target paused.`. Continue emits one neutral `Resumed` event with the same deterministic thread/instruction context and message `Mock target resumed.`.
+- The Mock provider allows only one active debugger attachment and rejects a process that does not belong to its target session. Disposing the target session also disposes any active Mock debugger session.
+- Kept all existing Mock scanner, memory, Saved Addresses, export, Memory Viewer, and synthetic Disassembler fixtures unchanged.
+
+### Compatibility and Preserved Functionality
+
+- Kept the public Plugin API at `2.12.0`; rev2 adds no new public SDK contract and therefore does not create an unnecessary API minor version.
+- Kept PS5 plugin `0.1.0.rev24` byte-for-byte unchanged and targeting compatible Plugin API `2.11.0`. It still advertises no debugger capability and rev2 sends no PS5 debugger command, opens no debugger event port, and changes no ps5debug-NG transport behavior.
+- Preserved the rev1 Plugin SDK/Core debugger foundation byte-for-byte. Rev2 is the first consumer of that verified foundation.
+- Preserved all previously verified scanner, scan-result storage, Saved Addresses/freeze, universal export, Memory Viewer, Disassembler, themes, and target I/O behavior outside the narrow host lifetime integration required to own debugger coordinators safely.
+
+### Verification Coverage
+
+- Extended the verification registry from **84** to **89** checks without removing or weakening any existing check.
+- Added **Mock debugger provider lifecycle** coverage for API/capability metadata, service discovery, attach state/process identity, absence of unimplemented advanced services, and detach.
+- Added **Mock debugger deterministic pause and continue events** coverage for state transitions, exact event count/kind/stop reason, deterministic thread/instruction context, messages, and rejection of Continue while already running.
+- Added **Mock debugger attachment exclusivity and target cleanup** coverage for one-active-attachment enforcement, wrong-process rejection, reattach after cleanup, target-session disposal, and service invalidation after target disposal.
+- Added **Debugger workspace command and event source contract** coverage for capability-driven entry, Attach/Pause/Continue/Detach/Clear bindings, event columns, connection-generation capture, shared coordinator usage, stale-event checks, and absence of platform-specific host terms.
+- Added **Debugger target lifetime and stale-session source contract** coverage for coordinator ownership, disposal before target replacement/disconnect/Active Target changes, and plugin/process/connection-generation validation.
+- The authoritative next gate is a clean Windows Release build followed by **89/89** automated checks and the rev2 Mock Debugger runtime/UI acceptance documented in `docs/testing/APP_0.1.7_REV2_VERIFICATION.md`.
+- No new live-PS5 debugger hardware acceptance applies to rev2 because the PS5 plugin remains unchanged and does not yet implement `IDebuggerProvider`.
+
+### Documentation
+
+- Updated `README.md` to describe `0.1.7.rev2`, the verified 84/84 rev1 baseline, the new modeless Debugger workspace, deterministic Mock debugger behavior, current plugin/API versions, and the 89-check verification boundary.
+- Updated `docs/TeeKay87_Memory_Engine_Full_Development_Action_Plan.md` to mark rev1 verified, identify rev2 as the current implementation candidate, and keep rev3 PS5 Debug Transport and Attach/Detach as the next debugger milestone after rev2 verification.
+- Updated `docs/architecture/DEBUGGER_ARCHITECTURE.md` with the rev2 host workspace, target-lifetime ownership rules, Mock backend semantics, and explicit separation between target identity and temporary attach availability.
+- Updated current-state Plugin SDK, Disassembly, Memory Viewer, Universal Export, main-workspace, Mock, and PS5 documentation without rewriting historical revision records.
+- Added `docs/testing/APP_0.1.7_REV2_VERIFICATION.md` and `docs/testing/APP_0.1.7_REV2_SOURCE_REVIEW.md` for the new revision's Windows/runtime acceptance and pre-package source-boundary review.
+
+### Final Verification Result — 2026-09-08
+
+- The complete Windows verification suite subsequently passed **89/89** checks.
+- The complete focused Mock Debugger runtime/UI acceptance also passed: capability gating, modeless open without implicit attach, explicit attach, deterministic pause/resume events, event-history clearing, explicit detach/reattach, window-close cleanup, disconnect/connection-generation invalidation, Active Target lifetime coverage, multiple Debugger-window exclusivity/recovery, and regression smoke testing of the existing Scan, Memory Viewer, Disassembler, Saved Addresses, read/write, themes, and connect/disconnect paths.
+- `0.1.7.rev2` is therefore the fully verified host/Mock debugger baseline for the PS5 backend introduced in rev3. No live-PS5 debugger acceptance applied to rev2 because that revision contained no PS5 debugger implementation.
+
+
+## TeeKay87's Memory Engine 0.1.7.rev1 - Debugger Contracts and Core Foundation
+
+### Version Transition and Verified Baseline
+
+- Advanced the host application from the completed `0.1.6` Disassembler feature block to the new `0.1.7` Debugger feature block and reset the application revision to `rev1`.
+- Recorded `0.1.6.rev14 - Disassembler Multi-Selection Copy Consistency` as the final fully tested and hardware-verified `0.1.6` implementation. The completed block passed all **79/79** automated checks plus deterministic Mock runtime acceptance and live PlayStation 5 hardware acceptance.
+- Updated the final `0.1.6.rev14` verification record and added `docs/testing/APP_0.1.6_FINAL_VERIFICATION.md` so the completed Disassembler block is an explicit regression boundary for all debugger development.
+- Updated `AppInfo` to `0.1.7.rev1 - Debugger Contracts and Core Foundation`; application title/version presentation continues to consume this centralized metadata rather than introducing another hardcoded display value.
+
+### Added — Public Debugger Contracts
+
+- Advanced the public Plugin API additively from `2.11.0` to `2.12.0` for the first architecture-neutral debugger contract surface.
+- Added `IDebuggerProvider`, owned by a connected target session, to attach a debugger to a neutral `TargetProcess` without exposing backend transport details to Core or WPF.
+- Added `IDebuggerSession` as the lifetime boundary for one attached process. The contract exposes neutral execution state, debugger events, Pause, Continue, Detach, optional attached-session service discovery, and asynchronous disposal.
+- Added optional attached-session service contracts for:
+  - thread enumeration through `IDebuggerThreadService`;
+  - individual-thread suspend/resume through the separate `IDebuggerThreadControlService`;
+  - register snapshots and explicit register writes through `IDebuggerRegisterService`;
+  - software breakpoints and hardware/watchpoint requests through `IDebuggerBreakpointService`;
+  - call-stack retrieval through `IDebuggerCallStackService`;
+  - architecture-neutral step requests through `IDebuggerStepService`.
+- Added `DebuggerSessionExtensions.GetRequiredService<T>()` so callers can request an optional debugger service through the same explicit failure pattern already used by target sessions.
+- Added neutral debugger models for execution states, event kinds, stop reasons, event payloads, threads, register snapshots/write requests, semantic register roles, stack frames, breakpoint/watchpoint requests, breakpoint access modes, and step kinds.
+- Register values are represented as fixed-width byte vectors with optional architecture-neutral `InstructionPointer`, `StackPointer`, and `FramePointer` roles. No architecture-specific register enum or backend register structure is introduced into the shared API.
+- Added `TargetCapabilities.ThreadControl` as a separate explicit capability so future plugins can advertise thread enumeration without falsely promising per-thread suspend/resume support.
+
+### Added — Core Debugger Foundation
+
+- Added `DebuggerSessionIdentity`, binding debugger work to plugin id, process id/name, and host connection generation. The identity follows the same stale-session safety principle already verified by the Memory Viewer and Disassembler.
+- Added Core-owned debugger lifecycle state for detached, attaching, attached, running, paused, detaching, and faulted coordination without exposing a platform-specific backend state machine to the application.
+- Added `DebuggerEventContext` and event arguments so every event accepted by Core carries the immutable debugger-session identity plus a positive monotonic session-local sequence number.
+- Added `DebuggerSessionCoordinator` as the shared lifecycle/control owner for future debugger workspaces. The coordinator:
+  - serializes attach, pause, continue, and detach operations;
+  - rejects attach attempts from an invalid lifecycle state;
+  - validates that the backend actually attached to the neutral process requested by Core;
+  - cleans up failed or mismatched backend sessions;
+  - forwards events only from the currently attached debugger session;
+  - maps backend execution state into the shared Core lifecycle;
+  - resolves optional debugger services only from the active attached session;
+  - unsubscribes events and disposes the backend session during detach;
+  - prevents stale events from a detached session from being accepted as current debugger state.
+
+### Compatibility and Preserved Functionality
+
+- Kept Mock plugin `1.0.0.rev7` and PS5 plugin `0.1.0.rev24` unchanged. Both continue to target Plugin API `2.11.0` and remain compatible with the `2.12.0` host through the existing same-major/older-minor API compatibility rule.
+- Neither built-in plugin advertises `Debugger`, debugger thread/register/breakpoint/watchpoint/call-stack/step capabilities, or exposes `IDebuggerProvider` in rev1. Adding shared contracts does not enable a backend implicitly.
+- No PS5 debugger command, event port, packet parser, transport, or x86-specific debugger implementation is added in this revision.
+- No WPF Debugger workspace is added in rev1. The existing main workspace, scanner, Saved Addresses, export surfaces, Memory Viewer, and fully verified Disassembler remain unchanged production workflows.
+- Preserved the complete `0.1.6.rev14` Disassembler implementation as the navigation/inspection base future debugger revisions will integrate with rather than duplicate or refactor prematurely.
+
+### Verification Coverage
+
+- Extended the verification registry from **79** to **84** checks without removing or weakening any existing check.
+- Added **Debugger neutral model contracts** coverage for register value immutability/width validation and the neutral thread/frame/breakpoint/event models.
+- Added **Debugger optional service contracts** coverage for attached-session service discovery and required-service failure behavior.
+- Added **Debugger session target identity** coverage for plugin/process/connection-generation matching and stale identity rejection.
+- Added **Core debugger session lifecycle and event binding** coverage for attach, pause, continue, event identity/sequence forwarding, detach, and backend disposal.
+- Added **Core debugger attach safety and cleanup** coverage for wrong-process attach rejection, failed-session cleanup, recovery to a new valid attachment, and suppression of stale post-detach events.
+- Added `docs/testing/APP_0.1.7_REV1_VERIFICATION.md` with the authoritative Windows Release build, **84/84** automated-test, compatibility, source-boundary, and regression acceptance procedure.
+- Added `docs/testing/APP_0.1.7_REV1_SOURCE_REVIEW.md` recording the pre-package static review: all 79 baseline checks remain registered, exactly five new checks raise the registry to 84, both production plugin trees are byte-identical to rev14, no debugger capability is advertised by either plugin, no platform-specific token appears in the new shared debugger source, project/XAML XML is structurally valid, and documentation links resolve.
+- This source revision is a verification candidate until the Windows Release build and all 84 automated checks pass. No new live-PS5 debugger hardware test is required for rev1 because no platform debugger backend exists yet.
+
+### Documentation
+
+- Updated `README.md` to describe the complete current `0.1.7.rev1` functionality instead of retaining rev13/rev14 candidate wording.
+- Updated `docs/TeeKay87_Memory_Engine_Full_Development_Action_Plan.md` to mark the entire `0.1.6` Disassembler block complete, make the debugger the active development block, and define the ordered `0.1.7` debugger revision plan from shared contracts through final integration/export verification.
+- Added `docs/architecture/DEBUGGER_ARCHITECTURE.md` defining debugger ownership boundaries, capability/service mapping, session identity, event ordering, thread/register/breakpoint/call-stack/step models, rev1 non-goals, and the required extension rules for future platform backends.
+- Updated the Plugin SDK, Disassembly, Universal Export, Memory Viewer, main-workspace, Mock-plugin, and PS5-plugin documentation so current-state/version wording matches host `0.1.7.rev1` while preserving historical revision records.
+
+## TeeKay87's Memory Engine 0.1.6.rev14 - Disassembler Multi-Selection Copy Consistency
+
+### Fixed
+
+- Fixed the remaining Disassembler multi-selection copy inconsistency discovered during the rev13 Mock runtime pass. Rev13 correctly preserved the complete Extended selection when any selected row was right-clicked, but **Copy Address**, **Copy Bytes**, **Copy Instruction**, and **Copy Address + Instruction** still copied only the context-clicked row.
+- Changed all four granular Disassembler copy actions to consume the same display-ordered selected-row set already used by **Copy Selected**, `Ctrl+C`, and the Selected Instructions export scope.
+- Preserved the intended context-selection rule from rev13: right-clicking a row that is already selected keeps the full multi-selection, while right-clicking an unselected row first collapses the selection to that row. Because every copy action now reads the current selected set, the latter case still produces a single-row result naturally.
+
+### Copy Semantics
+
+- **Copy Address** now emits one address per selected instruction row.
+- **Copy Bytes** now emits one byte string per selected instruction row.
+- **Copy Instruction** now emits one decoded instruction per selected instruction row.
+- **Copy Address + Instruction** now emits one `<address>: <instruction>` line per selected instruction row.
+- **Copy Selected** and `Ctrl+C` retain the existing `<address>: <bytes>\t<instruction>` format.
+- Every multi-row copy projection is normalized through the existing `GetSelectedRowsInDisplayOrder()` path, so clipboard order follows the visible instruction order rather than Ctrl-click order.
+- Clipboard operations continue to use the already materialized Disassembler presentation state and perform no new target-memory read or write.
+
+### Added
+
+- Added automated verification check **Disassembler multi-selection copy consistency**. The new source-contract check verifies that the four granular copy handlers project Address, Bytes, Instruction, and Address + Instruction from the shared selected-row formatter, reuse display-order normalization, and no longer contain the old single-context-row `CopyText(...)` paths.
+- Increased the verification registry from 78 to **79 checks** without removing or weakening any existing test.
+- Added `docs/testing/APP_0.1.6_REV14_VERIFICATION.md` with the focused Windows/Mock regression procedure and the remaining live-PS5 finalization gate for version `0.1.6`.
+
+### Changed
+
+- Advanced centralized application metadata from `0.1.6.rev13` to `0.1.6.rev14` with feature title `Disassembler Multi-Selection Copy Consistency`. The native window title and compact application title remain title-only; the permanent bottom status bar remains the sole persistent version/revision presentation.
+- Refactored the Disassembler clipboard path so the existing no-argument `CopySelectedRows()` delegates to a shared formatter overload. The same overload now serves every granular copy projection and retains the existing clipboard status/error handling.
+- Updated README, Disassembler architecture documentation, and the full development action plan to describe the final intended selection-aware copy semantics.
+
+### Preserved
+
+- Preserved rev13's right-click selection behavior and row-specific Follow Target capability evaluation.
+- Preserved rev12's Displayed/Selected universal export, readable-region navigation, module-relative origin presentation, Mock Custom / Unknown architecture metadata, Follow Target behavior, syntax highlighting, continuous origin resolution, and successful-address Back/Forward history.
+- Preserved Plugin API `2.11.0`, Mock plugin `1.0.0.rev7`, and PS5 plugin `0.1.0.rev24`.
+- No Core, Plugin SDK, Mock provider, PS5 provider, scanner, target transport, Memory Viewer, Saved Addresses, export writer, or theme behavior is changed by this host-only copy correction.
+
+### Verification and Finalization Boundary
+
+- Rev13 was reported as **78/78 automated checks passed**.
+- Focused Mock runtime testing confirmed that rev13 fixed selection preservation: right-clicking any already-selected row kept the full selection, while right-clicking an unselected row correctly selected only that row.
+- The same runtime pass confirmed **Copy Selected** and `Ctrl+C` already copied the complete selected set, while the four granular copy commands remained single-context-row operations. Rev14 addresses only that remaining inconsistency.
+- The first rev14 Windows gate is a clean build plus **79/79** automated checks, followed by the focused Mock copy regression in `docs/testing/APP_0.1.6_REV14_VERIFICATION.md`.
+- After the focused Mock copy regression passes, continue the remaining live-PS5 rev12-rev14 acceptance checklist. Version `0.1.6` must not be marked complete or advanced until that final live-target verification is confirmed.
+
+### Final Verification Result — 2026-09-08
+
+- The required final verification was subsequently completed successfully: **79/79** automated checks passed, the focused Mock regression passed, and the complete `0.1.6` Disassembler workflow passed live PlayStation 5 hardware acceptance.
+- `0.1.6.rev14` is therefore the final accepted and hardware-verified revision of the `0.1.6` Disassembler feature block. The detailed final record is maintained in `docs/testing/APP_0.1.6_FINAL_VERIFICATION.md`.
+
+## TeeKay87's Memory Engine 0.1.6.rev13 - Disassembler Context Selection Fix
+
+### Fixed
+
+- Fixed the runtime Disassembler multi-selection regression discovered during the rev12 Mock acceptance pass. Right-clicking a selected row that was not the current `SelectedItem` could collapse an Extended selection to that single row before context-menu copy/export commands observed the selection.
+- Added a `PreviewMouseRightButtonDown` guard on the Disassembler instruction grid. When the pointer is over a row that is already part of a multi-selection, the host consumes the selection-changing right-button-down behavior before WPF can replace the existing `SelectedItems` set. Right-clicking an unselected row remains unchanged and intentionally selects only that new context row.
+- Removed the context-menu-opening write to the TwoWay-bound `SelectedInstruction` property. Context-menu enablement now evaluates Follow Target capability for the clicked row directly, so simply opening the menu no longer mutates the grid's primary selection and cannot collapse the existing multi-selection through the `SelectedItem` binding.
+
+### Added
+
+- Added row-specific `DisassemblerViewModel.CanFollowTarget(DisassemblyInstructionViewModel?)` evaluation so the context menu can determine whether the clicked instruction has a valid direct target without changing `SelectedInstruction`. Existing command execution still assigns the clicked row only when Follow Target is actually invoked.
+- Added automated verification check **Disassembler right-click preserves extended selection**. The check verifies the preview right-click hook, the selected-row multi-selection guard, the retained unselected-row collapse behavior, the absence of a context-menu-opening `SelectedInstruction` rewrite, and row-specific Follow Target capability evaluation.
+- Increased the verification registry from 77 to **78 checks** without removing or weakening any existing test.
+- Added `docs/testing/APP_0.1.6_REV13_VERIFICATION.md` with a focused Windows/Mock regression procedure and the remaining live-PS5 finalization gate for version `0.1.6`.
+
+### Changed
+
+- Advanced centralized application metadata from `0.1.6.rev12` to `0.1.6.rev13` with feature title `Disassembler Context Selection Fix`. The native window title and compact application title remain title-only; the permanent bottom status bar remains the sole persistent version/revision presentation.
+- Updated the current Disassembler documentation and full development action plan to identify rev13 as the corrective final `0.1.6` candidate after rev12's automated suite passed and Mock runtime testing exposed the context-selection defect.
+
+### Preserved
+
+- Preserved rev12's Disassembler multi-selection model, copy formats, Displayed/Selected universal export, readable-region navigation, module-relative origin presentation, Mock Custom / Unknown architecture metadata, Follow Target behavior, syntax highlighting, and successful-address Back/Forward history.
+- Preserved the single-row context-menu semantics: Copy Address, Copy Bytes, Copy Instruction, Copy Address + Instruction, and Follow Target still operate on the row that was actually right-clicked; only Copy Selected and Selected Instructions export consume the complete selected set.
+- Preserved the intended context behavior for an unselected row: right-clicking outside the current multi-selection collapses the old selection and makes the clicked row the new single selection.
+- Preserved Plugin API `2.11.0`, Mock plugin `1.0.0.rev7`, and PS5 plugin `0.1.0.rev24`. No Core, Plugin SDK, Mock provider, PS5 provider, scanner, target transport, Memory Viewer, Saved Addresses, or export-writer behavior is changed by this host-only correction.
+
+### Verification and Finalization Boundary
+
+- The rev12 automated suite was reported as **77/77 passed** before runtime testing began.
+- Mock runtime verification confirmed the rev12 Custom / Unknown architecture presentation, deterministic disassembly fixture, Follow Target/history, region navigation, copy through `Ctrl+C`, universal export, and the other tested rev12 behavior. The only reported defect was the right-click collapse of a multi-selection when the clicked row was not the primary selected row.
+- Rev13 is intentionally a narrow corrective revision. The first Windows gate is a clean build plus **78/78** automated checks, followed by a focused Mock right-click regression: right-click the first, middle, and final rows of the same multi-selection and confirm the full selection remains intact; right-click an unselected row and confirm selection collapses only in that case.
+- After the focused rev13 regression passes, continue the remaining rev12/rev13 live-PS5 acceptance checklist. Version `0.1.6` must not be marked complete or advanced until that final live-target verification is confirmed.
+
+## TeeKay87's Memory Engine 0.1.6.rev12 - Disassembler Export, Region Navigation and Finalization
+
+### Added
+
+- Added **extended multi-selection** to the Disassembler instruction table. Ctrl/Shift selection now works without changing the existing Address / Bytes / Instruction column structure, syntax renderer, origin-row geometry, or Follow Target selection semantics.
+- Added Disassembler copy actions for **Copy Address**, **Copy Bytes**, **Copy Instruction**, **Copy Address + Instruction**, and **Copy Selected**. `Ctrl+C` invokes Copy Selected, and multi-row clipboard output is normalized to the current displayed instruction order rather than selection-click order.
+- Added a visible **Export** button and an **Export...** context-menu action to the Disassembler. The workflow reuses the existing universal export dialog, column selector, format selector, transactional writer, progress/cancellation dialog, and destination-publication guarantees instead of introducing a Disassembler-specific file writer.
+- Added Core `DisassemblyExportSource`, a structured `IExportDataSource` for Disassembler rows. Available columns are Address, Bytes, Instruction, Mnemonic, Operands, Length, Flow Control, Branch Target, Valid, Region / Module, Protection, and Module Relative. JSON therefore preserves structured instruction data instead of exporting only the rendered combined instruction string.
+- Added **Displayed Instructions** and **Selected Instructions** export scopes. Selected export snapshots only the current selected rows while preserving their displayed order; Displayed exports the complete bounded instruction list currently materialized in the workspace.
+- Added shared host `ExportDestinationPicker` so Scan Results, Saved Addresses, and Disassembler export use one file-extension/filter/destination implementation for JSON, CSV, TSV, and Markdown table output.
+- Added Disassembler region-navigation commands: **Previous Region**, **Region Start**, **Region End**, and **Next Region**. Previous/Next reuse Core's existing `MemoryViewerRegionNavigator`, so readable/non-guarded filtering is shared rather than reimplemented in the Disassembler.
+- Added module-relative origin presentation when the current memory map provides a real `ModuleName`. The host resolves the lowest mapped base for that module and presents the current origin as `<module> + 0x<offset>` without fabricating module names for anonymous mappings.
+- Added automated verification checks for structured Disassembly export, Disassembler selection/copy/export wiring, readable-region navigation/module-relative presentation, and Mock Target custom-architecture declaration. The verification registry now contains **77 checks**.
+- Added `docs/testing/APP_0.1.6_REV12_VERIFICATION.md` as the combined final acceptance checklist for the complete `0.1.6` Disassembler feature block.
+
+### Changed
+
+- Advanced centralized application metadata from `0.1.6.rev11` to `0.1.6.rev12` with feature title `Disassembler Export, Region Navigation and Finalization`. The native window title and compact application title remain title-only; `AppInfo.DisplayVersion` remains the sole persistent version/revision presentation in the bottom status bar.
+- Changed Mock Target architecture metadata from `X64` to `Unknown` while retaining 64-bit addresses, 64-bit pointers, and little-endian byte order. The Mock provider implements a synthetic deterministic instruction set, so presenting it as x86-64 was semantically incorrect even though its address model is 64-bit.
+- Updated `MockDisassemblerProvider` to accept only the Mock Target's custom/unknown 64-bit little-endian architecture descriptor and to reject a real X64 descriptor. This prevents the synthetic provider from claiming compatibility with real x86-64 targets.
+- Advanced the Mock plugin from `1.0.0.rev6` to **`1.0.0.rev7`** for the architecture-metadata correction. Plugin API remains `2.11.0`. PS5 plugin remains `0.1.0.rev24` because rev12 adds no PS5-specific decoding or transport behavior.
+- Updated the Disassembler Architecture display so a neutral `CpuArchitecture.Unknown` descriptor is shown as **Custom / Unknown** instead of implying a hardware ISA.
+- Refactored the existing Scan Results and Saved Addresses export destination selection to use the new shared `ExportDestinationPicker`; their scopes, data sources, output formats, transactional behavior, and user-visible semantics are unchanged.
+
+### Disassembler Export Semantics
+
+- Disassembly export is a presentation snapshot and performs no new target-memory reads while writing the file. The exported rows come from the already materialized bounded Disassembler snapshot.
+- JSON uses the existing schema-aware universal export writer and retains typed values where appropriate, including numeric Length and boolean Valid. A missing direct Branch Target remains null/blank rather than being inferred from rendered operand text.
+- Region / Module and Protection are taken from the actual memory region associated with the current Disassembler snapshot. Module-relative values are emitted only when a real module name/base can be resolved from the loaded memory map.
+- Export cancellation and failure retain the existing transactional guarantee: the requested destination is published only after the complete export succeeds; partial temporary output is not exposed as a successful file.
+
+### Region and Navigation Semantics
+
+- Previous/Next Region consider only readable, non-guarded regions, exactly like Memory Viewer. Region Start navigates to the first byte; Region End navigates to the final byte (`EndAddressExclusive - 1`).
+- Every successful region navigation uses the same `NavigateAndRecordAsync` path as Go To and Follow Target, so Back/Forward history remains one coherent successful-address timeline.
+- Failed region navigation/read attempts keep the previous instruction list and history position, preserving the existing stale-session and read-failure safety behavior.
+- Refresh continues to re-read the current origin without creating a history entry, and origin/instruction-boundary resolution remains the continuous rev5 behavior.
+
+### Preserved
+
+- Preserved Plugin API `2.11.0` and PS5 plugin `0.1.0.rev24`. No Plugin SDK contract, PS5 Iced decoder behavior, ps5debug-NG transport, scanner path, or target I/O contract changes are required for rev12.
+- Preserved rev11 Follow Target behavior for direct provider-supplied Call/Jump/ConditionalJump targets, including context-menu, double-click, Enter, Back/Forward integration, and rejection of unresolved indirect targets.
+- Preserved the rev5 continuous 512-byte-before / 512-byte-from-origin bounded decode model, origin resolution when the requested address lies inside an instruction, rev6 syntax highlighting, and the stable three-column Disassembler layout.
+- Preserved Memory Viewer value-span highlighting, Saved Addresses manual entry, Scan Results/Saved Addresses context menus, freeze/write behavior, universal export consumers, themes, and unrelated verified application functionality.
+
+### Verification and Finalization Boundary
+
+- Rev12 starts from the user-supplied `0.1.6.rev11` package whose Follow Target behavior was runtime-confirmed.
+- The planned `0.1.6.rev12` selection/export work and former `0.1.6.rev13` region-navigation/final-polish work are intentionally combined into this single final implementation candidate, so one complete Windows/Mock/PS5 acceptance pass can verify the finished Disassembler subsystem as a whole.
+- Static review confirms the new platform-specific behavior is limited to the Mock plugin's metadata correction; Disassembler export/navigation remains shared Core/host functionality. No PS5/x86-64 assumptions were added to Core/WPF.
+- A clean Windows build and **77/77** automated checks are the first acceptance gate. Final `0.1.6` completion additionally requires the rev12 runtime/UI checklist: multi-selection/copy, all export formats/scopes, Previous/Start/End/Next region navigation, module-relative presentation where available, Refresh/history, Follow Target regression, Mock Target behavior, theme/layout regression, stale-session safety, and live PS5 verification.
+- `0.1.6` must not be marked complete or advanced to `0.1.7` until that combined verification is confirmed.
+
+## TeeKay87's Memory Engine 0.1.6.rev11 - Branch and Call Target Navigation
+
+### Added
+
+- Added **Follow Target** to the Disassembler row context menu. The action is enabled only for valid neutral instruction records whose provider supplied a direct `BranchTarget` and whose `FlowControl` is `Call`, `Jump`, or `ConditionalJump`.
+- Added double-click target following for the same eligible direct-flow rows. Double-clicking an ordinary instruction or an indirect flow instruction does not navigate.
+- Added **Enter** as a keyboard shortcut for following the currently selected direct target. The context-menu item advertises the same shortcut.
+- Added row-level `CanFollowTarget` presentation state derived entirely from the existing neutral `DisassembledInstruction` fields. No opcode parsing, register-name matching, operand-text parsing, or platform branching was introduced in WPF.
+- Added `FollowTargetCommand` to the Disassembler ViewModel. Successful target following reuses the same `NavigateAndRecordAsync` path as Go To, so Follow Target participates naturally in Back/Forward history and in forward-branch truncation after navigating Back.
+- Added automated verification check **Disassembler direct target navigation contract**. The verification project now copies the production Disassembler XAML, code-behind, row ViewModel, and workspace ViewModel as fixtures and verifies the direct-target gating, interaction wiring, shared history path, and absence of PS5/Iced-specific host logic.
+- Added `docs/testing/APP_0.1.6_REV11_VERIFICATION.md` with Mock and live-PS5 direct Call/Jump/ConditionalJump, indirect-target safety, failure/history, keyboard/mouse/context-menu, theme, and cross-workspace regression checks.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev10` to `0.1.6.rev11` with feature title `Branch and Call Target Navigation`. Version/revision remains visible only in the permanent bottom status bar; native and compact application titles remain title-only.
+- Increased the automated verification registry from 72 to **73 checks**. No existing check was removed or weakened.
+- Updated README and current Disassembler/UI documentation so direct target navigation is described as implemented rather than a future milestone.
+
+### Safety and Navigation Semantics
+
+- Direct target navigation never derives an address by parsing rendered operand text. The host trusts only the neutral provider's nullable `BranchTarget`.
+- Indirect instructions such as `call rax`, `call [rax]`, and `jmp rbx` remain non-followable because their provider records intentionally expose no static target. Future debugger/register context may add a separate dynamic-resolution path, but rev11 does not guess.
+- A successful Follow Target read becomes a normal Disassembler history entry. Back/Forward therefore traverses Go To and Follow Target destinations uniformly.
+- A failed target read keeps the previous instruction list and history position, matching the already verified failed-Go-To semantics.
+- Follow Target continues through the captured Disassembler plugin/process/connection-generation identity and the existing foreground target reservation; it does not open a new transport or bypass stale-session protection.
+
+### Preserved
+
+- Preserved Plugin API `2.11.0`, Mock plugin `1.0.0.rev6`, and PS5 plugin `0.1.0.rev24`. Both providers already supplied the direct/indirect target metadata rev11 consumes, so no plugin revision is required.
+- Preserved Core disassembly reads and validation byte-for-byte. Rev11 does not change the 512-before/512-after bounded context, continuous decode stream, instruction-boundary/origin resolution, region clamping, or provider-output validation.
+- Preserved Disassembler syntax highlighting and the existing Address / Bytes / Instruction layout and row geometry.
+- Preserved Scan Results, Saved Addresses, Memory Viewer, manual Saved Address entry, value-span highlighting, scanner behavior, universal export, themes, target I/O coordination, and all platform-specific behavior unrelated to target following.
+
+### Verification and Documentation
+
+- Rev11 starts from the user-supplied `0.1.6.rev10` package.
+- Source review confirms the functional implementation is limited to the host Disassembler presentation/navigation layer plus verification/documentation and centralized host metadata. Core, Plugin SDK, Mock plugin, and PS5 plugin behavior is unchanged.
+- Windows clean build and **73/73** automated checks are the authoritative first verification gates. Runtime acceptance then requires direct Call/Jump/ConditionalJump following plus indirect-target rejection and Back/Forward verification on Mock and PS5.
+
+## TeeKay87's Memory Engine 0.1.6.rev10 - Manual Saved Address Compile Fix
+
+### Fixed
+
+- Fixed Windows compile error `CS0177` in `ManualSavedAddressDialog.TryParseHexAddress`. The rev9 implementation returned a short-circuit `candidate.Length ... && ulong.TryParse(..., out address)` expression. For candidates that failed the length guard, `ulong.TryParse` was not executed and the compiler could not prove that the `out address` parameter had been assigned before the method returned.
+- Initialized the `out` address to `0` before address normalization and the short-circuit length check. Valid hexadecimal parsing behavior is unchanged; invalid length/input paths now return `false` with a definitely assigned output value.
+- Addressed the root cause of the accompanying XAML designer/build errors reported for `MainWindow.xaml`. Those missing-type/member errors appeared after the App assembly failed to compile and are not treated as independent changes to `ProportionalGridSplitter`, `TextBoxInputFilter`, or their XAML namespaces.
+
+### Added
+
+- Added automated verification check **Saved Addresses manual-entry address parser out initialization**. The verification project now copies `ManualSavedAddressDialog.xaml.cs` as a production source fixture and verifies that the parser initializes its `out` address before the short-circuit length guard.
+- Added `docs/testing/APP_0.1.6_REV10_VERIFICATION.md` covering the clean Windows build, disappearance of the cascading XAML errors, the 72-check suite, invalid/valid manual address parsing, variable-length validation, and regression smoke tests.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev9` to `0.1.6.rev10` with feature title `Manual Saved Address Compile Fix`. Version/revision remains visible only in the permanent bottom status bar; native and compact application titles remain title-only.
+- Increased the automated verification registry from 71 to **72 checks**. No existing check was removed or weakened.
+- Updated README and the current Saved Addresses, Memory Viewer, Disassembler, main-workspace, input-validation, theme, and research documentation to identify rev10 as the corrective host state while preserving rev9 as the revision that introduced manual Saved Address entry.
+
+### Preserved
+
+- Preserved the rev9 **Add Manually / Remove All / Export** toolbar order and all manual-dialog controls, validation ranges, target/session revalidation, duplicate semantics, immediate refresh, and disabled planned placeholders.
+- Preserved Plugin API `2.11.0`, Mock plugin `1.0.0.rev6`, and PS5 plugin `0.1.0.rev24`; no Core, Plugin SDK, scanner, decoder, or platform-plugin behavior is changed by this fix.
+- Preserved Memory Viewer value-span highlighting and explicit OneWay bindings, and preserved Disassembler continuous decoding, syntax highlighting, navigation history, and workspace entry points.
+
+### Verification and Documentation
+
+- Rev10 starts from the user-supplied rev9 package after the first Windows build exposed `CS0177` at the manual hexadecimal parser and cascading XAML designer errors.
+- The functional code correction is intentionally one-line and host-side: `address = 0;` is assigned before the existing parser guards.
+- Windows clean build and **72/72** automated checks are the authoritative verification gates. Runtime smoke testing must confirm the manual dialog opens and rejects invalid hexadecimal addresses without exception.
+
+## TeeKay87's Memory Engine 0.1.6.rev9 - Manual Saved Address Entry
+
+### Added
+
+- Added **Add Manually** to the Saved Addresses toolbar, producing the requested toolbar order **Add Manually / Remove All / Export** without changing the Saved Addresses table layout or the existing destructive styling of Remove All.
+- Added a theme-aware **Add Saved Address Manually** dialog. Functional fields are Address, Description, Value Type, and Length. Address accepts the existing host hexadecimal-address syntax, Value Type is populated only from the active plugin's current `IMemoryValueType` declarations, and fixed-size types display their required byte count while variable-length types accept an explicit 1-4,096 byte length.
+- Added immediate post-create value refresh. A successfully created manual row is bound to the current Active Target and is immediately read through the existing Saved Addresses refresh path; from that point it uses the same Value editing, Freeze, refresh, Protection, export, Memory Viewer, Disassembler, copy, and remove workflows as a row captured from Scan Results.
+- Added target-safe duplicate handling for manual rows using the existing Saved Address identity rule: target process + address + Value Type. Attempting to add an identity that is already saved selects the existing row instead of creating a duplicate.
+- Added visible disabled placeholders based on the public Cheat Engine manual-address workflow for functionality that Memory Engine does not yet model: hexadecimal display preference, Binary start bit, Text Unicode/code-page options, and Pointer base-address/offset controls with Add Offset / Remove Offset. The placeholders are explicitly marked as planned and cannot affect a created row.
+- Added `docs/research/CHEAT_ENGINE_MANUAL_ADDRESS_DIALOG.md`, documenting the reviewed public Cheat Engine controls and the neutral mapping chosen for Memory Engine rather than copying platform-specific behavior into WPF.
+- Added `docs/testing/APP_0.1.6_REV9_VERIFICATION.md` with clean-build, toolbar/dialog, fixed-size/variable-size, duplicate, invalid/unreadable address, placeholder, theme, Mock Target, and live PS5 acceptance checks.
+- Added two automated verification checks for the production Saved Addresses toolbar contract and the manual-entry dialog contract. The verification executable now carries `MainWindow.xaml` and `ManualSavedAddressDialog.xaml` as fixtures for these UI-level regression checks.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev8` to `0.1.6.rev9` with feature title `Manual Saved Address Entry`. The native Windows title and compact application-title row remain title-only; the permanent bottom status bar remains the only persistent version/revision presentation.
+- Extended `SavedAddressViewModel` with a manual-construction path that starts without fabricated target bytes and then receives its real current bytes through the already-existing refresh pipeline. The original Scan Result construction path retains its previous initialization semantics.
+- Centralized manual variable-length constraints in host `ManualSavedAddressEntryLimits` (`1` minimum, `10` default, `4,096` maximum) so the dialog and final commit guard cannot drift to different limits.
+- Added `CanAddSavedAddressManually` and a foreground-safe manual-add operation to `PluginViewModel`. The command is available only when the selected plugin can read memory, exposes at least one Value Type, has a valid current Active Target, and is not in an incompatible target operation. The operation captures and revalidates session/process identity before the row is committed.
+- Updated current README, Saved Addresses, main-workspace, input-validation, theme, Memory Viewer, and Disassembler documentation for the rev9 host state and manual-entry workflow.
+- Increased the automated verification registry from 69 to **71 checks**. No existing check was removed or weakened.
+
+### Preserved
+
+- Preserved Plugin API `2.11.0`, Mock plugin `1.0.0.rev6`, and PS5 plugin `0.1.0.rev24`. Manual entry uses already-declared neutral Value Types and target services; no Plugin SDK, Core, decoder, scanner, or platform-plugin source change is required.
+- Preserved all existing Saved Address rows and behaviors. Double-click/**Save Address** capture from Scan Results, direct Address/Type/Value editing, Frozen writes, independent live refresh, target identity, Protection display, export snapshots, Remove/Remove All, and Memory Viewer/Disassembler entry points remain unchanged.
+- Preserved the established Saved Address duplicate identity semantics instead of introducing a separate manual-only rule.
+- Preserved the rev7/rev8 Memory Viewer value-span renderer and explicit OneWay binding correction. Manual entry does not alter Memory Viewer highlighting, read/write safety, history, bookmarks, or region navigation.
+- Preserved the rev5/rev6 Disassembler continuous context decoding, origin resolution, syntax highlighting, Back/Forward history, and workspace routing. Rev9 does not change disassembly contracts or presentation.
+- Preserved theme compatibility. The new dialog uses existing shared WPF brushes/styles and disabled-control presentation and introduces no new required theme key or hardcoded platform-specific color.
+
+### Verification and Documentation
+
+- Rev9 starts from the user-supplied, runtime-working `0.1.6.rev8` package after the rev8 Memory Viewer binding correction.
+- Source review confirms the functional code change is host-side Saved Addresses/UI work. Core, Plugin SDK, Mock plugin, and PS5 plugin remain source-identical to the rev8 base.
+- The manual dialog intentionally does not claim pointer-chain support. Pointer base/offset controls remain disabled until a platform-neutral pointer model, dereference rules, target/session handling, and verification path exist.
+- The automated verification registry contains **71 checks**. Windows clean build, **71/71** automated checks, Mock Target manual-add runtime testing, and live-PS5 manual-add testing remain the authoritative acceptance gates.
+
+
+## TeeKay87's Memory Engine 0.1.6.rev8 - Memory Viewer Value-Span Binding Fix
+
+### Fixed
+
+- Fixed the runtime `InvalidOperationException` that occurred when opening Memory Viewer after the rev7 value-span renderer was introduced. WPF was allowed to choose its default binding mode for the six `Run.Text` bindings that render `HexPrefix`, `HighlightedHexBytes`, `HexSuffix`, `AsciiPrefix`, `HighlightedAscii`, and `AsciiSuffix`; those source properties are intentionally read-only presentation values, so a TwoWay/OneWayToSource binding cannot target them.
+- Set all six Memory Viewer `Run.Text` bindings explicitly to `Mode=OneWay`. The inline prefix/highlight/suffix renderer remains unchanged otherwise, so the full known value span can still be highlighted independently inside Hex Bytes and ASCII without requiring writable ViewModel properties or presentation-only setters.
+
+### Added
+
+- Added the automated verification check **Memory Viewer value-span bindings are OneWay**. The verification project now copies the production `MemoryViewerWindow.xaml` as a test fixture and asserts that every read-only inline segment used by the value-span renderer is explicitly OneWay-bound. This directly covers the runtime failure reported against rev7 rather than only retesting the Core span-intersection calculations.
+- Added `docs/testing/APP_0.1.6_REV8_VERIFICATION.md` with the clean-build, 69-check, Memory Viewer opening, four-byte span, cross-row span, history, clipboard/edit, and Disassembler-route acceptance steps for the corrective revision.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev7` to `0.1.6.rev8` with feature title `Memory Viewer Value-Span Binding Fix`. The native Windows title and compact application-title row remain title-only; the permanent bottom status bar remains the only persistent version/revision presentation.
+- Updated README and the current Memory Viewer/UI/theme/disassembly documentation to identify `0.1.6.rev8` as the current host revision while preserving the established rev7 value-span behavior and all earlier revision history.
+- Increased the automated verification registry from 68 to **69 checks**. No existing verification case was removed or weakened.
+
+### Preserved
+
+- Preserved the rev7 `MemoryViewHighlightSpan` / `MemoryViewRowHighlight` calculations, source-size propagation from Scan Results and Saved Addresses, cross-row span behavior, one-byte manual/bookmark/region navigation, span-aware Back/Forward state, larger bounded pages for unusually long values, and status reporting for partially visible spans.
+- Preserved Memory Viewer row geometry and presentation semantics: Address / Hex Bytes / ASCII remains the table format, the green origin-row surface remains independent from the byte-span overlay, and the fix introduces no font-weight, border, margin, padding, column-width, or row-height change.
+- Preserved plain clipboard/edit data. `Bytes`, `HexBytes`, `Ascii`, `ClipboardRow`, and the verified full-row raw-byte editing/write/read-back path are unchanged; the OneWay fix affects only WPF presentation bindings.
+- Preserved Plugin API `2.11.0`, Mock plugin `1.0.0.rev6`, and PS5 plugin `0.1.0.rev24`. No plugin source, disassembly provider, target transport, scanner, Saved Addresses model, universal export contract, or platform-specific behavior changes in rev8.
+- Preserved rev6/rev7 Disassembler syntax highlighting, continuous around-origin decode, successful-address Back/Forward history, Scan Results/Saved Addresses entry points, and Memory Viewer **Open in Disassembler** routing.
+
+### Verification and Documentation
+
+- Rev8 starts from the user-supplied `0.1.6.rev7` package after a Windows runtime test exposed the read-only `Run.Text` binding exception immediately when Memory Viewer attempted to render its value-span cells.
+- Source review confirms the corrective code path is limited to explicit OneWay binding metadata plus its verification fixture/check; the Core value-span logic and platform plugins are unchanged.
+- The automated verification registry contains **69 checks**. The new binding-mode regression check complements, rather than replaces, the rev7 Core value-span highlighting check.
+- Windows clean build, **69/69** automated checks, and runtime opening of Memory Viewer remain the authoritative acceptance gates. Runtime verification should repeat the four-byte `0x42D43C` case and confirm that the viewer opens without exception and highlights the intended four bytes in Hex and ASCII.
+
+
+## TeeKay87's Memory Engine 0.1.6.rev7 - Memory Viewer Value-Span Highlighting
+
+### Added
+
+- Added Core `MemoryViewHighlightSpan` / `MemoryViewRowHighlight` models for platform-neutral intersection of an exact address + byte count with each visible Memory Viewer row. The calculation supports spans contained inside one row, spans that cross row boundaries, non-overlapping rows, and high addresses without unsigned overflow.
+- Added value-size-aware Memory Viewer entry payloads from both existing navigation sources. **Scan Results -> Open in Memory Viewer** now passes `CurrentValue.Size`; **Saved Addresses -> Open in Memory Viewer** now passes the row's current `ValueSize`. The host does not infer size from display text or platform-specific type names.
+- Added byte-level visual highlighting inside the existing **Hex Bytes** and **ASCII** cells. The complete visible source-value span is rendered using the existing theme-aware Primary button background/text brush pair, while the containing row keeps the already-verified green origin marker. No new required theme key is introduced.
+- Added span-aware Memory Viewer history state. Back/Forward now restores both the successful requested address and the byte-count highlight that belonged to that navigation entry. Manual Go To, bookmarks, and region navigation intentionally create one-byte highlight entries because those workflows do not carry external value-size context.
+- Added larger bounded Memory Viewer page requests for unusually long known source values. Values that fit comfortably inside the normal 512-byte view keep the established page size; larger spans request approximately twice their byte count plus row-alignment headroom, capped by the existing `MemoryViewerReader.MaximumWindowByteCount` of 65,536 bytes and still clamped to one readable non-guarded region.
+- Added `docs/testing/APP_0.1.6_REV7_VERIFICATION.md` covering the 68-check suite, four-byte PS5 example at `0x42D43C`, cross-row spans, Saved Address Value Type size propagation, manual one-byte navigation, Back/Forward span restoration, theme/layout behavior, clipboard/edit regressions, and large Array-of-Bytes visibility.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev6` to `0.1.6.rev7` with feature title `Memory Viewer Value-Span Highlighting`. The native window title and compact top application row remain title-only; `0.1.6.rev7` remains the only persistent version/revision text in the bottom status bar.
+- Replaced only the Memory Viewer **Hex Bytes** and **ASCII** DataGrid column cell presenters with inline prefix/highlight/suffix templates. The user-facing table remains **Address / Hex Bytes / ASCII**, uses the same column widths and monospaced text, and does not add a new column, border, font-size change, bold weight, margin, padding, or row-height change.
+- Extended `MemoryViewerRowViewModel` with presentation-only highlight segments while preserving the existing plain `Bytes`, `HexBytes`, `Ascii`, and `ClipboardRow` values. Copy and edit workflows therefore continue to consume the same unformatted byte/text data rather than rendered highlight markup.
+- Changed Memory Viewer navigation history from address-only entries to address + highlight-byte-count entries. Duplicate detection now compares both values, Refresh remains history-neutral, and a new successful navigation after Back still discards the abandoned Forward branch.
+- Updated the Memory Viewer status text for multi-byte source entries to report whether the full value span is visible. If a region/address-space/window boundary prevents the complete span from appearing, the status reports the visible highlighted byte count instead of claiming full coverage.
+- Updated README and current Memory Viewer/theme/main-workspace/disassembly/export/PS5 documentation to describe host `0.1.6.rev7` and make clear that Plugin API and platform-plugin behavior are unchanged.
+
+### Preserved
+
+- Preserved Plugin API `2.11.0`, Mock plugin `1.0.0.rev6`, and PS5 plugin `0.1.0.rev24`. No plugin source, decoder, scan transport, or capability contract change is required for this host/Core presentation feature.
+- Preserved the existing `MemoryViewerReader` safety rules: every read remains bounded, belongs to one readable non-guarded `MemoryRegion`, and uses the same target/process/connection-generation validation plus foreground target-I/O reservation.
+- Preserved the original 512-byte page for normal one-byte navigation and ordinary numeric source values. Larger pages are requested only when the known source span is large enough that the normal centered page could not contain it fully.
+- Preserved the independent green origin-row marker and ordinary DataGrid selection behavior. The new byte-span overlay does not replace origin state and does not make additional rows navigation origins when a span crosses a row boundary.
+- Preserved Memory Viewer row editing semantics: **Edit... / Edit Hex Bytes...** still edits and verifies the complete selected displayed row. The visual value-span highlight does not silently narrow the existing write range.
+- Preserved all Memory Viewer clipboard outputs exactly. Highlighted runs are presentation-only; copied Hex Bytes/ASCII/row text contains the same plain text as rev6 with no inserted brackets, markup, or delimiters.
+- Preserved rev6 Memory Viewer **Open in Disassembler**, Disassembler syntax highlighting, continuous origin resolution, Back/Forward history, Scan Results/Saved Addresses Disassembler entry points, and all previously verified scanner, storage, Saved Addresses, export, theme, and target-state behavior.
+
+### Verification and Documentation
+
+- Rev7 starts from the user-supplied `0.1.6.rev6` package after all **67/67** automated checks passed. Runtime testing also confirmed the new Disassembler syntax highlighting in the Dimmed theme, the Scan Results/Saved Addresses/Memory Viewer navigation entry points, and working Disassembler Back/Forward history.
+- The automated verification registry now contains **68 checks**. The new `Memory Viewer value-span highlighting` test verifies in-row and cross-row range intersections, non-overlap behavior, high-address saturation, and invalid zero-length rejection; all 67 rev6 checks remain present.
+- Source review confirms the implementation introduces no PS5/x86/Iced knowledge into Memory Viewer/Core highlighting and no new platform command path. Source size comes from existing neutral scan/Saved Address value metadata.
+- Windows clean build, **68/68** automated checks, and runtime/UI verification remain the authoritative acceptance gates. Runtime verification should specifically confirm the previously observed `0x42D43C` four-byte case, a cross-row value span, one-byte manual navigation, Back/Forward span restoration, and layout stability in the active themes.
+
+
+## TeeKay87's Memory Engine 0.1.6.rev6 - Disassembly Syntax Highlighting and Navigation History
+
+### Added
+
+- Added architecture-neutral Disassembler syntax presentation metadata to Plugin API `2.11.0` through `DisassemblyTextToken` and `DisassemblyTextTokenKind`. Providers may now describe formatted instruction text as semantic `Mnemonic`, `FlowControlMnemonic`, `Register`, `Number`, `Keyword`, or plain `Text` segments without exposing target-specific register/opcode knowledge to Core or WPF.
+- Added a backward-compatible syntax-token surface to `DisassembledInstruction`. The original constructor remains present with its previous signature and produces an empty token collection, while the new overload accepts provider-supplied tokens. Existing compatible Plugin API 2.x plugins therefore continue to render plain instruction text even when they do not opt into syntax metadata.
+- Added PS5 syntax-token generation to `Ps5X64DisassemblerProvider`. Iced `1.21.0` remains the architecture-specific decoder/formatter inside the PS5 plugin; its `FormatterOutput` token kinds are translated into the neutral Plugin SDK categories before leaving the plugin. Flow-control mnemonics are classified through the already-neutral `DisassemblyFlowControl` result rather than through WPF string matching.
+- Added deterministic syntax-token output to the Mock disassembler so syntax presentation can be regression-tested without hardware.
+- Added theme-aware Disassembler syntax brush resources for mnemonic, flow control, register, number, and keyword text. Bundled Light, Dimmed, and Dark themes define explicit values. The theme loader treats the new syntax colors as optional extensions with semantic fallbacks to existing required palette entries, so custom theme files created before rev6 remain valid.
+- Added successful-address **Back** / **Forward** navigation history to the Disassembler, including Alt+Left / Alt+Right shortcuts. The initial address and successful Go To operations are recorded; Refresh is intentionally history-neutral, failed reads do not advance history, and a new successful navigation after going Back removes the abandoned Forward branch.
+- Added **Open in Disassembler** to the Memory Viewer row context menu. The action opens the selected row address through the existing generic Disassembler workspace and is enabled only while the Memory Viewer’s captured plugin/process/connection generation still matches a current Active Target that can provide Disassembly.
+- Added `docs/testing/APP_0.1.6_REV6_VERIFICATION.md` covering the 67-check automated suite, syntax-token fidelity, Light/Dimmed/Dark highlighting, unchanged table geometry, Disassembler history semantics, Memory Viewer entry-point safety, Mock runtime behavior, and live PS5 preservation checks.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev5` to `0.1.6.rev6` with feature title `Disassembly Syntax Highlighting and Navigation History`. The native window title and compact top application row remain title-only; `0.1.6.rev6` remains visible in the permanent bottom status bar.
+- Advanced Plugin API compatibility metadata from `2.10.0` to `2.11.0` for the additive neutral syntax-token model.
+- Advanced Mock plugin metadata from `1.0.0.rev5` to `1.0.0.rev6` because its disassembler now emits neutral syntax tokens and targets Plugin API `2.11.0`.
+- Advanced PS5 plugin metadata from `0.1.0.rev23` to `0.1.0.rev24` because its x86-64 provider now exports neutral syntax-token metadata and targets Plugin API `2.11.0`.
+- Changed only the rendered content implementation of the existing **Instruction** DataGrid column from a plain generated text element to a custom TextBlock that emits WPF `Run` elements for provider tokens. The user-facing table remains **Address / Bytes / Instruction** with the same widths, row selection, origin background, virtualization, and monospaced instruction text.
+- Moved the existing tag-based context-menu enabled-state helper out of `MainWindow` into a reusable host UI utility so Scan Results, Saved Addresses, and the new Memory Viewer Disassembler action share one implementation instead of duplicating menu-item lookup/state logic.
+- Updated README and current architecture/UI/plugin documentation to describe Plugin API `2.11.0`, syntax-token ownership, theme fallback behavior, active Disassembler history, and Memory Viewer-to-Disassembler navigation.
+
+### Preserved
+
+- Preserved the rev5 continuous decode/origin-resolution path unchanged: up to 512 bytes before plus 512 bytes from the requested origin are read once, clamped to one readable non-guarded region, and decoded as one continuous provider stream. Syntax highlighting does not trigger additional target reads or a second decode pass.
+- Preserved `IDisassemblerProvider` itself and all established memory-I/O/session boundaries. PS5 decoding still uses caller-supplied bytes through Iced inside the PS5 plugin; no new ps5debug-NG command path is introduced.
+- Preserved plain-text compatibility for providers that return no syntax tokens. The custom Instruction renderer validates that token text reconstructs the existing combined instruction string and falls back to the original plain text when metadata is absent or inconsistent.
+- Preserved the exact requested address as Disassembler history/origin state even when the highlighted instruction begins before that byte.
+- Preserved Scan Results and Saved Addresses **Open in Memory Viewer** / **Open in Disassembler** behavior and their existing target-safety rules.
+- Preserved all Memory Viewer read/write/history/bookmark/region-navigation behavior; rev6 only adds a new context-menu route out to the Disassembler and does not change Memory Viewer memory acquisition or editing.
+- Preserved all previously verified scanner, scan-result storage, Saved Addresses, universal export, target-I/O coordination, process-control, theme switching, and version/title presentation behavior.
+
+### Verification and Documentation
+
+- The automated verification registry now contains **67 checks**: all 66 rev5 checks remain present and a new neutral syntax-token model regression check is added. Existing Mock and PS5 disassembly checks are also extended to verify token categories and that token concatenation exactly reproduces the previously rendered instruction text.
+- Source-level review verifies that no x86 register names, opcode tables, or Iced types are introduced into Core or WPF. Iced-specific `FormatterTextKind` handling remains confined to the PS5 plugin.
+- The runtime acceptance focus for this revision is visual: syntax colors must improve readability in Light, Dimmed, and Dark without changing the three-column Disassembler layout, row dimensions, selection/origin geometry, or the exact instruction text seen in rev5.
+
+
+## TeeKay87's Memory Engine 0.1.6.rev5 - Continuous Disassembly Stream and Origin Resolution
+
+### Changed
+
+- Changed Core `DisassemblyReader.ReadAroundAsync(...)` from the rev4 two-stream strategy to one continuous decode across the complete bounded around-origin byte range. Core still performs one bounded target read and still requests up to 512 bytes before plus 512 bytes from the requested origin, but the provider now receives the complete returned byte range in a single call rather than separate pre-origin and exact-origin slices.
+- Removed the artificial decode seam at the requested origin. An origin that lies inside a multi-byte instruction is no longer forced to begin a second instruction stream, so the instruction that started before the requested address can continue across it.
+- Kept the requested address as presentation origin rather than silently changing it to the instruction start. `DisassemblyInstructionViewModel` already marks a row when the requested address falls anywhere inside that instruction's byte range, so the existing green origin marker now naturally resolves to the containing instruction when continuous decoding identifies one.
+- Updated the Disassembler boundary notice to describe the actual rev5 behavior: the visible range is decoded as one continuous stream, the origin marks the decoded instruction containing the requested address, and only the beginning of an arbitrary variable-length context window remains best-effort because raw bytes alone cannot prove that the first byte is a canonical instruction boundary.
+- Advanced centralized host metadata from `0.1.6.rev4` to `0.1.6.rev5` and changed the feature title to `Continuous Disassembly Stream and Origin Resolution`. The native Windows title and top application row continue to show only the application title; `0.1.6.rev5` remains visible only in the permanent bottom status bar.
+
+### Added
+
+- Added the automated **Core disassembly continuous origin resolution** regression check. It requests a Mock Target address that intentionally falls inside a two-byte instruction and verifies that Core returns the original instruction start/length/mnemonic, that the instruction contains the requested origin, and that no fabricated second instruction begins at the interior origin byte.
+- Added `docs/testing/APP_0.1.6_REV5_VERIFICATION.md` with clean-build, 66-check automated, Mock runtime, live-PS5 boundary-resolution, context-menu regression, target/session safety, theme/layout, and preservation checks.
+
+### Preserved
+
+- Preserved the rev4 around-origin acquisition boundary: up to 512 bytes before and 512 bytes from the requested address, clamped independently to one readable non-guarded region, with a maximum combined Core window of 65,536 bytes. No additional target-memory read is introduced by the continuous decode change.
+- Preserved the original exact-start `DisassemblyReader.ReadAsync(...)` semantics for callers that explicitly request decoding from one address forward.
+- Preserved Plugin API `2.10.0`, Mock plugin `1.0.0.rev5`, and PS5 plugin `0.1.0.rev23`. No Plugin SDK contract, plugin capability, Iced dependency, ps5debug-NG command, PS5 transport, or platform-specific decoder code changes in this revision.
+- Preserved Scan Results and Saved Addresses **Open in Memory Viewer** / **Open in Disassembler** entry points, including Saved Address Active Target safety.
+- Preserved foreground target-I/O coordination, connection-generation/session validation, memory-region rules, Go To/Refresh behavior, origin/selection layout neutrality, and existing theme resources.
+- Preserved all previously verified scanner, scan-result storage, Saved Addresses, universal export, Memory Viewer, PS5 native scanning/process-control, and application-state behavior.
+
+### Verification and Documentation
+
+- The automated verification registry now contains **66 checks**: the 65 rev4 checks remain present and the new continuous-origin-resolution regression is added. Windows build/runtime execution remains the user's authoritative verification step.
+- Updated `README.md`, `docs/architecture/DISASSEMBLY_ARCHITECTURE.md`, `docs/ui/MAIN_WORKSPACE.md`, `docs/ui/THEMES.md`, and PS5 disassembly documentation so current behavior no longer claims that the requested origin starts a separate decode stream.
+- The rev4 runtime observation that motivated this correction is explicitly represented in the rev5 verification plan: when an address falls inside a multi-byte x86-64 instruction, the row beginning before the address should remain intact and receive the origin marker instead of being truncated into an invalid pre-context record plus a false instruction stream at the requested byte.
+
+## TeeKay87's Memory Engine 0.1.6.rev4 - Bidirectional Disassembly Context and Workspace Entry Points
+
+### Added
+
+- Added bounded **bidirectional Disassembler context** through a new Core `DisassemblyReader.ReadAroundAsync(...)` path. The default workspace request now collects up to **512 bytes before** the requested origin plus **512 bytes starting at** the origin, for up to 1,024 bytes of visible context when the containing readable region has enough data on both sides.
+- Added independent region-boundary clamping for the pre-origin and origin/forward portions. The context reader never crosses the containing readable, non-guarded `MemoryRegion` merely to fill either side of the requested page, and partial memory-reader results are rejected if they no longer contain the requested origin.
+- Added an exact-origin decode split for variable-length instruction sets. Pre-origin bytes are decoded as a separate best-effort provider stream, while bytes beginning at the user's requested address always start their own provider decode. This prevents uncertain pre-context alignment from consuming the requested origin or changing the already-verified forward decode that begins there. Core still does not attempt to infer x86-64 instruction semantics or claim that an arbitrary pre-context byte is a canonical program boundary.
+- Added a Core regression check for bidirectional context. It verifies the default 512-before/512-from-origin window, exact requested-origin preservation, separation between pre-context and origin decode streams, and region-start clamping. The automated verification registry therefore increases from **64 to 65 checks**.
+- Added **Open in Disassembler** to the Scan Results context menu. The command is capability-driven and opens the clicked scan-result address as the origin of the existing modeless Disassembler workspace for the current Active Target.
+- Added **Open in Disassembler** to the Saved Addresses context menu. The command reuses the Saved Address's captured target identity and is enabled only when that identity still matches the current Active Target and the plugin can provide the complete neutral Disassembly/memory workflow. A retained address therefore cannot be silently disassembled against a different process.
+- Added `docs/testing/APP_0.1.6_REV4_VERIFICATION.md` with clean-build, 65-check, bidirectional-context, context-menu, target-safety, theme, Mock, and live-PS5 verification procedures.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev3` to `0.1.6.rev4` with feature title `Bidirectional Disassembly Context and Workspace Entry Points`. `AppInfo` remains the single source for host title/version/revision metadata; the native Windows title and compact top application row remain title-only, while `AppInfo.DisplayVersion` remains in the permanent bottom status bar.
+- Changed the Disassembler workspace from a forward-only 512-byte page to an around-origin view backed by the new Core context reader. **Go To** and **Refresh** now preserve the exact requested address as the origin while exposing preceding bytes in the same view whenever the containing region permits it.
+- Changed the Disassembler boundary guidance to explain the two-stream rule explicitly: the exact requested origin is protected, while earlier raw-byte context on variable-length architectures remains best-effort because no generic byte reader can prove a canonical instruction boundary from arbitrary memory alone.
+- Changed origin-row detection so the presentation can mark an instruction that contains the requested address, not only a row whose start address equals it. The current exact-origin stream normally produces a row starting at the origin, but the presentation rule remains correct for providers or future workflows that return a containing instruction.
+- Renamed the user-facing Scan Results and Saved Addresses context-menu action **Browse Memory** to **Open in Memory Viewer**. The underlying Memory Viewer workflow, captured target identity, stale-session protection, and read/write behavior are unchanged.
+- Extended `PluginViewModel` with an additive bidirectional Disassembly read bridge and a target-aware Disassembler availability check for Saved Addresses. Both continue to use the existing connection-generation validation, cached memory map, foreground target-I/O reservation, and neutral Core/provider services.
+- Updated README plus Disassembly, Memory Viewer, Saved Addresses, Universal Export, main-workspace, theme, and PS5 documentation to describe the current rev4 behavior and distinguish implemented entry points from later navigation/history work.
+
+### Preserved
+
+- The already-verified exact-start `DisassemblyReader.ReadAsync(...)` contract remains available with its original forward-only semantics. Rev4 adds a separate around-origin path rather than changing existing callers or provider expectations underneath them.
+- Plugin API remains `2.10.0`. No Plugin SDK contract or capability value changes are made in rev4.
+- Mock plugin remains `1.0.0.rev5` and PS5 plugin remains `0.1.0.rev23`. The PS5 Iced `1.21.0` decoder integration, ps5debug-NG transport, plugin deployment/dependency layout, and provider implementation are unchanged.
+- No PS5, `eboot.bin`, Iced, opcode-table, or x86-64 decode rule is introduced into Core or WPF. Core owns generic bounded context acquisition/orchestration; plugins continue to own architecture-specific byte-to-instruction decoding.
+- Scan Results/Saved Addresses **Open in Memory Viewer** still opens the same existing Memory Viewer and does not change memory protection or issue target writes by itself.
+- Previously verified scanner/storage, universal export, Saved Addresses refresh/edit/freeze/remove, Memory Viewer read/write/bookmark/history/region-navigation, Active Target state, foreground-I/O coordination, theme, Danger-button, settings, and status-bar behaviors are not redesigned by rev4.
+- Disassembler Back/Forward history remains intentionally disabled, and Memory Viewer-to-Disassembler navigation, direct branch/call target following, disassembly copy/multi-selection/export, module-relative presentation, assembly/instruction editing, debugger/watchpoint/register/thread/stepping/call-stack features, Find What Writes/Accesses, decompilation, and symbol resolution remain later milestones.
+
+### Verification and Documentation
+
+- This revision starts from the exact user-supplied `0.1.6.rev3` package that passed the complete **64/64** Windows automated verification suite and was subsequently live-verified against a physical PS5 executable `Read, Execute` region. In that verification, Memory Viewer and Disassembler bytes matched and coherent x86-64 instructions were decoded from real executable memory.
+- README, CHANGELOG, all Markdown documentation under `docs/`, and the complete source/project/test inventory were reviewed again before rev4 code changes. The implementation reuses the verified Core disassembly snapshot, target/session identity, foreground-I/O reservation, existing Memory Viewer opening path, and existing concrete DataGrid context-menu pattern rather than creating parallel infrastructure.
+- The automated verification registry now contains **65 checks**. The new check is limited to the generic Core bidirectional-context behavior; the previously verified 64 checks remain registered unchanged and must continue to pass.
+- `docs/testing/APP_0.1.6_REV4_VERIFICATION.md` defines the required Windows build/test acceptance plus Mock and live-PS5 checks for the enlarged visible range, exact-origin decode behavior, region clamping, context-menu labels/actions, Saved Address target identity, title/version presentation, and regression safety.
+- No .NET build, automated-test pass, or runtime/PS5 verification is claimed from the packaging environment. Clean Windows compilation, **65/65** automated checks, and the documented runtime/UI checks remain the authoritative acceptance gates for rev4.
+
+## TeeKay87's Memory Engine 0.1.6.rev3 - Disassembler Workspace
+
+### Added
+
+- Added the first user-facing, modeless **Disassembler** workspace on top of the architecture-neutral contracts/Core reader verified in `0.1.6.rev1` and the PS5 x86-64 provider verified in `0.1.6.rev2`. The new `DisassemblerWindow`, `DisassemblerViewModel`, and `DisassemblyInstructionViewModel` are host presentation components only; they contain no PS5 process rule, ps5debug command, x86 opcode table, Iced dependency, or `eboot.bin` assumption.
+- Added a capability-driven **Disassembler...** action to the Target / Connection strip. It is visible only when the selected plugin advertises `TargetCapabilities.Disassembly` and becomes enabled only when a connected Active Target has a loaded memory map, normal memory-read availability, no conflicting foreground target operation, and at least one readable non-guarded region. The generic initial-address policy prefers readable executable regions, then named/module regions, then lower addresses without hardcoding a platform or module.
+- Added hexadecimal Address navigation with **Go To** and **Refresh**. Successful requests use the existing Core `DisassemblyReader.DefaultWindowByteCount` of 512 bytes and remain clamped to one readable, non-guarded memory region. Invalid hexadecimal input, unreadable/unmapped addresses, stale sessions, and provider/read failures are surfaced as workspace errors without fabricating instruction data or discarding the last successful view.
+- Added a virtualized read-only instruction table with **Address**, **Bytes**, and combined **Instruction** columns. The presentation model retains raw bytes plus separate mnemonic/operands/flow/branch-target/validity metadata even though rev3's default Instruction column renders mnemonic and operands together.
+- Added Region / Module, Visible range, Protection, Architecture, target/process identity, operation status, and error presentation. Region/Module uses backend-reported module name first and region name second; anonymous mappings are not assigned invented names.
+- Added a persistent theme-aware origin marker for the exact requested start-address row using the existing `SuccessMutedBrush`. Selected-origin presentation deliberately changes no layout-affecting border, padding, height, width, or column property, carrying forward the layout-neutral correction verified for Memory Viewer in `0.1.5.rev5`.
+- Added an explicit instruction-boundary warning to the workspace. Decoding begins exactly at the requested address, but the UI does not claim that an arbitrary address is a canonical instruction boundary on variable-length architectures such as x86-64.
+- Added visible **Back** and **Forward** controls as disabled rev3 placeholders so the navigation layout is established without falsely presenting history before that feature is implemented. Successful-address Back/Forward history is intentionally reserved for `0.1.6.rev4`.
+- Added `docs/testing/APP_0.1.6_REV3_VERIFICATION.md` with clean-build, unchanged 64-check regression, capability/UI-state, deterministic Mock decode, origin/layout, bounded-region, stale-session, foreground-I/O, theme, and live-PS5 comparison procedures. The deterministic visual fixture begins at Mock address `0x10000400` so the first user-facing Disassembler can be checked without physical hardware before live PS5 verification.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev2` to `0.1.6.rev3` with feature title `Disassembler Workspace`. `AppInfo` remains the single source for host title/version/revision metadata. The native Windows title and compact top application row remain application-title-only; `AppInfo.DisplayVersion` remains the sole persistent version/revision presentation in the bottom status bar.
+- Extended `PluginViewModel` with the generic host bridge used by Disassembler windows. Before every read it validates the captured process and connection generation, required capabilities/services, loaded memory map, and current memory-I/O state; it then reserves the existing foreground target path, snapshots the current memory regions, invokes neutral Core `DisassemblyReader`, and releases the reservation in `finally`.
+- Extended foreground target-state notifications so **Disassembler...** enablement follows the same transient read/export/foreground-operation ownership rules as other explicit target actions instead of remaining clickable during a conflicting operation.
+- Updated README plus Disassembly, Memory Viewer, Universal Export, theme, main-workspace, and PS5 documentation to describe the actual rev3 host workspace and distinguish implemented standalone navigation from the still-deferred cross-workspace/history/branch/export milestones.
+
+### Preserved
+
+- Plugin API remains `2.10.0`. No public Plugin SDK contract changes are made in rev3.
+- Mock plugin remains `1.0.0.rev5` and PS5 plugin remains `0.1.0.rev23`; their already-verified decoders and service discovery are unchanged. Iced remains a PS5-plugin-private dependency and no new decoder dependency is added to Core/WPF.
+- `DisassemblyReader`, `DisassemblySnapshot`, `DisassemblySessionIdentity`, `IDisassemblerProvider`, `DisassembledInstruction`, and `DisassemblyFlowControl` semantics remain unchanged from the verified rev1/rev2 foundation.
+- Existing scanner/storage, universal export, Saved Addresses, Memory Viewer, process/Active Target, PS5 transport/TurboScan, theme, settings, Danger-button, and status-bar behaviors are not redesigned by rev3.
+- The Disassembler still does not provide Scan Results/Saved Addresses/Memory Viewer **Disassemble Here**, Back/Forward history, direct branch/call target following, multi-selection/copy, universal export, module-relative offset presentation, assembly/instruction editing, breakpoints/watchpoints, registers/threads/stepping/call stack, Find What Writes/Accesses, decompilation, or symbol-server behavior. These remain later milestones rather than partial rev3 implementations.
+- Existing files under `tools/preflight/` remain unchanged; further development of that auxiliary tooling remains paused unless explicitly revisited.
+
+### Verification and Documentation
+
+- This revision starts from the exact user-supplied `0.1.6.rev2` package that passed the complete **64/64** Windows automated verification suite.
+- README, CHANGELOG, every Markdown document under `docs/`, and the complete source/project/test inventory were reviewed again before rev3 code changes so the workspace could reuse the existing target/session, memory-map, foreground-I/O, theming, input-filter, and modeless-window patterns instead of introducing parallel implementations.
+- The automated verification registry deliberately remains at **64 checks** because rev3 does not change the Plugin SDK/Core/provider contract surface covered by those tests; its new acceptance surface is WPF compilation and runtime presentation/state behavior. All 64 previously verified checks must still pass unchanged.
+- `docs/testing/APP_0.1.6_REV3_VERIFICATION.md` defines deterministic Mock visual output at `0x10000400`, live PS5 byte comparison against Memory Viewer, stale-target/reconnect rejection, bounded-region behavior, origin-layout verification, Light/Dimmed/Dark checks, and regression acceptance before rev3 is considered verified.
+- No .NET build, automated-test pass, or runtime/PS5 verification is claimed from the packaging environment. Clean Windows compilation, **64/64** regression checks, Mock visual verification, and live PS5 verification remain the authoritative acceptance gates for this revision.
+
+## TeeKay87's Memory Engine 0.1.6.rev2 - PS5 x86-64 Disassembly Provider
+
+### Added
+
+- Added the first real platform disassembly implementation through `Ps5X64DisassemblerProvider` in the PlayStation 5 plugin. The provider implements the Plugin API `2.10.0` `IDisassemblerProvider` contract and decodes caller-supplied PlayStation 5 x86-64 bytes without introducing architecture-specific decoding into Core or WPF.
+- Added Iced `1.21.0` as a PS5-plugin-private x86/x64 decoder dependency. The provider uses Iced's 64-bit decoder and NASM formatter to return the neutral Address, Raw Bytes, Length, Mnemonic, Operands, FlowControl, optional direct BranchTarget, and validity fields introduced by rev1.
+- Added neutral flow-control translation for direct calls, direct unconditional jumps, direct conditional jumps, indirect calls/jumps, returns, interrupts, sequential instructions, and other instruction-flow categories. Direct branch/call destinations are exposed only when Iced identifies a statically known near-branch operand; indirect control flow deliberately returns no invented target.
+- Added bounded invalid/truncated-byte handling. Undecodable x86-64 input remains represented by invalid neutral instruction records that retain the consumed source bytes, while unsupported target architectures are rejected explicitly rather than decoded under guessed assumptions.
+- Added PlayStation 5 session discovery for `IDisassemblerProvider` and advertised the neutral `TargetCapabilities.Disassembly` capability. The provider is stateless and does not create or own a ps5debug-NG transport.
+- Added generic plugin deployment output collection through root `Directory.Build.targets`. Project references marked `DeployAsPlugin=true` now use one shared post-build path that asks each plugin for its assembly, generated `.deps.json`, and private copy-local dependencies and copies the deduplicated set into the consuming host's `Plugins` directory. Both the WPF application and verification executable use this path, so isolated `AssemblyDependencyResolver` discovery sees the same dependency-complete plugin layout. The PS5 project enables dynamic plugin dependency metadata so Iced resolves from that layout.
+- Added two automated verification checks covering deterministic PS5 x86-64 decoding and provider safety. The deterministic fixture covers NOP, register MOV, ADD, SUB, CMP, direct CALL/JMP/conditional branch targets, RET, and RIP-relative addressing. Safety coverage checks architecture acceptance/rejection, bounded invalid input, indirect CALL/JMP target handling, cancellation, and no fabricated invalid branch destination. The verification registry increases from 62 to **64 checks**.
+- Added `docs/plugins/PS5/PS5_DISASSEMBLY_IMPLEMENTATION.md` and `docs/testing/APP_0.1.6_REV2_VERIFICATION.md` covering the selected backend strategy, dependency deployment, flow-control mapping, instruction-boundary limits, architecture rules, package expectations, and Windows verification procedure.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.6.rev1` to `0.1.6.rev2` with feature title `PS5 x86-64 Disassembly Provider`. `AppInfo` remains the single source for host title/version/revision metadata.
+- Advanced the PlayStation 5 plugin from `0.1.0.rev22` to `0.1.0.rev23` and its targeted Plugin API from compatible `2.9.0` to `2.10.0` because this plugin revision now implements the public disassembly contract added in host rev1. The public Plugin API itself remains `2.10.0`.
+- Removed the version/revision badge from the compact top application/title row. The native Windows title remains `TeeKay87's Memory Engine` only, and `AppInfo.DisplayVersion` remains visible solely at the right edge of the permanent bottom status bar. This intentionally supersedes the `0.1.5.rev8` presentation that had retained a duplicate version badge in the compact application bar.
+- Updated the README, Disassembly architecture documentation, PS5 plugin documentation, protocol mapping notes, and main-workspace documentation to describe the actual rev2 provider and the single status-bar version/revision presentation.
+- Updated the source-preflight documentation to refer to the automated verification executable without the old dependency-free qualifier, because rev2 provider verification restores the PS5 plugin's Iced package dependency. The preflight checks themselves are unchanged.
+
+### Backend Strategy
+
+- Reviewed current ps5debug-NG disassembly support before selecting the rev2 implementation path. The upstream backend includes a Zydis-based `CMD_PROC_DISASM_REGION` operation (`0xBDAA0020`) that emits fixed-size analysis records with instruction address/length, flow classification, RIP-relative/memory metadata, and compact mnemonic metadata.
+- The upstream server-side disassembly operation is not used as rev2's neutral instruction provider because its response shape does not provide the same complete raw-byte plus formatted mnemonic/operand representation required by the already-verified `IDisassemblerProvider` contract. Core also already performs bounded region-safe reads for the common workflow, so routing those bytes through a client-side decoder avoids a parallel memory/disassembly transport path.
+- Iced is therefore intentionally confined to the PS5 plugin. Core and WPF contain no Iced reference, x86-64 opcode table, PS5 branch, ps5debug disassembly command, or `eboot.bin` assumption. The upstream server analysis operation remains documented as a possible future backend primitive for use cases such as bulk analysis/xref generation where its server-side metadata may be advantageous.
+
+### Preserved
+
+- The architecture-neutral Plugin API `2.10.0` contracts, `DisassembledInstruction` model, `DisassemblyFlowControl` model, `DisassemblyReader`, `DisassemblySnapshot`, and `DisassemblySessionIdentity` introduced and verified with 62/62 checks in `0.1.6.rev1` are unchanged.
+- Mock plugin `1.0.0.rev5` remains unchanged on Plugin API `2.10.0`; its synthetic deterministic instruction set remains a hardware-independent Core/contract fixture and is not converted into or coupled to x86-64.
+- Existing PS5 process enumeration, preferred-process behavior, memory-map/read/write paths, concurrent Frozen writes, process suspend/resume, native TurboScan negotiation/mapping/streaming/resident-results behavior, connection settings, and transport synchronization are not redesigned by the new provider.
+- Rev2 sends no new ps5debug-NG command when decoding. Target bytes still reach Core through the existing `IMemoryReader`; `IDisassemblerProvider` only interprets the supplied byte window.
+- All previously verified scanner/storage, universal export, Saved Addresses, Memory Viewer, Active Target gating, theme, and Danger-button behavior remain outside the functional scope of the PS5 provider work.
+- Rev2 still does not add the Disassembler WPF workspace, `Disassemble Here` context actions, Go To/Back/Forward, branch-follow navigation, disassembly copy/export UI, assembler/instruction editing, debugger, breakpoints/watchpoints, register/thread/call-stack views, Find What Writes/Accesses, decompiler, or symbol-server behavior. Those remain later `0.1.6`/post-`0.1.6` milestones as documented.
+- Existing files under `tools/preflight/` remain unchanged; further development of that auxiliary tooling remains paused unless explicitly revisited.
+
+### Verification and Documentation
+
+- This revision starts from the exact user-supplied `0.1.6.rev1` package that passed the complete **62/62** Windows automated verification suite.
+- README, CHANGELOG, every Markdown file under `docs/`, and the complete source/project/test inventory were reviewed again before rev2 production changes so the provider could reuse the existing architecture, target I/O, capability, plugin-loading, and session-service paths.
+- Static source review confirms Iced is referenced only by the PS5 plugin project/provider, the PS5 provider performs no target I/O, and no PS5/x86-64 decode logic has been introduced into Core or the WPF application.
+- Static package-project review confirms the PS5 plugin now reports the dependency artifacts required by the existing `AssemblyDependencyResolver` loader, while both application and verification projects mark platform references for the same shared plugin-deployment target instead of relying on Iced being present in a consumer's normal dependency graph.
+- `docs/testing/APP_0.1.6_REV2_VERIFICATION.md` defines the clean Windows build, expected **64/64** automated result, plugin dependency-output checks, PS5 provider checks, title/status presentation check, and existing-regression acceptance criteria.
+- No .NET build, automated-test pass, or live PS5 runtime verification is claimed from the packaging environment. Those checks remain required on the user's Windows/.NET 9 environment before `0.1.6.rev2` is accepted and work proceeds to the Disassembler workspace milestone.
+
+## TeeKay87's Memory Engine 0.1.6.rev1 - Disassembly Contracts and Core Foundation
+
+### Added
+
+- Added the first public architecture-neutral disassembly surface to Plugin API `2.10.0`: `IDisassemblerProvider` accepts a start address, caller-supplied target bytes, the existing neutral `TargetArchitecture`, and cancellation, then returns ordered neutral instruction records. The provider contract deliberately owns decoding only; target memory I/O remains outside the provider so platform transports do not leak into Core or WPF.
+- Added `DisassembledInstruction` with Address, defensively copied Raw Bytes, derived Length, separate Mnemonic/Operands, neutral `DisassemblyFlowControl`, optional direct Branch Target, and explicit validity state. The model rejects empty raw-byte records, branch targets on non-branch flow-control categories, and branch targets on invalid instructions.
+- Added the initial neutral flow-control catalog: None, Call, Jump, ConditionalJump, Return, Interrupt, and Other. Direct targets are permitted only for Call/Jump/ConditionalJump so future providers do not fabricate destinations for indirect flow.
+- Added `Core/Disassembly/DisassemblyReader`. Core now validates that the requested address belongs to one readable non-guarded region, clamps the operation to that region, performs the read through the existing `IMemoryReader`, forwards only the bytes actually read to the provider, and rejects zero/invalid reader counts.
+- Added provider-result validation before decoded data is accepted by Core. Returned instructions must remain inside the actual read range, be ordered and non-overlapping, and report Raw Bytes that exactly match the target bytes at each instruction address.
+- Added `DisassemblySnapshot` as presentation-neutral Core result data retaining requested/start address, the copied byte window, containing `MemoryRegion`, existing `TargetArchitecture`, calculated end address, and the validated instruction collection.
+- Added `DisassemblySessionIdentity`, capturing plugin id, process id/name, and host connection generation. This establishes the same stale-target safety basis used by Memory Viewer without introducing a second target/session model; WPF integration is deferred until the Disassembler workspace exists.
+- Added a deterministic Mock disassembly provider and stable code fixture at `0x10000400`. The provider uses a deliberately synthetic Mock instruction set to cover ordinary instructions, direct call/conditional-jump targets, return, no-op, invalid/truncated records, and cancellation without pretending to be an x86-64 decoder.
+- Added eight dependency-free verification checks for the instruction model, Mock capability/provider discovery, bounded Core reads, region-boundary clamping, unreadable/guarded rejection, invalid provider ordering, cancellation, and disassembly target/session identity. The automated registry increases from 54 to **62 checks**.
+- Added `docs/architecture/DISASSEMBLY_ARCHITECTURE.md` and `docs/testing/APP_0.1.6_REV1_VERIFICATION.md` describing the new ownership boundary, contracts, safety rules, Mock fixture, deferred work, and Windows verification requirements.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.5.rev8` to `0.1.6.rev1` with feature title `Disassembly Contracts and Core Foundation`. `AppInfo` remains the single application title/version/revision source and the verified native-window/status presentation model is unchanged.
+- Advanced the public Plugin API compatibility version from `2.9.0` to `2.10.0` because rev1 adds new public disassembly contracts/models. The existing same-major/older-minor compatibility rule is unchanged, so plugins that target earlier compatible 2.x minors remain loadable.
+- Advanced the In-Memory Test Target from `1.0.0.rev4` to `1.0.0.rev5`, moved its targeted Plugin API to `2.10.0`, advertised the already-reserved neutral `Disassembly` capability, exposed `IDisassemblerProvider` from its session, and seeded the new deterministic code fixture. Its existing process, memory-region dimensions/protection, health/ammo/money addresses, scanner declarations, and memory read/write behavior remain unchanged.
+- Updated README and architecture/plugin documentation to describe `0.1.6.rev1`, Plugin API `2.10.0`, Mock `1.0.0.rev5`, the completed/verified `0.1.5` Memory Viewer block, and the new disassembly foundation without presenting PS5 or WPF Disassembler functionality as implemented.
+- Marked the architecture-neutral disassembly-contract roadmap step as initially implemented in `0.1.6.rev1`; PS5 disassembly remains the next separate milestone.
+
+### Preserved
+
+- PlayStation 5 plugin `0.1.0.rev22` is functionally unchanged and continues to target compatible Plugin API `2.9.0`. Rev1 adds no ps5debug-NG command, transport packet, x86-64 decoder, `eboot.bin` assumption, or PS5-specific branch in Core/WPF.
+- The existing `TargetArchitecture` model remains the only CPU/address-width/pointer-width/endianness contract. No parallel architecture system was introduced for Disassembly.
+- Existing Core/host target memory I/O contracts are reused. `IDisassemblerProvider` receives bytes and cannot establish a separate target command stream through the neutral contract.
+- All `0.1.3` scanner/storage behavior, `0.1.4` universal export behavior, Saved Addresses refresh/edit/freeze coordination, and fully verified `0.1.5.rev8` Memory Viewer/UI-state/theme behavior remain outside the functional scope of this revision.
+- Rev1 does not add a Disassembler WPF workspace, `Disassemble Here` context actions, Go To/Back/Forward, branch-follow navigation, selection/copy/export integration, assembler/instruction editing, debugger, breakpoints/watchpoints, register/thread/call-stack support, Find What Writes/Accesses, decompiler, or symbol-server behavior.
+- The Mock provider is intentionally synthetic and is not an x86-64 implementation. Real PS5/x86-64 provider strategy and decoding are reserved for the next `0.1.6` milestone.
+- Existing files under `tools/preflight/` remain unchanged; further development of that auxiliary tooling remains paused.
+
+### Verification and Documentation
+
+- Started from the exact user-supplied, fully verified `0.1.5.rev8` package. README, CHANGELOG, all Markdown documentation under `docs/`, the supplied `0.1.5` handover, and the complete source/project/test inventory were reviewed before production changes.
+- Static architecture review confirms the new Core disassembly subsystem contains no PS5 id, ps5debug-NG command id, `eboot.bin` logic, x86/x64 opcode table, WPF dependency, or independent transport. The provider receives bytes through the public contract and Core performs target reads through `IMemoryReader`.
+- Static review confirms the Mock plugin's new fixture is additive: existing deterministic health/ammo/money addresses, one-region memory-map shape, and read/write paths are retained.
+- `docs/testing/APP_0.1.6_REV1_VERIFICATION.md` defines the clean Windows build, expected **62/62** automated result, new contract/Core/Mock checks, architecture review, and regression acceptance criteria.
+- No .NET build or runtime test is claimed from the packaging environment. The real Windows/.NET 9 build and the complete 62-check verification executable remain required before `0.1.6.rev1` is accepted and before work advances to the PS5 x86-64 provider milestone.
+
+## TeeKay87's Memory Engine 0.1.5.rev8 - UI State and Theme Consistency
+
+### Fixed
+
+- Fixed the Memory Viewer bookmark selector's closed/selected presentation. The expanded dropdown already showed each bookmark's `DisplayText`, but the shared ComboBox selection presenter could fall back to the backing `MemoryViewerBookmarkViewModel` object's CLR type name. `MemoryViewerBookmarkViewModel.ToString()` now returns the same `DisplayText`, so the selected bookmark consistently shows its hexadecimal address and optional backend-supplied Region / Module label without changing bookmark identity, history, or target I/O behavior.
+- Fixed the Scan panel appearing partially interactive before an explicit Active Target existed. The complete interactive Scan control surface is now gated by a new host `HasActiveTarget` presentation state. Merely selecting/browsing a process no longer leaves Value operands, Scan Type, Value Type, plugin Scan Options, pause-scanning options, or scan action controls enabled; choosing **Set Active Target** enables the surface subject to each control's existing capability/session/busy-state rule.
+- Fixed inconsistent semantic styling for application-owned destructive/dismissive buttons. Memory Viewer bookmark **Remove** and the **Cancel** buttons in Settings, Data Export, Memory Edit, and Confirmation dialogs now use the existing shared `DangerButtonStyle`, matching the already-correct Disconnect, Cancel Scan, operation-progress Cancel, Saved Address Remove, and Remove All actions. No hard-coded colors or new theme keys were introduced.
+- Fixed main-window identity presentation so the native Windows title bar no longer appends the host version/revision. `AppInfo.WindowTitle` now resolves to the application title only, while the compact application bar keeps its existing version badge.
+- Fixed the permanent status bar's rightmost identity field to show the centralized `AppInfo.DisplayVersion` value instead of the revision feature title. The status bar therefore shows values such as `0.1.5.rev8` and no longer exposes the internal feature/revision title as persistent UI chrome.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.5.rev7` to `0.1.5.rev8` with feature title `UI State and Theme Consistency`.
+- Added `PluginViewModel.HasActiveTarget` as a presentation-facing derived state of the already-existing explicit `ActiveProcess` selection. The property is notified whenever Active Target changes; it adds no new target/session concept and does not alter command eligibility logic that already requires an Active Target for actual scans.
+- Removed the now-unused `MainWindowViewModel.FeatureTitle` presentation property after the status bar moved to the existing centralized `DisplayVersion` value. `AppInfo.FeatureTitle` remains the authoritative release metadata used for revision documentation/package identity.
+- Clarified the application-wide semantic button rule: Remove/Delete/Cancel/Exit/Abort/Disconnect-style `Button` controls use the active theme's Danger palette. Neutral supporting actions remain Secondary and affirmative workflow actions remain Primary.
+- Updated README and UI/Memory Viewer architecture documentation to describe Active Target Scan gating, native-title/status-bar version presentation, bookmark selected-item rendering, and the expanded Danger-button consistency rule. Refreshed the current-version references in the scanner and universal-export architecture documents to `0.1.5.rev8` without changing those verified subsystems.
+- Recorded the rev7 runtime result: all 54 automated checks passed and the new bookmarks, region navigation/history integration, and Saved Addresses tooltip correction behaved correctly in use. Rev8 addresses the UI/state inconsistencies discovered during that validation rather than redesigning those verified workflows.
+
+### Preserved
+
+- Memory Viewer bookmark storage, exact-address identity, duplicate prevention, Go/Remove behavior, window-local lifetime, Back/Forward history integration, region navigation, green origin marking, copy behavior, and safe read/write services are unchanged.
+- Rev6 safe-editing guarantees remain unchanged: writable-region gating, no page-protection override, stale-source pre-read rejection, neutral `IMemoryWriter`, immediate read-back verification, and automatic refresh after stale/issued writes.
+- Saved Addresses empty row-tooltip suppression from rev7 remains unchanged; explicit Frozen and Remove child-control tooltips are preserved.
+- The Scan panel's existing capability/session/busy-state logic is preserved underneath the new Active Target parent gate. First Scan/Next Scan/New Scan/Cancel Scan command semantics, Core Scan Types, plugin Value Types/options, pause-scanning behavior, resident PS5 scanning, and disk-backed storage are unchanged.
+- No Core, Plugin SDK, PS5 plugin, Mock plugin, scanner protocol, export format, or scan-result storage contract is changed by rev8.
+- Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, and Mock plugin remains `1.0.0.rev4`.
+- Existing files under `tools/preflight/` remain unchanged; further development of that helper remains paused.
+- The automated verification registry remains at **54 checks** because rev8 is a host-WPF presentation/state consistency revision and does not add a new Core/plugin contract suitable for the existing non-WPF test executable.
+
+### Verification and Documentation
+
+- Started from the exact user-supplied/runtime-tested `0.1.5.rev7` package. README, CHANGELOG, all Markdown documentation under `docs/`, and the complete source/XAML/project/test inventory were reviewed before production changes.
+- Static review must confirm every application-owned literal Remove/Cancel/Disconnect-style `Button` uses `DangerButtonStyle`, all `IsCancel=True` application buttons use the same Danger style, and no local destructive color was introduced.
+- Static review must confirm the Scan control column has one parent Active Target gate and that `PluginViewModel` notifies `HasActiveTarget` whenever `ActiveProcess` changes, while all existing individual `IsEnabled`/Command conditions remain intact beneath it.
+- Static review must confirm the main native title resolves from centralized `AppInfo.WindowTitle`, the status bar resolves from centralized `DisplayVersion`, and the top application-bar version badge is retained.
+- Static review must confirm the bookmark selected-item fix is confined to presentation (`ToString() => DisplayText`) and does not alter bookmark address/region data or navigation logic.
+- `docs/testing/APP_0.1.5_REV8_VERIFICATION.md` covers clean Windows build, the unchanged 54-check automated suite, Active Target Scan-panel gating, destructive-button theme behavior across Light/Dimmed/Dark, native title/status-bar identity, bookmark selected-item display, and rev7 Memory Viewer regression behavior.
+- Native Windows/.NET/WPF compilation and runtime verification remain required before rev8 is accepted.
+
+## TeeKay87's Memory Engine 0.1.5.rev7 - Memory Viewer Bookmarks and Region Navigation
+
+### Added
+
+- Added viewer-local **Memory Viewer bookmarks**. The current navigation/origin address can be added to a bookmark list, selected later, revisited through **Go**, and removed without changing the saved-address table or target memory. Bookmarks preserve the exact origin address rather than rounding to the 16-byte display-row base.
+- Added platform-neutral **Memory Viewer region navigation** through a new Core `MemoryViewerRegionNavigator`. The viewer can move to the previous readable non-guarded region, current region start, current region end, or next readable non-guarded region without embedding platform-specific memory-map assumptions in WPF.
+- Added a dedicated region-navigation toolbar with **Previous Region**, **Region Start**, **Region End**, and **Next Region** actions. Previous/Next skip write-only, unreadable, and guarded mappings and navigate to the selected region's base address; Region End navigates to the final byte so the existing bounded reader naturally clamps the page to the region boundary.
+- Added a bookmark toolbar with **Add Current**, a window-local bookmark selector, **Go**, and **Remove**. Duplicate bookmarks for the same exact origin address are prevented within one viewer window. Bookmark navigation is a normal successful navigation and therefore participates in the existing Back/Forward history.
+- Added automated Core coverage **Memory Viewer readable region navigation**, verifying that previous/next region lookup works with an unsorted memory map, skips guarded and unreadable regions, and correctly reports the beginning/end of the readable-region sequence. The automated registry therefore increases from 53 to **54 checks**.
+- Added `docs/testing/APP_0.1.5_REV7_VERIFICATION.md` covering clean Windows build, all 54 automated checks, bookmark behavior, region navigation, history integration, live PS5 memory-map navigation, the Saved Addresses tooltip correction, and regression coverage for the fully verified rev6 write workflow.
+
+### Fixed
+
+- Fixed empty tooltip popups over blank Saved Addresses cell space. The row-level `StatusText` tooltip is now suppressed when `StatusText` is empty instead of allowing WPF to materialize an empty tooltip popup.
+- The tooltip correction specifically removes the empty hint surface observed when hovering the unused cell area around **Frozen**, **Protection**, and the **Remove** column while preserving the meaningful tooltips on the Frozen checkbox and Remove button themselves. Non-empty row status/error tooltips remain available when a Saved Address actually has status text to show.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.5.rev6` to `0.1.5.rev7` with feature title `Memory Viewer Bookmarks and Region Navigation`.
+- Reused the existing Core readable-region rule for both bounded Memory Viewer reads and region navigation so readable/non-guarded eligibility is defined once rather than duplicated between reader and navigator code.
+- Expanded the Memory Viewer navigation card into separate address/history, region-navigation, bookmark, and region-context rows while continuing to use existing shared WPF control styles and theme resources.
+- Successful navigation through bookmarks or region actions records the exact destination in the same in-window history used by Go To. Refresh still creates no history entry, ordinary row selection still does not navigate, and a new successful navigation after Back still discards the obsolete Forward branch.
+- Recorded `0.1.5.rev6` as fully verified. The Windows suite passed 53/53 and runtime verification on Mock Target and real PS5 hardware confirmed verified writes/read-back, larger 4-byte edits, Saved Addresses observing written values, read-only Edit gating, stale-data rejection with no write attempted, automatic refresh, and Back/Forward navigation.
+- Updated README, Memory Viewer architecture, Saved Addresses/UI/theme guidance, the early-development guide, and current-version references to describe bookmarks, region navigation, and the tooltip behavior as current functionality.
+
+### Preserved
+
+- Memory Viewer bookmarks are intentionally scoped to one open Memory Viewer window. Rev7 does not persist them to application settings, projects, Saved Addresses, or disk; persistent bookmark/project ownership remains a later design decision rather than being hidden inside general settings.
+- Region navigation uses only the current neutral `MemoryRegion` list and existing `IMemoryReader` path. It adds no Plugin SDK contract, no PS5 protocol command, and no platform-name check.
+- Existing target/process/connection-generation validation and foreground target-I/O coordination apply unchanged to bookmark and region destinations because every navigation ultimately uses the same verified `ReadMemoryViewerWindowAsync(...)` path.
+- Rev6 safe editing/write semantics remain unchanged: no page-protection override, exact displayed-row edit size, stale-source pre-read, neutral `IMemoryWriter`, immediate read-back verification, and refresh after stale/issued writes.
+- Rev4-rev5 selection/copy/history/origin behavior remains unchanged. The green origin marker is still independent from ordinary selection and remains layout-neutral.
+- Scan Results/Saved Addresses scanning, export, value editing, Freeze, Protection, target handling, resident PS5 scans, and plugin settings remain unchanged except for the Saved Addresses empty-tooltip presentation fix.
+- Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, and Mock plugin remains `1.0.0.rev4`.
+- Existing files under `tools/preflight/` remain unchanged; further development of that helper remains paused.
+
+### Verification and Documentation
+
+- Started from the exact user-supplied and fully runtime-verified `0.1.5.rev6` package. README, CHANGELOG, all Markdown documentation under `docs/`, and the complete source/XAML/project/test inventory were reviewed before the production changes.
+- `MemoryViewerRegionNavigator` lives in Core and depends only on neutral `MemoryRegion` data. The WPF ViewModel consumes the current Active Target memory-map snapshot exposed through the existing plugin workspace and sends all actual reads through the already coordinated viewer read path.
+- Bookmark state is host presentation/session state only and causes no target I/O until the user explicitly chooses **Go**. Adding/removing a bookmark does not affect navigation history; navigating to a bookmark does.
+- Static review must confirm the new WPF command bindings resolve to existing ViewModel properties, the bookmark/region controls introduce no new code-behind event wiring, Saved Addresses keeps child-control tooltips while empty row tooltips are suppressed, the automated registry contains exactly 54 checks, Plugin SDK/plugin versions remain unchanged, `tools/preflight/` is unchanged, local Markdown links resolve, and no build artifacts are packaged.
+- Native Windows/.NET/WPF compilation and runtime verification remain required. Live PS5 region-navigation testing should use ordinary readable mappings and must not imply that Previous/Next Region changes memory or page protection.
+
+## TeeKay87's Memory Engine 0.1.5.rev6 - Memory Viewer Safe Editing and Write Support
+
+### Added
+
+- Added the first production Memory Viewer write path through a new platform-neutral Core `MemoryViewerWriter`. The service accepts the existing neutral `IMemoryReader`, `IMemoryWriter`, `TargetProcess`, and `MemoryRegion` contracts and therefore requires no platform-name checks, PS5 protocol leakage, or new Plugin SDK contract.
+- Added safe optimistic write validation for Memory Viewer edits. Before any requested bytes are written, Core rereads the exact displayed range and requires it to still match the bytes that were shown when the edit dialog opened. If the target changed, the operation returns `SourceChanged` and no write is issued.
+- Added immediate read-back verification after each Memory Viewer write. Core reports `Verified` only when the complete written range can be reread and matches the requested bytes; a differing read-back is reported as `VerificationFailed`, while a post-write read error explicitly states that the write was sent but verification could not be completed.
+- Added `MemoryViewWriteOutcome` and `MemoryViewWriteResult` so the host can distinguish unchanged edits, stale-source rejection, verified writes, and read-back mismatch without inferring write state from UI text.
+- Added a themed **Edit Hex Bytes** dialog for a single Memory Viewer row. The dialog shows the row address, current bytes, an editable replacement byte sequence, the exact required byte count, and the pre-read/read-back safety rule. The affirmative action is explicit **Write & Verify** and is deliberately not the default Enter-key action.
+- Added **Edit...** to the Memory Viewer toolbar and **Edit Hex Bytes...** to the row context menu. The action is available only when the displayed region is readable, writable, non-guarded, and the active plugin advertises both memory-read and memory-write support.
+- Added two automated Core verification checks: **Memory Viewer safe write and stale-data protection** and **Memory Viewer write protection rejection**. The safe-write check covers stale displayed bytes, a deliberately non-writing writer that forces read-back mismatch, a successful verified write, and unchanged-edit no-op semantics. The protection check confirms a read-only region is rejected without changing target memory. The automated registry therefore increases from 51 to **53 checks**.
+- Added `docs/testing/APP_0.1.5_REV6_VERIFICATION.md` covering clean Windows build, all 53 automated checks, Mock-target editing, stale-data rejection, read-only protection behavior, write/read-back presentation, existing selection/copy/history/origin regressions, theme coverage, and controlled live-PS5 verification.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.5.rev5` to `0.1.5.rev6` with feature title `Memory Viewer Safe Editing and Write Support`.
+- Changed the Memory Viewer header from a fixed **Read-only** label to a snapshot-derived **Read/write** or **Read-only** access label. The DataGrid itself remains presentation-only; raw edits are committed only through the explicit modal edit workflow.
+- Extended `MemoryViewerRowViewModel` with an immutable copy of the displayed row bytes and row-level edit eligibility. Copy/selection/origin behavior continues to use the same row object and formatting as rev5.
+- Added a host `WriteMemoryViewerBytesAsync(...)` operation beside the existing viewer read operation. It preserves the captured process identity and connection-generation checks, requires the same Active Target, takes a current memory-map snapshot, reserves the existing foreground target-operation path, waits for Saved Address I/O to become idle through the already verified coordinator, and executes the Core write/verify service on the primary session reader/writer.
+- Successful verified writes refresh the current 512-byte Memory Viewer snapshot immediately. Stale-source rejection also refreshes the viewer so the user sees the target's newer bytes; a read-back mismatch refreshes the current view while retaining an explicit verification error. Navigation history and the green origin address do not change because of a write/refresh.
+- Updated README, Memory Viewer architecture, current workspace/theme/early-architecture documentation, and current-version references to describe the new editable boundary and the remaining `0.1.5` work.
+- Recorded `0.1.5.rev5` as fully verified: the Windows automated suite passed 51/51 and runtime testing confirmed the selected green origin row keeps identical geometry without introducing a horizontal scrollbar.
+
+### Preserved
+
+- Memory Viewer writes never change target page protections. A range that is not already readable and writable, or carries `Guard`, remains non-editable.
+- Rev6 writes exactly one displayed row at a time and requires the replacement byte count to match that row's displayed byte count. Byte-level cursor editing, arbitrary-length paste across rows, code patch assembly, and protection override are deliberately outside this revision.
+- The existing bounded 512-byte reader, one-region clamping, Go To, Refresh, Back/Forward history, persistent green origin marker, layout-neutral selected-origin rendering, extended selection, copy actions, and target/reconnect safety remain unchanged.
+- Saved Address value editing/Freeze coordination, scan/result storage, universal export, resident PS5 scanning, raw diagnostic write behavior, and plugin settings are unchanged.
+- No Plugin SDK or platform-plugin code changes are required. Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, and Mock plugin remains `1.0.0.rev4`.
+- Existing files under `tools/preflight/` are left unchanged; further development of that helper remains paused.
+
+### Verification and Documentation
+
+- Started from the exact user-supplied, fully verified `0.1.5.rev5` package and reread README, CHANGELOG, all Markdown documentation under `docs/`, and reviewed the complete source/project/resource/test inventory before changing code.
+- Core safe-write validation is intentionally separate from WPF. The writer requires one complete readable+writable+non-guarded region, performs an exact pre-read, refuses stale displayed bytes before `IMemoryWriter.WriteAsync(...)`, and performs an exact read-back after the write.
+- Host coordination uses the existing foreground-target reservation rather than creating another write queue or using the PS5-specific concurrent Frozen-write channel. This preserves the already verified rule that explicit target actions do not overlap the primary target command stream.
+- Static preparation must confirm all new XAML event handlers exist on concrete window/dialog elements, the dialog and Memory Viewer XAML parse, all new C# files contain required `using` directives, the two new Core tests are registered exactly once, the automated count is 53, Plugin SDK/plugin versions are unchanged, local Markdown links resolve, and no build artifacts are packaged.
+- Native Windows/.NET/WPF compilation and runtime verification remain required. Live PS5 editing should begin with a deliberately chosen, already writable test range or a known disposable game value and must confirm the normal command stream remains usable afterward.
+
+## TeeKay87's Memory Engine 0.1.5.rev5 - Memory Viewer Origin Selection Layout Fix
+
+### Fixed
+
+- Fixed the Memory Viewer origin row changing physical size when the persistent green origin row was also selected. Rev4 added `BorderThickness="1"` only for the combined `IsOriginRow + IsSelected` state; WPF included that border in the row's desired size, which increased the selected origin row by a few pixels, shifted every row below it downward, widened the measured row content, and could force a horizontal scrollbar to appear.
+- Removed the selection-only row border entirely. The origin marker is now presentation-only through the existing theme-aware `SuccessMutedBrush` background and does not modify `BorderThickness`, padding, margin, row height, column width, or any other layout-affecting property when selection changes.
+- Preserved the independent state model introduced in rev4: the current navigation/origin row remains green while another row or a multi-selection uses the normal DataGrid selection surface, and selecting the green origin row no longer changes its geometry.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.5.rev4` to `0.1.5.rev5` with feature title `Memory Viewer Origin Selection Layout Fix`.
+- Updated README and Memory Viewer/UI/theme/current-version documentation to record the rev4 runtime presentation defect and the rev5 layout-neutral correction.
+- Shifted the next functional Memory Viewer stage, **safe editing/write support**, to `0.1.5.rev6` because rev5 is a corrective revision rather than the next planned feature stage. Bookmarks, richer region handling, and runtime-driven additions remain later `0.1.5` work.
+
+### Preserved
+
+- Memory Viewer selection, multi-selection, clipboard actions, Back/Forward history, Go To, Refresh, origin-address semantics, target/process/connection-generation safety, and bounded read-only memory access are unchanged from rev4.
+- No Core, Plugin SDK, PS5 plugin, Mock plugin, scanner/storage/export, Saved Address, or target-protocol behavior is changed by this host-WPF presentation correction.
+- Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, Mock plugin remains `1.0.0.rev4`, and the automated verification registry remains at **51 checks**.
+- Existing files under `tools/preflight/` remain unchanged; further development of that helper remains paused.
+
+### Verification and Documentation
+
+- Before changing rev4, reread README, CHANGELOG, project Markdown documentation, and reviewed the complete current source/project/resource inventory from the packaged rev4 baseline.
+- Source review identifies the rev4 `DataGridRow.BorderThickness=1` setter in the selected-origin `MultiDataTrigger` as the sole layout-affecting state responsible for the observed geometry change. Rev5 removes the layout-affecting border setters from that combined selected-origin trigger and retains only background setters, so both the ordinary origin state and selected-origin state stay green without changing geometry.
+- Static preparation must confirm the Memory Viewer origin row style contains no selection-dependent border thickness, padding, margin, height, or width changes; XAML/project XML and bundled JSON parse; relative Markdown links resolve; the test registry remains at 51 checks; plugin/API versions remain unchanged; and no build artifacts are packaged.
+- Native Windows/.NET/WPF compilation and manual runtime verification remain required. The key runtime acceptance is that selecting and deselecting the green origin row does not move any row, change the DataGrid's measured width, or create/remove a horizontal scrollbar.
+
+## TeeKay87's Memory Engine 0.1.5.rev4 - Memory Viewer Selection Copy and Navigation
+
+### Added
+
+- Added independent extended row selection to the read-only Memory Viewer. Selecting one or several rows is now presentation state only and does not change the address the viewer was opened/navigated to or trigger additional target I/O.
+- Added a persistent green origin-row marker for the row containing the current Memory Viewer navigation address. The origin state is stored separately from DataGrid selection, so the row remains green after the user clicks or multi-selects other rows. A new successful Go To, Back, or Forward navigation moves the origin marker; Refresh keeps it at the current address.
+- Added Memory Viewer clipboard actions: **Copy Address**, **Copy Hex Bytes**, **Copy ASCII**, **Copy Row**, and **Copy Selected**. Row/selection copies use tab-separated Address, Hex Bytes, and ASCII fields with one selected row per line. `Ctrl+C` invokes the same Copy Selected path.
+- Added Memory Viewer Back/Forward history for successful navigation addresses. The initial Browse Memory address becomes the first history entry, successful Go To operations add entries, Back/Forward restore previous/next addresses, `Alt+Left`/`Alt+Right` invoke the same navigation, Refresh does not add history, and ordinary row selection does not affect history.
+- Added forward-branch replacement: after navigating Back, a successful Go To removes the obsolete forward branch before recording the new address. Failed reads leave the current history index and previous visible snapshot unchanged.
+- Added a theme-derived `SuccessMutedBrush` generated from the active theme's existing `SuccessText` color. The translucent brush provides the Memory Viewer origin-row surface without adding a new required theme JSON key or invalidating existing custom theme files.
+- Added `docs/testing/APP_0.1.5_REV4_VERIFICATION.md` covering clean Windows build, the unchanged 51-check automated suite, persistent origin highlighting, multi-selection/copy behavior, history semantics, theme switching, and existing Memory Viewer/Scan Results/Saved Addresses regressions.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.5.rev3` to `0.1.5.rev4` with feature title `Memory Viewer Selection Copy and Navigation`.
+- Changed the Memory Viewer DataGrid from single-row to extended full-row selection while preserving the existing bounded 16-byte-row presentation and read-only behavior.
+- Changed the Memory Viewer toolbar to include Back and Forward controls ahead of the Address/Go To/Refresh workflow.
+- Changed the row model's previous `ContainsRequestedAddress` presentation flag to the clearer `IsOriginRow` semantic and added a tab-separated row representation used by the host clipboard actions.
+- Updated README, Memory Viewer architecture, main-workspace, theme, early-architecture, scanner/export current-version references, and verification documentation for the rev4 behavior and the next planned Memory Viewer stage.
+- Recorded the project decision to pause further development of `tools/preflight/`. The existing preflight files remain in the repository unchanged; this revision adds no rules or behavior to that subsystem, and the real Windows/Roslyn/WPF build remains the authoritative compile gate.
+
+### Preserved
+
+- The Memory Viewer remains read-only. No memory-write/editing path, page-protection override, disassembly, pointer interpretation, bookmark persistence, or automatic live refresh is introduced in rev4.
+- Core `MemoryViewerReader`, `MemoryViewSnapshot`, target/process/connection-generation safety, region clamping, Guard rejection, foreground target-I/O coordination, and Region / Module + Protection presentation remain unchanged from the rev1 foundation.
+- Scan Results multi-selection Save Address behavior and the rev2/rev3 concrete DataGrid context-menu ownership remain unchanged.
+- Universal export, scanner/storage, Saved Address refresh/write/Freeze/removal, and PS5 native/resident scan behavior are not modified.
+- Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, Mock plugin remains `1.0.0.rev4`, and the dependency-free automated verification registry remains at **51 checks**.
+- `tools/preflight/Invoke-SourcePreflight.ps1` and `tools/preflight/Run-SourcePreflight.cmd` are byte-for-byte unchanged from rev3.
+
+### Verification and Documentation
+
+- Before changing rev3, reread README, CHANGELOG, the project Markdown documentation, and reviewed the complete C#/XAML/project/test/source inventory from the exact supplied `0.1.5.rev3` package.
+- Source review confirms the rev4 feature remains host/WPF-only except for the derived theme brush resource. No Plugin SDK or platform-plugin contract is required for selection, clipboard, navigation history, or origin-row presentation.
+- Source-level checks must verify XAML/XML/JSON structure, all new Memory Viewer event-handler names/signatures, navigation command wiring, version/revision references, Markdown links, unchanged plugin/API versions, unchanged 51-test registry, release-tree cleanliness, and byte preservation of Core/Plugin SDK/plugins/tests/preflight scripts where claimed.
+- Native Windows/.NET/WPF compilation and manual runtime verification remain required; no assistant-side build result is claimed.
+
+## TeeKay87's Memory Engine 0.1.5.rev3 - Memory Viewer C# Scope Compile Fix and Preflight Hardening
+
+### Fixed
+
+- Fixed the Windows/Roslyn `CS0136` build failure exposed by the first `0.1.5.rev2` build. The shared `TryPrepareRowContextMenu<TItem>()` helper declared the pattern variable name `contextMenu` once inside the failed-row branch and again later in the enclosing method declaration space; C# rejects that shadowing even though the two checks are reached on different control-flow paths.
+- Reworked the helper to read `dataGrid.ContextMenu` once into a nullable `ContextMenu? contextMenu` local and reuse that single local for clearing stale menu DataContext, validating menu availability, and assigning the current row DataContext. This removes the declaration-space conflict rather than merely renaming one of two competing pattern variables.
+- Preserved the rev2 context-menu ownership and selection semantics. Scan Results/Saved Addresses context menus remain concrete `DataGrid.ContextMenu` instances, right-clicking an already selected Scan Result retains the multi-selection, right-clicking outside the selection targets the clicked row, and existing Save Address/Browse Memory/copy/freeze/remove actions continue through the same handlers/commands.
+- Recorded the actual rev2 Windows result as build failure rather than acceptance. The `MC6007` failure from rev1 was gone, but rev2 could not reach the 51-check/runtime acceptance phase because `CS0136` prevented the App project from compiling.
+
+### Added
+
+- Hardened `tools/preflight/Invoke-SourcePreflight.ps1` with a conservative C# pattern-variable declaration-space rule. For project/WPF-style PascalCase type patterns inside one method, reusing the same pattern-variable identifier is now rejected before the authoritative Windows build. This directly detects the rev2 `contextMenu` failure class while remaining intentionally narrower than a general C# compiler.
+- Added a dedicated PASS line for the new C# pattern-variable declaration-space check so the source-preflight output makes the new gate visible.
+- Added `docs/testing/APP_0.1.5_REV3_VERIFICATION.md` covering the hardened source preflight, clean Windows build, unchanged 51-check automated suite, context-menu/multi-select regressions, and Memory Viewer smoke verification.
+
+### Changed
+
+- Advanced centralized host metadata from `0.1.5.rev2` to `0.1.5.rev3` with feature title `Memory Viewer C# Scope Compile Fix and Preflight Hardening`.
+- Updated README, Memory Viewer/Main Workspace/Saved Addresses architecture notes, Universal Export/Scanner current-version references, the early architecture guideline's preflight note, and source-preflight documentation to reflect the rev2 build result and rev3 correction.
+- The planned Memory Viewer feature order is unchanged, but two corrective revisions now sit between the rev1 foundation and the next functional stage. Selection/copy/navigation history therefore moves to `0.1.5.rev4`; safe editing/write support follows after that, then bookmarks/richer region behavior and other runtime-driven additions.
+
+### Preserved
+
+- Core Memory Viewer behavior is unchanged: bounded read-only region-safe reads, Address/Hex/ASCII rows, Go To, Refresh, target/process/connection-generation safety, Protection and region presentation all retain rev1 semantics.
+- Scan Results multi-selection Save Address behavior is unchanged from rev1/rev2.
+- Core, Plugin SDK, PS5 plugin, Mock plugin, scanner/storage/export implementation, Saved Address I/O/freeze behavior, and PS5 protocol behavior are not functionally modified by this compile correction.
+- Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, Mock plugin remains `1.0.0.rev4`, and the automated verification registry remains at **51 checks**.
+
+### Verification and Documentation
+
+- Before changing rev2, reread README, CHANGELOG, all Markdown files under `docs/`, and reviewed the complete source/XAML/project/test inventory from the exact packaged rev2 baseline.
+- Static regression analysis against the exact packaged rev2 source identifies one repeated typed pattern-variable conflict: `contextMenu` in `TryPrepareRowContextMenu<TItem>()` at rev2 lines 151 and 165. The corrected rev3 source contains no conflict under the same rule.
+- The source preflight remains an auxiliary gate only. No assistant-side Windows/.NET/WPF build result is claimed; clean Windows build, the 51-check verification runner, and manual Memory Viewer/context-menu acceptance remain required.
+
+## TeeKay87's Memory Engine 0.1.5.rev2 - Memory Viewer XAML Compile Fix and Source Preflight
+
+### Fixed
+
+- Fixed the first Windows/WPF build failure in `0.1.5.rev1`. Rev1 added code-behind `MenuItem.Click` handlers inside `ContextMenu` instances created through `DataGridRow` `Setter.Value`; the XAML remained valid XML but WPF markup compilation failed with `MC6007` and then emitted cascading designer/type errors such as missing `System.Object`, `ProportionalGridSplitter`, `TextBoxInputFilter`, and `UiMetrics` references.
+- Removed all three rev1 code-behind `Click` hookups from `Setter.Value` object graphs. The Scan Results and Saved Addresses row menus now live as concrete `DataGrid.ContextMenu` instances, where ordinary code-behind event wiring is compiled in the normal control object graph.
+- Added `ContextMenuOpening` preparation for both DataGrids. The clicked row becomes the menu DataContext before commands/events execute. If the row is outside the current selection, the previous selection is cleared and that row becomes the selection; if the context-clicked Scan Result is already part of a multi-selection, the existing selected set is retained so **Save Address** can still process all selected rows as intended.
+- Preserved existing row commands after the context-menu ownership change. Scan Results **Copy address**/**Copy value** and Saved Addresses Freeze/Unfreeze, **Copy address**, **Copy value**, and **Remove address** continue to bind to the context row rather than to the main window/plugin DataContext.
+
+### Added
+
+- Added repository source-preflight tooling under `tools/preflight/`: `Run-SourcePreflight.cmd` provides the Windows entry point and `Invoke-SourcePreflight.ps1` performs source-level checks before a real application build.
+- Added XAML event-wiring validation that checks known event-handler names, verifies matching code-behind methods, rejects direct event hookups inside shared `Setter.Value` object graphs, and, when Windows `PresentationFramework` is available, reflects built-in WPF types so an event name must exist on the element type that declares it.
+- Added source-level `StaticResource` validation for simple named resources and `clr-namespace` validation that checks project-owned XAML custom-control/attached-property owner types against the C# source inventory. These checks are intended to catch common custom-type/resource failures before they cascade through the WPF designer.
+- Added JSON/project validation, explicit `ProjectReference` path checks, centralized `AppInfo`/README/CHANGELOG/current-verification consistency checks, current verification-registry count validation, and release-tree rejection of `bin`, `obj`, and `.vs` directories.
+- Added `docs/development/SOURCE_PREFLIGHT.md` documenting the preflight scope, limitations, execution order, and maintenance rule. The preflight is explicitly an additional source gate and does not claim to replace Roslyn, WPF BAML generation, Windows build verification, automated regression execution, or live-target testing.
+- Added `docs/testing/APP_0.1.5_REV2_VERIFICATION.md` covering source preflight, clean Windows build, the existing 51 automated checks, corrected Scan Results/Saved Addresses context menus, multi-selection Save Address, Browse Memory, Memory Viewer regression, and existing scanner/export/Saved Address/PS5 boundaries.
+
+### Changed
+
+- Advanced the host from `0.1.5.rev1` to `0.1.5.rev2` with feature title `Memory Viewer XAML Compile Fix and Source Preflight` through centralized `AppInfo`.
+- Recorded the actual rev1 verification outcome in its verification document: rev1 failed at the clean Windows/WPF build before its 51-check/runtime acceptance could begin. The compile failure is therefore not recorded as a functional Memory Viewer regression or as a passed revision.
+- Updated README and Memory Viewer/UI/architecture documentation to describe the corrected context-menu ownership and the new preflight-before-build release workflow.
+- Adjusted the working `0.1.5` feature sequence without changing its functional order. Because rev2 is a corrective revision, selection/copy/navigation history moves to the next functional revision, safe Memory Viewer editing follows after that, and bookmarks/richer region handling remain later `0.1.5` work. Architecture-neutral disassembly remains the expected next major feature block only after Memory Viewer is complete and verified.
+
+### Preserved
+
+- The rev1 Core Memory Viewer design is unchanged: neutral `MemoryViewerReader`, 512-byte bounded reads, readable/non-Guarded single-region clamping, target/process + connection-generation safety, foreground target I/O coordination, Address/Hex/ASCII presentation, Go To, Refresh, Region / Module, Protection, and visible range all remain as implemented in rev1.
+- Scan Results multi-selection **Save Address** semantics are unchanged from rev1; rev2 only repairs how the WPF context menu reaches that already-implemented host method.
+- Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, and Mock plugin remains `1.0.0.rev4`. No Plugin SDK contract, PS5 protocol command, native scan mapping, memory reader/writer implementation, or plugin-specific functionality changes.
+- Core scanner/storage/export behavior, the 50,000-row presentation boundary, complete-result disk/resident semantics, Protection resolution/export, Saved Address refresh/write/Freeze behavior, and pretty JSON export remain unchanged.
+- The dependency-free automated registry remains exactly **51 checks**. Rev2 changes WPF compile/integration and repository source tooling, so no existing automated production check is removed or renumbered.
+
+### Verification
+
+- The supplied `0.1.5.rev1` ZIP was used as the baseline. README, CHANGELOG, all Markdown files under `docs/`, and the complete source/project inventory were reviewed before the corrective code change.
+- Static regression review confirms there are no code-behind event attributes remaining under a direct `Setter.Value` object graph in the current XAML source. An equivalent source-preflight rule detects all three problematic rev1 event placements and none in the corrected rev2 tree.
+- MainWindow XAML/context-menu code was reviewed together with the existing Scan Results/Saved Addresses selection, copy, Freeze, Remove, Browse Memory, and bulk-save paths so the compile fix does not silently replace row semantics with window/plugin semantics.
+- Final Windows/WPF build, source-preflight execution under Windows `PresentationFramework`, the **51/51** verification run, and runtime context-menu/Memory Viewer checks remain user-run acceptance steps documented in `docs/testing/APP_0.1.5_REV2_VERIFICATION.md`.
+
+## TeeKay87's Memory Engine 0.1.5.rev1 - Memory Viewer Foundation
+
+### Added
+
+- Added the first production **Memory Viewer Foundation** as a platform-neutral read-only subsystem. `TeeKay87.MemoryEngine.Core.MemoryViewer.MemoryViewerReader` reads through the existing `IMemoryReader` contract and returns a neutral `MemoryViewSnapshot`; no PS5-specific protocol command or Plugin SDK contract was added.
+- Added bounded Memory Viewer reads with a default 512-byte visible window, 16-byte row width, a 65,536-byte defensive maximum request size, readable-region validation, Guard rejection, centered-window positioning where possible, row-boundary alignment, and strict clamping to the containing `MemoryRegion`. Row alignment is applied only when the aligned page still contains the requested address, including near intentionally unaligned region ends. Partial backend reads are accepted only when they still contain the requested address. The viewer never reads through a region boundary merely to fill its page.
+- Added a themed, modeless `MemoryViewerWindow` with hexadecimal **Address** input, **Go To**, **Refresh**, target/plugin identity, Region / Module, containing region range, Protection, visible range, and a virtualized read-only Address / Hex Bytes / ASCII table. Auto-generated DataGrid columns are disabled, non-printable ASCII bytes render as `.`, and the row containing the requested address is selected and scrolled into view after each successful read.
+- Added **Browse Memory** to the Scan Results context menu. It opens Memory Viewer at the clicked result address while capturing the current Active Target identity.
+- Added **Browse Memory** to the Saved Addresses context menu. It opens Memory Viewer at the saved absolute address while carrying the Saved Address process identity rather than assuming the currently selected process.
+- Added target/connection safety for Memory Viewer. Each window captures the owning process identity and the host connection generation; every read verifies both before using the current session, so an old viewer cannot silently redirect itself to another process or to a later reconnect that happens to reuse the same process id/name.
+- Preserved backend-provided Region / Module naming semantics in Memory Viewer: module name is preferred, then region name, and anonymous mappings remain blank instead of receiving a host-invented label.
+- Added host-side Memory Viewer I/O coordination through the existing foreground-target reservation. Viewer reads prevent new Saved Address timer work from starting, wait for already-running Saved Address I/O to reach its safe idle boundary, use the primary neutral `IMemoryReader`, and release the reservation afterward. Existing scan/write/other foreground conflicts are rejected rather than overlapped.
+- Added two automated Core verification checks: **Memory Viewer bounded readable window** and **Memory Viewer guarded-region rejection**. The bounded-window check also covers an intentionally unaligned near-end region boundary so row alignment cannot move the requested address outside the returned page. The verification registry therefore increases from 49 to **51 checks**.
+- Added `docs/architecture/MEMORY_VIEWER.md`, documenting the implemented boundary, target safety, read/window semantics, WPF presentation, and the planned `0.1.5` progression.
+- Added `docs/testing/APP_0.1.5_REV1_VERIFICATION.md` with clean-build, 51-check, Mock-target, PS5-live, target-safety, theme, multi-selection, and regression verification steps.
+
+### Changed
+
+- Changed Scan Results context-menu **Save Address** so it respects WPF multi-row selection. When the context-clicked row is part of a selection containing multiple current Scan Results, every selected row is processed rather than only the row that supplied the context menu.
+- Changed bulk Save Address handling to skip rows whose Saved Address identity already exists, refresh the derived Saved Address count/export-state properties once after the additions, select the last relevant row, and report added/already-saved counts in one status message. The existing target + address + Value Type identity rule is unchanged.
+- Kept Scan Results double-click as the existing single-row Save Address shortcut; the multi-selection behavior applies specifically to the context-menu Save Address workflow requested for selected rows.
+- Advanced the host application version from verified `0.1.4.rev5` to `0.1.5.rev1` and reset revision numbering to 1 because the Universal Export feature block is complete and verified and development has moved to the Memory Viewer feature block. `AppInfo` remains the authoritative title/version/revision/feature source.
+- Updated README and architecture/UI documentation to describe Memory Viewer as current functionality rather than future work, to document the new Scan Results multi-selection behavior, and to record that `0.1.4.rev5` passed all 49 automated checks plus its runtime visual acceptance.
+- Updated the early-development architecture guide only as implementation status/guidance: it now records the rev1 Memory Viewer foundation while explicitly retaining the document's non-frozen nature.
+
+### Preserved
+
+- The verified `0.1.4` export pipeline is unchanged: JSON/CSV/TSV/Markdown formats, scopes, column selection, transactional temp-file publication, progress/cancellation, Protection export, disk-backed/resident complete-set semantics, and indented JSON all retain their rev5 behavior.
+- Scan Type semantics, disk-backed generation lifecycle, backend-resident TurboScan behavior, 50,000-row WPF scan preview boundary, live Scan Result refresh, Saved Address read/write/freeze coordination, Protection resolution, and target process-selection rules are unchanged except for the new explicit Memory Viewer read caller and multi-row Save Address invocation.
+- Plugin API remains `2.9.0`, PS5 plugin remains `0.1.0.rev22`, and Mock plugin remains `1.0.0.rev4`. No platform plugin source or protocol mapping is changed by this host/Core feature.
+- Memory Viewer rev1 is deliberately read-only. Byte/cell selection/copy/navigation history are deferred to a later `0.1.5` revision, safe editing/write support follows after that, and bookmarks/richer region behavior remain rev4+ work. Architecture-neutral disassembly is expected only after the Memory Viewer feature block is complete and verified.
+
+### Verification and Documentation
+
+- Recorded the final user verification result for `0.1.4.rev5`: **All 49 checks passed** and the template-based Saved Addresses Protection text was visually confirmed centered at runtime. The `0.1.4` block is therefore closed as verified.
+- Reviewed README, CHANGELOG, all Markdown documentation under `docs/`, and the complete source/XAML/project/test inventory before changing the verified rev5 baseline.
+- Added 51-check automated coverage for the new Core read boundary while retaining every previous scanner/export/plugin/PS5 verification check.
+- Final Windows build, WPF runtime behavior, Mock Memory Viewer workflow, PS5 live memory inspection, multi-selected Save Address behavior, and theme checks remain user-run acceptance steps for this revision and are documented in `docs/testing/APP_0.1.5_REV1_VERIFICATION.md`.
+
+## TeeKay87's Memory Engine 0.1.4.rev5 - Saved Address Protection Rendering Alignment Fix
+
+### Fixed
+
+- Corrected the Saved Addresses **Protection** vertical-alignment defect that remained visible at runtime in `0.1.4.rev4`. Rev4 changed the `DataGridCell.VerticalContentAlignment`, but the `DataGridTextColumn` still generated its own `TextBlock` presentation element and the text continued to render too high within the taller Saved Address row.
+- Replaced the Saved Addresses Protection `DataGridTextColumn` with an explicit read-only `DataGridTemplateColumn`. The column now stretches its cell content vertically and renders Protection through an explicit `TextBlock` with `VerticalAlignment="Center"`, so the element that actually draws the text is centered rather than relying on container alignment to influence a generated element.
+- Preserved the original column's sortable/clipboard semantics explicitly through `SortMemberPath="Protection"` and `ClipboardContentBinding="{Binding Protection}"`; moving to a template column does not intentionally remove header sorting or DataGrid clipboard content for Protection.
+- Kept the correction local to the Saved Addresses Protection column. No global `DataGridCell`, `TextBlock`, row-height, TextBox, ComboBox, Scan Results, or theme style is changed as part of this revision.
+
+### Changed
+
+- Advanced the host application from `0.1.4.rev4` to `0.1.4.rev5` with feature title `Saved Address Protection Rendering Alignment Fix` through centralized `AppInfo`. The semantic application version remains `0.1.4` while the Universal Export/Protection feature block remains under runtime verification.
+- Updated README and current architecture/UI documentation to describe the explicit template-based Protection rendering used by the current build rather than claiming the ineffective rev4 container-only correction was sufficient.
+- Recorded the actual rev4 verification outcome: the Windows automated verification suite passed **49/49**, while the required Saved Addresses Protection visual alignment check failed at runtime. Rev4 therefore did not satisfy its acceptance criteria.
+- Added `docs/testing/APP_0.1.4_REV5_VERIFICATION.md` with clean-build, existing 49-check regression, explicit Protection alignment, selection/theme, resize, multi-row, data, and export verification steps.
+
+### Preserved
+
+- Protection data semantics are unchanged. Rev5 does not alter `MemoryProtection`, memory-map lookup, address/range validation, refresh timing, or the conditions under which Protection is blank.
+- Scan Results Protection presentation is unchanged; only the Saved Addresses Protection rendering path is replaced.
+- Universal Export is unchanged: Protection selection/output, indented JSON, CSV/TSV/Markdown output, complete-set streaming, progress/cancellation, and transactional destination publication retain rev3/rev4 behavior.
+- Saved Address Description/Address/Type/Value editing, direct writes, Frozen writes, background refresh, target-identity checks, pending removal, user-operation coordination, and export snapshot behavior are unchanged.
+- Plugin API remains **2.9.0**, PS5 plugin remains **0.1.0.rev22**, Mock plugin remains **1.0.0.rev4**, and no platform-specific code is changed.
+- The automated verification registry remains at **49 checks** because rev5 is a host-WPF rendering correction. Existing automated checks continue to cover the Protection/export/scanner contracts; the visual alignment itself remains a runtime UI acceptance item.
+
+### Verification and Documentation
+
+- `0.1.4.rev4` was run on Windows and completed the full automated verification suite with **All 49 checks passed**. Runtime inspection in the Dimmed theme demonstrated that the Protection text was still positioned too high, proving the rev4 `DataGridCell.VerticalContentAlignment` approach did not correct the generated `DataGridTextColumn` text element.
+- Before editing rev5, reread README, CHANGELOG, every Markdown document under `docs/`, and reviewed the complete current source/project/resource inventory from the packaged rev4 baseline.
+- Reviewed the existing WPF DataGrid styles and all current `ElementStyle`/template usage before changing the column. No existing shared centered read-only DataGrid-text style was available to reuse without broadening the change.
+- The rev5 implementation explicitly controls both sides required for deterministic centering: the `DataGridCell` content host stretches vertically, and the template-owned `TextBlock` centers itself within that stretched area.
+- Per established project workflow, no assistant-side .NET/WPF build result is claimed. Windows build, the existing 49/49 suite, and visual runtime verification in Light/Dimmed/Dark remain user-run according to `docs/testing/APP_0.1.4_REV5_VERIFICATION.md`.
+
+## TeeKay87's Memory Engine 0.1.4.rev4 - Saved Address Protection Vertical Alignment Fix
+
+### Fixed
+
+- Fixed the read-only **Protection** text in the **Saved Addresses** table being aligned against the top of each row instead of vertically centered. Saved Address rows are taller than ordinary text-only DataGrid rows because Description, Address, Type, and Value use the shared 34-unit editor controls; the new Protection `DataGridTextColumn` had inherited the default cell vertical-content alignment introduced in rev3.
+- Added a local `DataGridCell` style only to the Saved Addresses Protection column and set `VerticalContentAlignment` to `Center`. The style is based on the existing application DataGridCell style so theme, selection, focus, borders, and other shared DataGrid behavior remain intact.
+
+### Changed
+
+- Advanced the host application from `0.1.4.rev3` to `0.1.4.rev4` with feature title `Saved Address Protection Vertical Alignment Fix` through centralized `AppInfo`. The semantic application version remains `0.1.4` because the Universal Export/Protection feature block is still being runtime-verified.
+- Updated README, Saved Addresses architecture documentation, Main Workspace UI documentation, the early architecture guideline's current implementation note, and current-version references in scanner/export documentation.
+- Added `docs/testing/APP_0.1.4_REV4_VERIFICATION.md` for clean build, existing 49-check regression verification, Saved Addresses alignment checks, theme checks, Protection data regression, and export regression.
+
+### Preserved
+
+- Protection data semantics are unchanged. Rev4 does not alter `MemoryProtection`, memory-map lookup, address/range validation, refresh timing, or the conditions under which Protection is blank.
+- Scan Results Protection presentation is unchanged. The alignment correction applies only to the Saved Addresses Protection column reported in the rev3 runtime UI.
+- Universal Export is unchanged: Protection selection/output, indented JSON, CSV/TSV/Markdown output, complete-set streaming, cancellation, progress, and transactional publication retain rev3 behavior.
+- Saved Address editing, direct writes, Frozen writes, background refresh, target-identity checks, pending removal, and user-operation coordination are unchanged.
+- Plugin API remains **2.9.0**, PS5 plugin remains **0.1.0.rev22**, Mock plugin remains **1.0.0.rev4**, and no platform-specific code is changed.
+- The automated verification registry remains at **49 checks** because rev4 is a host-WPF visual alignment correction; existing automated checks continue to cover the affected Protection/export data contracts.
+
+### Verification and Documentation
+
+- Rev3 was observed running successfully enough to expose the new Protection data in both Scan Results and Saved Addresses; the reported issue was specifically that Saved Addresses Protection text was not vertically centered. Rev4 addresses that presentation defect without changing the verified data path.
+- Windows build, the 49-check automated suite, and visual verification in Light/Dimmed/Dark remain user-run according to `docs/testing/APP_0.1.4_REV4_VERIFICATION.md`.
+
+### Static Review Preparation
+
+- Used the packaged `0.1.4.rev3` source tree as the baseline and reread all Markdown documentation plus the complete source/project inventory before editing.
+- Confirmed the misalignment originated from the Saved Addresses Protection `DataGridTextColumn` using default cell vertical-content alignment while neighboring template columns use taller controls.
+- Kept the fix local rather than changing the global DataGridCell style, avoiding unintended layout changes to Scan Results, other columns, dialogs, or future DataGrids.
+- Structural pre-package checks cover XAML/project XML parsing, JSON parsing, Markdown relative links, centralized AppInfo metadata, exact 49-check registry count, unchanged plugin/API trees, absence of build artifacts, and ZIP roundtrip integrity. Per project workflow, .NET/WPF compilation and runtime verification remain user-run on Windows.
+
+## TeeKay87's Memory Engine 0.1.4.rev3 - Memory Protection Columns and Pretty JSON Export
+
+### Added
+
+- Added a read-only **Protection** column to **Scan Results**. Materialized `MemoryScanResult` rows now carry the neutral `MemoryProtection` flags of the containing `MemoryRegion`, allowing the UI to distinguish ranges such as `Read`, `Read, Write`, and `Read, Execute` without inventing a region/module name when the backend supplied none.
+- Added a read-only **Protection** column to **Saved Addresses**. A saved row resolves the protection of its complete current Value Type range from the cached Active Target memory map and keeps that metadata separate from its editable Address/Type/Value state.
+- Added **Protection** to the shared export-column catalog for Scan Results and Saved Addresses. Displayed/Selected Scan Results export the materialized row protection, while Saved Addresses export the resolved protection captured in the stable host snapshot.
+- Added complete-set Protection export for disk-backed and backend-resident **All Results**. The export source resolves each streamed address/value range against the memory-map snapshot supplied by the host, so Protection is available beyond the 50,000-row WPF presentation preview without creating millions of new WPF objects.
+- Extended the existing automated export/scanner checks to verify Protection preservation, text/JSON output, and Protection resolution for disk-backed/backend-resident exports beyond the 50,000-row preview boundary. The verification registry remains at **49 checks** because existing checks were strengthened rather than adding another top-level test.
+- Added `docs/testing/APP_0.1.4_REV3_VERIFICATION.md` covering Windows build, 49-check verification, Scan Results/Saved Addresses Protection, complete-set export, pretty JSON, cancellation, live PS5 behavior, and UI/theme regressions.
+
+### Changed
+
+- Advanced the host application from `0.1.4.rev2` to `0.1.4.rev3` with feature title `Memory Protection Columns and Pretty JSON Export` through centralized `AppInfo`. The semantic application version remains `0.1.4` because Universal Export is still in its current verification block.
+- Changed structured JSON export from compact single-line output to **indented human-readable JSON** by enabling `JsonWriterOptions.Indented` on the existing streaming `Utf8JsonWriter`. JSON is formatted while it is produced; there is no second beautifier pass and no requirement to load the completed file or complete result set into memory. Schema version `1`, typed values, metadata, selected-column structure, progress, cancellation, row-count validation, and transactional publication remain unchanged.
+- Scan Result protection is refreshed for currently materialized rows when the Active Target memory map changes. This refresh changes presentation/export metadata only and does not alter scan membership, Previous values, native/disk baselines, or target memory.
+- Saved Address protection is recalculated when the Active Target memory map changes and after Address, Type, or successful variable-size Value changes that can change the covered range. Protection is cleared when the row does not belong to the Active Target, no map is available, or no single region contains the complete range.
+- Updated **All Results** scope descriptions to state that complete disk-backed/backend-resident sources now guarantee Address, Value, Type, and Protection. Previous and Region / Module remain presentation-only unless the complete set itself is materialized.
+- Updated README, Universal Export, Memory Scanner, Saved Addresses, Main Workspace, Early Development Architecture guideline, and current verification documentation for the rev3 behavior.
+
+### Preserved
+
+- **Region / Module** behavior is intentionally unchanged. If ps5debug-NG or another backend supplies no region/module name, the field remains blank; rev3 does not fabricate a label from address ranges or protection flags.
+- Memory protection is informational/presentation data. Rev3 does not change page permissions, call a target protection API, or bypass the existing host checks that require readable ranges for refresh and writable ranges for direct writes/freeze operations.
+- The verified scan-result disk format is unchanged. Protection is not appended to every stored record solely for export; complete stored/native exports resolve it from the already-loaded neutral memory map while streaming.
+- The Plugin SDK already contained `MemoryProtection` and `MemoryRegion.Protection`, and the PS5 implementation already maps ps5debug-NG R/W/X values into that neutral model. Plugin API therefore remains **2.9.0**, PS5 plugin remains **0.1.0.rev22**, and Mock plugin remains **1.0.0.rev4**.
+- Scan Type semantics, native mappings, resident result lifecycle, disk generations, 50,000-row WPF preview boundary, live-value refresh, Saved Address write/freeze/removal coordination, export scopes/formats, transactional cancellation, and target-I/O coordination remain unchanged apart from exposing the new Protection metadata.
+
+### Verification and Documentation
+
+- Recorded the user-run `0.1.4.rev2` verification result: **all 49 automated checks passed** on Windows, including Universal Export, disk-backed/resident complete-set export, scanner semantics, PS5 native protocol, Plugin API, storage, and plugin-host regression coverage.
+- Rev3 keeps the same 49-check registry and strengthens relevant assertions for Protection plus indented JSON. Windows compilation/runtime and manual/live PS5 acceptance remain user-run according to `docs/testing/APP_0.1.4_REV3_VERIFICATION.md`.
+- Reviewed the existing neutral memory-map model and current PS5 mapping before implementation. No platform-specific branch or duplicate protection enum was added to Core/WPF.
+
+### Static Review Preparation
+
+- Used the user-supplied `0.1.4.rev2` package as the exact baseline and reviewed the project documentation and complete source/project inventory before finalizing rev3.
+- Audited every `MemoryScanResult` construction path so Core reader-based scans, list-based native scans, disk-backed previews, and backend-resident previews all preserve the containing region's Protection metadata.
+- Audited all `MemoryScanResultExportSource` factory callers after adding the memory-map snapshot requirement for complete stored sources. Materialized, disk-backed, and backend-resident paths all expose Protection without introducing a platform-specific export branch.
+- Confirmed PS5 plugin, Mock plugin, and Plugin SDK trees remain byte-identical to rev2; no public compatibility/version change is required.
+- Structural pre-package checks cover XAML/project XML parsing, JSON parsing, Markdown relative links, exact 49-check registry count, centralized AppInfo metadata, absence of build/draft artifacts, and release-tree diff scope. Per project workflow, .NET/WPF build and runtime/live PS5 verification remain user-run on Windows.
+
+## TeeKay87's Memory Engine 0.1.4.rev2 - Tabular Export Nullability Compile Fix
+
+### Fixed
+
+- Fixed the Windows build-blocking `CS8600` diagnostic in `TeeKay87.MemoryEngine.Core/Exporting/TabularExportService.cs`. `Directory.Build.props` intentionally enables nullable reference analysis and promotes warnings to errors, and `Dictionary<TKey,TValue>.TryGetValue(...)` annotates its `out` value as potentially null when the lookup fails. Rev1 passed that result directly into a non-nullable `ExportColumn` local, so the Core project could not produce `TeeKay87.MemoryEngine.Core.dll`.
+- Changed the selected-column lookup to receive `TryGetValue(...)` into `ExportColumn?` and explicitly reject either a failed lookup or a null value before assigning the column to the resolved export array. This preserves the existing invalid-column exception behavior while satisfying nullable analysis without using the null-forgiving operator and without weakening the repository's warning policy.
+- Identified the accompanying `CS0006`, `XLS0414`, and `XDG0008` diagnostics reported for `MainWindow.xaml` as downstream assembly-load/designer failures caused by the missing Core build output. `ProportionalGridSplitter` and `TextBoxInputFilter` remain present with the same public types and namespaces used by `MainWindow.xaml`; no XAML workaround or namespace change is introduced for those cascading errors.
+
+### Changed
+
+- Advanced the host application from `0.1.4.rev1` to `0.1.4.rev2` with feature title `Tabular Export Nullability Compile Fix` through the centralized `AppInfo` source. The semantic application version remains `0.1.4` because the Universal Export feature block is still awaiting Windows/runtime verification.
+- Updated the current README revision/checklist references to rev2 while retaining the full rev1 Universal Export functionality description.
+- Recorded the actual rev1 Windows build failure in `docs/testing/APP_0.1.4_REV1_VERIFICATION.md` and added `docs/testing/APP_0.1.4_REV2_VERIFICATION.md` for the corrected clean-build, existing 49-check, export/runtime, and rev32 regression verification path.
+- Updated current-version wording in the scanner/export architecture documentation where the document describes the current host build or emits an example `applicationVersion`; historical statements that Universal Export was introduced in rev1 remain historical.
+
+### Preserved
+
+- Universal Export behavior is unchanged from rev1: JSON/CSV/TSV/Markdown writing, transactional temporary-file publication, selectable scopes/columns, complete disk-backed/backend-resident **All Results**, 50,000-row displayed-preview semantics, Saved Address snapshots, progress/cancellation, and resident target-I/O coordination are not redesigned by this revision.
+- The verification registry remains at **49 checks**. No test is removed or weakened; rev2 exists so the already-added rev1 tests can actually build and run on Windows.
+- Plugin API remains **2.9.0**, PS5 plugin remains **0.1.0.rev22**, and Mock plugin remains **1.0.0.rev4**. No plugin contract, ps5debug-NG protocol path, native scan mapping, scanner predicate, result-storage format, Saved Address write/freeze path, target/session lifecycle, theme resource, or XAML layout behavior changes.
+- `Nullable` remains enabled and `TreatWarningsAsErrors` remains enabled in `Directory.Build.props`. The compile correction conforms to the existing quality policy rather than bypassing it.
+
+### Documentation and Verification Preparation
+
+- Re-read `README.md`, `CHANGELOG.md`, all **85** Markdown files under `docs/`, and the complete current source/project/resource tree from the packaged rev1 baseline before changing code.
+- Reviewed the reported compiler/designer chain against the actual project references and declarations. `TeeKay87.MemoryEngine.App` still references Core, `ProportionalGridSplitter` remains a public control in `TeeKay87.MemoryEngine.App.Controls`, and `TextBoxInputFilter` remains a public attached-property owner in `TeeKay87.MemoryEngine.App.Input`; their XAML namespace declarations are unchanged and valid in source.
+- Audited the new Core export files and their callers for another copy of the same non-nullable `TryGetValue` pattern. The reported `ExportColumn` lookup is the only occurrence in the rev1 export implementation requiring this correction.
+- Per established project workflow, no assistant-side .NET/WPF build result is claimed. Windows **Rebuild Solution**, the existing **49/49** verification run, and the rev1 export/live-PS5 acceptance tests remain required before the `0.1.4` export feature block is considered verified.
+
+## TeeKay87's Memory Engine 0.1.4.rev1 - Universal Export Foundation
+
+### Added
+
+- Added the first shared **universal list/table export foundation** to Core. `IExportDataSource`, typed `ExportCellValue` values, stable export-column definitions, bounded `ExportRowBatch` streaming, and `TabularExportService` now provide one reusable path for current and future list-based application features instead of requiring each view to implement its own file writer.
+- Added generic **JSON**, **CSV**, **TSV**, and **Markdown table** writers. CSV/TSV quote embedded delimiters, quotes, and line breaks; Markdown escapes table separators/backslashes and converts embedded line breaks so exported rows remain structurally valid.
+- Added a structured JSON envelope with export type, schema version, UTC export timestamp, authoritative row count, metadata, selected-column descriptors, and typed row properties. Rev1 defines schema version 1 for the current Scan Results and Saved Addresses sources; it does not define a re-import contract.
+- Added transactional destination handling for every export. Data is streamed into a uniquely named temporary file in the destination directory, the source's emitted row count is validated, and the completed file is published only after a successful write. Cancellation or failure removes the temporary output and does not replace an existing completed destination file.
+- Added a reusable theme-aware **Export Data** dialog for choosing export scope, format, and included columns. The dialog is shared by the first two export consumers rather than being hard-coded to one workspace and reuses the application's existing semantic control/error resources, including `ErrorTextBrush` for validation feedback.
+- Activated **Scan Results -> Export...** with three scopes where applicable:
+  - **All Results** reads the complete authoritative scan result set;
+  - **Displayed Results** exports only the currently materialized WPF presentation rows;
+  - **Selected Results** exports only the selected displayed rows.
+- Added complete-set Scan Results export adapters for all current result-storage shapes. Small materialized sets are exported directly, committed `IScanResultSet` generations are read in bounded disk-backed batches, and `INativeValueScanResidentResultSet` sources are read in bounded backend-resident batches without first materializing the entire set on the PC.
+- Added explicit complete-set column boundaries. Materialized Scan Results can export **Address**, **Value**, **Previous**, **Type**, and **Region / Module**. Complete disk-backed/backend-resident exports guarantee **Address**, **Value**, and **Type**, matching the data retained by the already-verified complete-result storage contracts without widening the storage format merely for export.
+- Activated **Saved Addresses -> Export...** with **All Addresses** and **Selected Addresses** scopes. Saved Address export snapshots **Frozen**, **Description**, **Address**, **Type**, and **Value** before file writing, so no target read/write is required during export.
+- Reused the existing generic modal operation-progress service for long exports, including determinate row progress and cancellation.
+- Added five dependency-free verification checks for the new subsystem: text-format escaping, structured JSON behavior, transactional cancellation, complete disk-backed Scan Results export beyond the 50,000-row presentation boundary, and complete backend-resident Scan Results export beyond that same boundary. The verification registry therefore increases from **44 to 49 checks**.
+- Added `docs/architecture/UNIVERSAL_EXPORT.md` and `docs/testing/APP_0.1.4_REV1_VERIFICATION.md` for the implemented architecture, schema/scope boundaries, large-result behavior, and Windows/live verification plan.
+
+### Changed
+
+- Advanced the host from the user-verified `0.1.3.rev32` scanner block to `0.1.4.rev1` with feature title `Universal Export Foundation` through centralized `AppInfo`. The new version begins at revision 1 because the user confirmed `0.1.3.rev32` works as intended and closes the `0.1.3` scanner feature block.
+- Changed the existing disabled Scan Results and Saved Addresses **Export...** placeholders into functional commands backed by the shared export pipeline.
+- Large Scan Results export now follows the same authoritative-result boundary as Next Scan. **All Results** must not be confused with the WPF preview: a scan containing more than 50,000 candidates reads the complete disk-backed or backend-resident set, while **Displayed Results** is explicitly the bounded presentation scope.
+- Backend-resident **All Results** export participates in the existing target-I/O coordination rules because it reads the resident result set through the plugin's primary native command stream. Ordinary live refresh and conflicting foreground target actions are suppressed for that resident export. Existing Frozen writes may continue only when the plugin provides the already-established concurrent memory writer path; otherwise they pause until the export leaves the resident target stream.
+- Scan Results export is unavailable while a scan/foreground result operation can replace or dispose the active complete result set. This prevents an export from retaining a disk-backed or backend-resident source while Next Scan is concurrently publishing a replacement set.
+- Saved Addresses **Export...** is temporarily disabled while a direct Saved Address user operation (such as an Address/Type/Value commit) is in progress. This prevents clicking Export immediately after an edit from snapshotting the pre-commit value while the LostFocus-triggered write is still completing. Background refresh/Frozen scheduling does not require this gate because export snapshots the current host rows synchronously and performs no target I/O.
+- Updated `README.md` to describe the current `0.1.4.rev1` export workflow, complete-result versus displayed-result semantics, active Saved Address export, 49-check verification boundary, and current development boundary. The stale current-verification reference to rev31 is replaced by the rev1 checklist.
+- Updated scanner, scan-result storage, Saved Addresses, main-workspace, modal-progress, and early-architecture documentation to describe the actual implemented export boundary. `EARLY_DEVELOPMENT_ARCHITECTURE.md` remains a design guide rather than a frozen implementation specification.
+- Recorded the user's 2026-09-05 acceptance of `0.1.3.rev32` in its verification document before opening the new `0.1.4` feature block.
+
+### Preserved
+
+- Plugin API remains **2.9.0**. Universal export is a shared Core/host feature and introduces no new plugin contract.
+- PS5 plugin remains **0.1.0.rev22** and Mock plugin remains **1.0.0.rev4**. No ps5debug-NG protocol command, native Scan Type mapping, plugin capability, or plugin-specific export implementation is added in this revision.
+- The verified disk-backed scan-result record format, backend-resident result contract, 50,000-row WPF presentation ceiling, First/Next/New Scan semantics, Changed/Unchanged byte semantics, live Scan Result refresh, Saved Address editing/freezing, and target/session lifecycle remain unchanged outside the temporary I/O coordination required while a resident export is actively reading its source.
+- Complete Scan Results export does not manufacture unavailable historical fields. Rev1 deliberately leaves the verified complete-result storage format unchanged instead of adding Previous/Region data solely to satisfy an early conceptual JSON example.
+- Export output is not treated as the application's future project/cheat persistence format, and rev1 does not add import/re-import, pointer persistence, Memory Viewer export, debugger export, disassembly export, or plugin cheat exporters.
+
+### Documentation
+
+- Added `docs/architecture/UNIVERSAL_EXPORT.md` as the authoritative description of the rev1 shared export contracts, ownership boundary, streaming strategy, output formats, JSON envelope, scopes, complete-result behavior, cancellation, and current non-goals.
+- Added `docs/testing/APP_0.1.4_REV1_VERIFICATION.md` with clean-build, 49-check, UI-format/scope, disk-backed large-result, live PS5 resident-result, cancellation, overwrite-safety, I/O-coordination, and rev32 regression verification steps.
+- Updated `docs/architecture/SCAN_RESULT_STORAGE_FOUNDATION.md` with complete-set export integration for materialized, disk-backed, and backend-resident result sets.
+- Updated `docs/architecture/SAVED_ADDRESSES.md` with the active Saved Address export integration and removed export from the feature's obsolete non-goals.
+- Updated `docs/architecture/MEMORY_SCANNER_FOUNDATION.md`, `docs/ui/MAIN_WORKSPACE.md`, and `docs/ui/MODAL_OPERATION_PROGRESS.md` for the current export consumer/progress behavior.
+- Updated `docs/architecture/EARLY_DEVELOPMENT_ARCHITECTURE.md` so its development-order status reflects the user-verified completion of `0.1.3` and the initial `0.1.4.rev1` export implementation while preserving the document's role as an architectural guideline.
+
+### Verification
+
+- Started from the complete user-supplied and user-verified `0.1.3.rev32` ZIP. `README.md`, `CHANGELOG.md`, all Markdown documentation under `docs/`, and the complete source/project inventory were reviewed before export code was added.
+- Added verification coverage that writes **50,005** complete disk-backed results and independently exposes **50,005** backend-resident results, proving the universal **All Results** source requests and writes beyond the 50,000-row WPF presentation ceiling instead of silently exporting only the preview.
+- Added cancellation coverage with a pre-existing destination file to verify that cancellation propagates, the old completed destination remains unchanged, and the temporary partial export is removed.
+- The final pre-package review includes source/documentation diffs, C#/XAML/project/JSON structural checks, Markdown relative-link checks, version/plugin metadata consistency, exact 49-check registry validation, release-tree cleanliness, and archive round-trip verification.
+- Per established project workflow, no assistant-side .NET/WPF build or live PS5 result is claimed. The clean Windows build, **49/49** executable verification run, and live export behavior remain user-run verification steps documented in the rev1 checklist.
+
+## TeeKay87's Memory Engine 0.1.3.rev32 - PS5 Floating Changed-Unchanged Semantics Fix
+
+### Fixed
+
+- Fixed a live PS5 Float/Double **Changed Value / Unchanged Value** semantic defect discovered while verifying the rev30/rev31 resident-result path. A Float **Unknown Initial Value** scan produced roughly 707 million resident candidates; the following **Changed Value** pass reduced the set to **66,937,361** results, but the bounded preview was dominated by `NaN` values that had not necessarily changed in memory.
+- Fixed the root cause in shared Core scan semantics. **Changed Value** and **Unchanged Value** now compare the fixed-width bytes retained by consecutive scan generations instead of using the Value Type's numeric equality contract. This makes change detection representation-stable: an identical NaN payload remains unchanged, a different NaN payload is changed, and representation changes such as `+0.0` to `-0.0` are treated as byte changes.
+- Fixed the corresponding PS5-native resident refinement path without forcing hundreds of millions of candidates through Core materialization. Current ps5debug-NG evaluates Float/Double compare types 9/10 through IEEE-754 `!=`/`==`; because `NaN != NaN` is true, unchanged NaN payloads can survive every Changed pass. For **Changed Value** and **Unchanged Value** only, the PS5 plugin now transmits the same-width unsigned integer Value Type in the TurboScan COUNT request: Float uses UInt32 and Double uses UInt64. ps5debug-NG therefore performs exact four-/eight-byte equality/inequality while the resident result width remains unchanged.
+- Preserved selected Value Type interpretation across the workaround. TurboScan START, resident-session shape, result GET decoding, WPF display, and subsequent Core metadata remain Float/Double; only the native COUNT comparison type is reinterpreted for the two byte-change predicates.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev31` to `0.1.3.rev32` with feature title `PS5 Floating Changed-Unchanged Semantics Fix` through centralized `AppInfo`.
+- Advanced the PS5 plugin from `0.1.0.rev21` to `0.1.0.rev22` because its native TurboScan refinement request mapping changes. Its Plugin API target remains `2.9.0`.
+- Plugin API remains `2.9.0`; rev32 does not add or modify a public plugin contract.
+- The dependency-free verification registry increases from **43 to 44 checks**. The new **PS5 native floating Changed/Unchanged bitwise protocol** check verifies a Float Unknown Initial resident session followed by Changed COUNT using wire UInt32, and a Double Unknown Initial resident session followed by Unchanged COUNT using wire UInt64. Both cases also verify that GET records remain the selected floating-point width and expose correct previous/current bytes.
+- Extended the existing Core Scan Type semantic check with explicit NaN-payload cases proving that identical floating snapshot bytes are Unchanged and not Changed, while a different NaN payload is Changed.
+
+### Preserved
+
+- Exact Value semantics are unchanged and continue to use the Value Type equality contract. Rev32 does not redefine user-entered floating-point equality, strict/tolerant Exact behavior, Fuzzy Value, Bigger/Smaller, Between, Increased/Decreased, Increased By/Decreased By, parsing, formatting, or rounding options.
+- Integer Changed/Unchanged behavior remains equivalent because byte identity for a fixed-width integer is the same representation criterion already expected from consecutive scan snapshots.
+- The rev30 backend-resident result architecture is unchanged: large PS5 TurboScan result sets can remain target-resident, only a bounded preview is fetched, compatible native Next Scans refine the complete target-side set, and Core materialization is deferred until a non-native predicate requires it.
+- The 50,000-row presentation ceiling, visible-row live Value refresh, disk-backed generation format, transactional materialization, New Scan Exact-default fix, Saved Addresses, scan-option applicability, Endianness/Alignment locking, target I/O serialization, and rev29 snapshot command-stream recovery are unchanged.
+- Core and WPF remain platform-neutral. The ps5debug-NG-specific Float/Double wire reinterpretation is contained entirely inside the PS5 plugin; Core defines only the shared stored-byte semantics of Changed/Unchanged.
+- Mock plugin remains `1.0.0.rev4` targeting Plugin API `2.0.0`.
+
+### Documentation
+
+- Updated `README.md` for application `0.1.3.rev32`, PS5 plugin `0.1.0.rev22`, the stored-byte Changed/Unchanged definition, the PS5 same-width integer COUNT workaround, and the 44-check verification boundary.
+- Updated scanner architecture and native-mapping documentation to distinguish Exact Value's Value Type equality from Changed/Unchanged's consecutive-snapshot byte comparison.
+- Updated PS5 plugin, native scan, and ps5debug-NG protocol mapping documentation with the Float -> UInt32 and Double -> UInt64 COUNT-only mapping and the reason it is required for NaN-stable resident refinement.
+- Recorded the actual rev31 Windows/live verification outcome in `docs/testing/APP_0.1.3_REV31_VERIFICATION.md`: **43/43 automated checks passed**, the New Scan regression passed live, the large resident path avoided immediate full materialization, and the subsequent Float Changed pass exposed the NaN semantic mismatch.
+- Added `docs/testing/APP_0.1.3_REV32_VERIFICATION.md` covering the 44-check runner and focused live PS5 regression for Float/Double Changed/Unchanged while retaining resident-result, visible-refresh, New Scan, and fallback behavior.
+
+### Verification
+
+- Started from the complete user-supplied `0.1.3.rev31` ZIP and reviewed the project documentation and full source/project inventory before changing scan semantics or PS5 transport behavior.
+- Rechecked current ps5debug-NG source for TurboScan COUNT and point comparison. COUNT uses its request `valueType` for comparison, requires only the resident session's byte width to match, and its optimized compare types 9/10 use typed `!=`/`==`. This makes same-width UInt32/UInt64 a protocol-compatible way to obtain byte equality for resident Float/Double snapshots without changing record width or GET decoding.
+- Added regression coverage at both semantic layers: Core directly tests unchanged/changed Float NaN payloads, while the PS5 loopback fixture independently asserts the exact COUNT wire Value Type and returned previous/current byte payloads for Float Changed and Double Unchanged.
+- Reviewed the change boundary so the only production semantic changes are shared Changed/Unchanged stored-byte comparison, the PS5 refinement Value Type selector, centralized host revision metadata, and PS5 plugin revision metadata. No Plugin SDK contract, storage format, WPF layout, Mock implementation, or native Scan Type id changes are required.
+- The rev32 pre-package static audit covers **233 files**, including structural checks across **129 C# files**, parse checks for **14 XAML/project XML files** and **3 JSON files**, relative-link resolution across **85 Markdown files**, and an exact **44-check** test registry. Version metadata, protocol constants used by the workaround, release-tree cleanliness, and generic/platform code boundaries pass.
+- Diff review against the user-supplied rev31 package shows **15 intentionally changed files, one new rev32 verification document, and no removed files**. No Plugin SDK contract, WPF production source, Mock production source, storage format source, project file, or theme file changes are introduced.
+- Per project workflow, no assistant-side .NET/WPF runtime build result is claimed. The release package is statically audited and archive-verified; the clean Windows build, **44/44** executable verification run, and live PS5 acceptance remain user-run verification steps documented in the rev32 checklist.
+
+## TeeKay87's Memory Engine 0.1.3.rev31 - Native Value-Type Verification Lifecycle Fix
+
+### Fixed
+
+- Fixed the deterministic verification-suite deadlock in **PS5 native value-type mapping protocol** introduced by the rev30 backend-resident result lifecycle. The fixture performs a native Exact First Scan for every supported ps5debug-NG Value Type. Each of those First Scans leaves an authoritative resident TurboScan session open until the client explicitly ends it.
+- Fixed the Float/Double branch of `VerifyPs5NativeValueTypesAsync`. That branch intentionally verifies that strict Exact native refinement throws `NotSupportedException`, because ps5debug-NG's resident Float/Double Exact comparison uses relative `1e-6` tolerance and strict semantics must fall back to shared Core. Rev30 correctly caught that fallback request but then awaited `Ps5ProtocolTestServer.Completion` without first ending the resident First Scan session. The loopback server was waiting for `CMD_PROC_TURBOSCAN_END` while the test was waiting for server completion, so neither side could advance.
+- Unified fixture cleanup so **every** Value Type path now calls `INativeValueScanRefiner.ResetAsync(...)` after its semantic assertions and before waiting for the loopback protocol server. Integer, Float, Double, and Array-of-Bytes cases therefore all exercise the same explicit resident-session lifecycle boundary.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev30` to `0.1.3.rev31` with feature title `Native Value-Type Verification Lifecycle Fix` through centralized `AppInfo`.
+- Kept the verification registry at **43 checks**. Rev31 repairs the lifecycle of an existing check rather than adding/removing coverage.
+- Updated the current verification documentation so the interrupted rev30 Windows run is recorded accurately and rev31 acceptance explicitly requires the runner to advance from **PS5 native custom-alignment protocol** through **PS5 native value-type mapping protocol** and the remaining checks.
+
+### Preserved
+
+- Plugin API remains `2.9.0`; no public Plugin SDK contract changes are introduced.
+- PlayStation 5 plugin remains `0.1.0.rev21` targeting Plugin API `2.9.0`; no PS5 production source changes are introduced by rev31.
+- In-Memory Test Target remains `1.0.0.rev4` targeting Plugin API `2.0.0`.
+- Rev30's backend-resident result architecture is unchanged: large authoritative PS5 TurboScan sets can stay target-resident, only the bounded presentation preview is fetched initially, compatible Next Scans refine the resident set directly, and Core fallback materializes the complete set on demand.
+- Rev30's visible Scan Result live Value refresh is unchanged. Only currently realized DataGrid rows are periodically reread, `Previous` remains the previous-scan baseline, and off-screen preview rows are not periodically traversed/read.
+- Rev30's New Scan stable-id/default-selection implementation is unchanged and remains part of the live acceptance checklist.
+- Core's 13 Scan Types, PS5 native Scan Type mapping table, strict/tolerant Float semantics, disk-backed scan-result format, result-storage lifecycle, Saved Addresses behavior, scan-option applicability, target I/O coordination, process/memory protocols, themes, and WPF layouts are unchanged.
+- The production behavior in which strict Float/Double Exact refinement requests shared-Core fallback is intentionally unchanged. Rev31 changes only the deterministic fixture's responsibility to explicitly close the resident First Scan session after verifying that fallback boundary.
+
+### Documentation
+
+- Updated `README.md` to identify `0.1.3.rev31` as the current build while continuing to describe the complete current scanner/resident-result/live-refresh functionality rather than using README as version history.
+- Recorded the actual rev30 Windows automated-verification result in `docs/testing/APP_0.1.3_REV30_VERIFICATION.md`: all checks through **PS5 native custom-alignment protocol** passed, then **PS5 native value-type mapping protocol** stalled because the Float/Double fixture waited for server completion without issuing TurboScan END.
+- Added `docs/testing/APP_0.1.3_REV31_VERIFICATION.md` covering the clean Windows build, 43-check rerun, exact value-type fixture regression, and the still-required live rev30 feature acceptance for New Scan defaults, large resident scans, native refinement, Core materialization, and visible Scan Result live refresh.
+
+### Verification
+
+- Re-extracted the complete rev30 release ZIP and used it as the rev31 baseline before making the targeted changes.
+- Reviewed the complete documentation inventory and source/project inventory before finalizing the correction, including the resident-result lifecycle, PS5 refiner reset path, loopback server protocol sequence, and the exact Float/Double strict-fallback branch that stalled the user-run verifier.
+- Confirmed the loopback server's native-scan path expects `CMD_PROC_TURBOSCAN_END` whenever a native resident session was created, including Float/Double First Scans; `ResetAsync(...)` maps to the existing production native-session reset service and therefore supplies the missing protocol completion without changing scan semantics.
+- Confirmed required C# namespace imports remain present; the rev31 test change introduces no new type/namespace dependencies.
+- The pre-package static audit covers **232 files**, including **129 C# files**, **14 XAML/project XML files**, **3 JSON files**, and **84 Markdown files**. XML/JSON parsing, Markdown relative-link resolution, C# delimiter/string/comment structure, version metadata, release-tree cleanliness, and the exact **43-check** registry all pass.
+- Diff review against rev30 shows no removed files and only the intended test, centralized host metadata, README/changelog, current architecture/version references, rev30 result note, and new rev31 verification document changed. All PS5 production source, Core production source, Plugin SDK production source, Mock production source, XAML, themes, and project files are byte-identical to rev30.
+- Per project workflow, no assistant-side .NET build/runtime result is claimed. The final package is statically audited and archive-verified; the Windows build and **43/43** verification run remain the user-run acceptance step.
+
+## TeeKay87's Memory Engine 0.1.3.rev30 - Resident Scan Results and Live Visible Values
+
+### Fixed
+
+- Fixed the remaining **New Scan** Scan Type selection regression found during rev29 live verification. The failure occurred specifically after a successful First Scan when the user selected a Next-only Scan Type such as Changed Value and then clicked New Scan. Replacing the filtered `ScanTypes` collection caused WPF to invalidate the old `SelectedItem` while the new First Scan list was being published, leaving the ComboBox visually blank even though the host attempted to choose Exact Value. The host now keeps one persistent observable Scan Type collection, clears the stale backing selection before mutating that collection, rebuilds the complete valid stage list in place, and publishes the resolved stable-id selection only after Core's default is present. New Scan therefore restores **Exact Value** even when the previous selection is not legal for First Scan.
+- Removed the unnecessary immediate full-transfer penalty for very large authoritative native result sets. Rev29 could successfully create a PS5 Unknown Initial snapshot containing hundreds of millions of candidates, but then immediately fetched every survivor through TurboScan GET and wrote the complete set to the PC before the user could continue. Rev30 can retain that complete set in the plugin/backend and fetch only the bounded presentation window.
+- Preserved the rev29 TurboScan protocol-recovery fix while extending resident refinement: sentinel-terminated COUNT progress streams no longer use an arbitrary host record-count limit, so long native refinement progress sequences are drained to their protocol boundary before the returned survivor count is accepted.
+
+### Added
+
+- Added Plugin API `2.9.0` optional contract `INativeValueScanResidentResultSet`. A native result stream can now expose an authoritative 64-bit count, stable Value Size/alignment, bounded result-window reads, bounded address enumeration, previous-value transport, and a non-mutating `CanRefine(...)` query while keeping the complete result membership in the plugin/backend.
+- Extended `NativeValueScanResultBatch` with optional packed Previous-value bytes. Existing constructors remain available, so older streaming producers that provide only current values keep the same call shape. Core consumes Previous values only when the batch explicitly carries them.
+- Added Core helpers to validate resident result shape/address ordering, load a bounded resident preview, determine whether a requested Next Scan can remain native, start native resident refinement, and materialize a complete resident set into the existing transactional disk-backed writer when host-side refinement is required.
+- Added an on-demand **Materializing Scan Results** operation using the existing generic modal progress component. Materialization reports transferred/stored counts, supports cancellation, commits only after the complete resident set is written, and leaves partial generations unpublished on cancellation/failure.
+- Added live Value refresh for **only the Scan Results rows currently realized by the WPF DataGrid viewport**. DataGrid row virtualization registers/unregisters visible `ScanResultViewModel` instances, and the existing Live value refresh scheduler rereads only that small set through neutral `IMemoryReader`. Off-screen rows are not periodically read. The `Previous` column remains the previous-scan baseline and is not changed by live refresh.
+- Added two verification checks, increasing the dependency-free suite from 41 to **43 checks**: a generic resident-result contract/materialization test and a PS5 resident TurboScan bounded-preview/native-refinement protocol test.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev29` to `0.1.3.rev30` with feature title `Resident Scan Results and Live Visible Values` through centralized `AppInfo`.
+- Advanced Plugin API from `2.8.0` to `2.9.0` for the optional backend-resident result-set contract and Previous-value batch extension. Same-major 2.x compatibility rules remain unchanged.
+- Advanced the PS5 plugin from `0.1.0.rev20` to `0.1.0.rev21` and its target API from `2.8.0` to `2.9.0` because its TurboScan result stream now implements the resident-result contract. Mock remains `1.0.0.rev4` targeting API `2.0.0`.
+- Large authoritative PS5 TurboScan First Scans now remain target-resident when their result count exceeds the 50,000-row presentation ceiling. The host requests only the first 50,000 records for presentation instead of immediately transferring the complete result set to local disk.
+- Compatible mapped Next Scans run directly against the resident TurboScan session. The refined resident handle replaces the previous generation and bounded preview GET records include the target-provided previous value so the UI's `Previous` column retains correct Next Scan semantics without a local previous-generation file.
+- A Next Scan that cannot be represented by the resident native backend automatically materializes the complete current resident set into the established Core disk format and then runs the shared Core refinement. This preserves predicates deliberately kept as Core fallback, including Increased By/Decreased By and other runtime-incompatible native shapes.
+- The Live value refresh interval in Settings now controls both Saved Address value refresh and visible Scan Result value refresh. The existing serialized target-I/O coordination remains authoritative: automatic reads pause during First/Next Scan and yield to foreground target operations.
+
+### Preserved
+
+- Core still owns the same 13 standard Scan Types, stable ids, operand counts, comparison semantics, First/Next-stage availability, and Value Type compatibility filtering.
+- The PS5 Core-to-native Scan Type mapping table is unchanged. Rev30 changes how a complete native result set is retained/consumed, not which predicates are considered semantically equivalent.
+- The compact disk-backed record format, generation commit protocol, application/scan-session isolation, stale-session cleanup rules, and 50,000-row WPF presentation ceiling are unchanged. Resident result sets are an additional complete-result representation, not a replacement for shared disk storage.
+- Rev29's long snapshot-progress handling and same-connection snapshot-refusal recovery remain intact.
+- Endianness, Alignment, Floating-point rounding, Pause target while scanning, Value Type parsing/filtering, Saved Address editing/freezing/removal, themes, process selection, raw memory access, and plugin discovery keep their existing behavior.
+- Scan Result live refresh changes only the displayed current `Value`; it does not mutate the stored/native scan baseline, `Previous`, result membership, or total count.
+
+### Documentation
+
+- Updated README for application `0.1.3.rev30`, Plugin API `2.9.0`, PS5 plugin `0.1.0.rev21`, resident result behavior, deferred materialization, visible Scan Result live refresh, and the 43-check verification boundary.
+- Updated scanner, native-mapping, Plugin SDK, scan-storage, Saved Addresses coordination, modal-progress, main-workspace, PS5 plugin, native-scan, and ps5debug-NG protocol documentation where rev30 changes the current architecture.
+- Recorded the user-run rev29 verification outcome in `docs/testing/APP_0.1.3_REV29_VERIFICATION.md`: 41/41 automated checks passed, the Next-only -> New Scan blank-selection regression remained reproducible, and a live Float Unknown Initial run advertised **705,163,264** resident candidates before the immediate host materialization cost prompted the rev30 design change.
+- Added `docs/testing/APP_0.1.3_REV30_VERIFICATION.md` covering the Windows build, 43-check runner, exact New Scan regression, large resident PS5 First/Next Scans, on-demand Core materialization, visible-row live refresh, cleanup, and UI/theme regressions.
+
+### Verification
+
+- Re-extracted the user-supplied rev29 ZIP and confirmed the rev30 working baseline matches it exactly before the intended rev30 changes.
+- Reviewed every changed production/test path against the rev29 baseline. Platform-specific TurboScan protocol/state remains inside the PS5 plugin; the new public contract and resident validation/materialization logic are platform-neutral. WPF contains no ps5debug-NG command ids or PS5-specific resident branch.
+- Traced resident lifecycle across First Scan, native Next Scan replacement, Core-fallback materialization, New Scan, target/session reset, cancellation/failure, and result-storage release. The existing native reset service remains responsible for releasing target-side sessions before local scan state is cleared.
+- Reviewed the visible-row refresh path against DataGrid virtualization and the existing Saved Address I/O scheduler. Row realization controls membership in the refresh set; scan replacement clears stale registrations; automatic reads are suppressed while scanning or while foreground/user target operations own the serialized path.
+- Verified source metadata consistency for host `0.1.3.rev30`, Plugin API `2.9.0`, PS5 `0.1.0.rev21` / API `2.9.0`, and Mock `1.0.0.rev4` / API `2.0.0`.
+- The pre-package static audit covers **231 files**, including structural checks across **129 C# files**, parse checks for **14 XAML/project XML files** and **3 JSON files**, relative-link resolution across **83 Markdown files**, the **43-check** test registry, absence of build/draft artifacts, exact intended additions/removals relative to rev29, and platform-boundary checks for generic App/Core/Plugin SDK code.
+- Per project workflow, no assistant-side .NET build/runtime claim is made. The final source package is statically audited and archive-verified; the Windows build, 43-check executable, WPF behavior, performance improvement, and live PS5 resident-session behavior remain user-run acceptance steps documented in the rev30 verification checklist.
+
+## TeeKay87's Memory Engine 0.1.3.rev29 - New Scan Defaults and TurboScan Snapshot Recovery
+
+### Fixed
+
+- Fixed the **New Scan** Scan Type selection regression found during rev28 live verification. Rebuilding the First Scan-compatible `ScanTypes` list could leave WPF's ComboBox visually unselected even though the ViewModel still had a valid backing selection. New Scan now explicitly prefers Core's `MemoryScanTypeCatalog.DefaultScanTypeId` and republishes `SelectedScanType` whenever the filtered Scan Type `ItemsSource` is rebuilt. The default remains **Exact Value**.
+- Fixed the large PS5 **Unknown Initial Value** failure reported during rev28 live testing. The PS5 client imposed a host-only limit of 1,024 TurboScan snapshot progress records even though the ps5debug-NG protocol defines a sentinel-terminated progress stream with no such record-count limit.
+- Removed that arbitrary progress-record cap. A valid native snapshot now consumes progress records until the protocol sentinel regardless of how many target-side I/O windows were needed.
+- Fixed the command-stream instability caused by the old progress cap. Throwing after record 1,025 left the remaining progress records, snapshot summary, and completion status unread on the shared ps5debug-NG TCP stream, so later commands could interpret leftover snapshot bytes as command responses and require Disconnect/Connect to recover.
+- Snapshot START now consumes the complete progress stream, summary, and final status before applying host-side summary validation or selecting Core fallback. A server-side `snapshot_ok == 0` therefore remains a normal `NotSupportedException` acceleration refusal after a clean protocol boundary, allowing the existing shared scanner fallback to run without reconnecting.
+- Hardened stored-session cleanup for malformed snapshot summaries: when the server reports that a snapshot was stored, the client records that a target-side session may exist before validating survivor/slot consistency, allowing the existing `finally` cleanup path to send TurboScan END if validation fails.
+- Hardened the adjacent list-resident TurboScan START path so its final status is consumed before rejecting an invalid `resident_stored` state. Normal successful framing and the documented `resident_stored == 0` Core-fallback behavior are unchanged.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev28` to `0.1.3.rev29` with feature title `New Scan Defaults and TurboScan Snapshot Recovery` through centralized `AppInfo`.
+- Advanced the PS5 plugin from `0.1.0.rev19` to `0.1.0.rev20` because its TurboScan snapshot transport/recovery behavior changed.
+- Plugin API remains `2.8.0`; rev29 does not add or modify a public Plugin SDK contract.
+- The dependency-free verification runner now contains **41 checks**. The existing PS5 Unknown Initial snapshot test now sends 1,500 valid progress records, directly covering the old 1,024-record regression, and a new rejection-recovery check verifies that a fully consumed `snapshot_ok == 0` response leaves the same PS5 command stream usable for a subsequent process command.
+
+### Preserved
+
+- Core still owns the same 13 standard Scan Types and their comparison semantics. No Scan Type id, operand count, First/Next-stage rule, Value Type compatibility rule, or previous-value behavior changes in rev29.
+- The generic Plugin API `2.7.0` native Scan Type mapping contract and the PS5 semantic mapping table remain unchanged. Unknown Initial Value still maps to TurboScan snapshot mode with explicit zero inclusion; Increased By/Decreased By and floating Unknown Initial Low remain deliberate Core fallbacks.
+- The disk-backed result format, generation commit rules, complete-set refinement outside the 50,000-row UI preview, and massive native result streaming are unchanged.
+- Rev28's PS5 Scan Option presentation/applicability behavior is unchanged: Little-endian remains a checkbox, Alignment remains a choice list, Floating-point rounding remains visible only for Exact Float/Double, and Between/multi-value inputs remain side-by-side.
+- Saved Addresses, Frozen I/O coordination, process selection, raw memory access, process suspend/resume, themes, confirmation dialogs, and plugin discovery behavior are unchanged.
+
+### Documentation
+
+- Updated README to describe rev29's deterministic New Scan default and large TurboScan snapshot recovery behavior.
+- Updated current scanner/native-mapping, PS5 plugin, PS5 protocol, native-scan/process-control, and main-workspace documentation where the corrected behavior is part of the current implementation.
+- Recorded the user-run rev28 verification results in `docs/testing/APP_0.1.3_REV28_VERIFICATION.md`, including **40/40 automated PASS**, successful Scan Type/option/live comparison tests, and the two regressions that led to rev29.
+- Added `docs/testing/APP_0.1.3_REV29_VERIFICATION.md` with focused build, New Scan default, large native snapshot, snapshot-rejection recovery, fallback, and regression checks.
+
+### Verification
+
+- Re-read the supplied rev28 documentation set and inventoried the complete source/project tree before changing code.
+- Traced the rev28 New Scan issue through `ClearScanState`, `SetHasScanSession`, `RefreshScanTypesForCurrentStage`, and the WPF `SelectedItem` binding. The fix stays in generic host Scan Type state management and adds no platform-specific branch.
+- Compared the ps5debug-NG TurboScan snapshot implementation and protocol documentation with the rev28 PS5 client. ps5debug-NG emits one `uint64` progress record per snapshot I/O window and terminates the stream with `0xFFFFFFFFFFFFFFFF`; its 16 MiB preferred buffers can fall back to smaller windows. Therefore a large valid snapshot may legitimately exceed 1,024 progress records even when a similarly sized run does not.
+- Confirmed the observed instability follows directly from throwing before the snapshot sentinel/summary/final status were consumed. Rev29 moves all host-side snapshot validation to a safe post-response boundary.
+- Extended the protocol test fixture to generate arbitrary valid snapshot progress-record counts and explicit snapshot acceptance/refusal responses while preserving normal resident-session framing for existing tests.
+- Per project workflow, the Windows .NET build/runtime and live PS5 verification remain user-run; the package is subjected to the same static source, version, documentation, diff, and archive-integrity checks used for prior revisions.
+
+## TeeKay87's Memory Engine 0.1.3.rev28 - Scan Type Selection and PS5 Scan Panel Refinement
+
+### Fixed
+
+- Fixed the post-scan Scan Type selector state reported during rev27 live testing. `CanSelectScanType` depends on `IsScanningMemory`, but the `IsScanningMemory` setter notified scan commands, `CanConfigureScanPause`, `CanSelectScanValueType`, and Scan Option state without notifying `CanSelectScanType`. WPF could therefore leave the selector visually disabled after First/Next Scan completed until unrelated input caused another binding reevaluation. Rev28 explicitly raises `PropertyChanged` for `CanSelectScanType` whenever scanning enters or leaves the active state.
+- Audited the other `IsScanningMemory`-dependent Scan-panel properties while fixing the stale selector. Existing command-state refresh, pause configuration, Value Type locking, Scan Option state refresh, Saved Addresses timer coordination, and scan progress behavior remain in their established paths; no additional stale derived property was found that required a separate notification.
+
+### Added
+
+- Added optional Plugin API `2.8.0` contract `IMemoryScanOptionPresentation` plus neutral `MemoryScanOptionPresentationKind`. A plugin-owned Scan Option may now request the normal `ChoiceList` presentation or a generic two-state `Toggle` presentation without exposing platform ids or control-specific branches to WPF.
+- Toggle presentation maps the UI's checked and unchecked states back to two existing stable `MemoryScanOptionChoice` ids and carries an independent user-facing toggle label. Scan execution continues to receive the same `MemoryScanOptions` id/choice pairs as before; the presentation layer does not create new backend semantics.
+- Added optional Plugin API `2.8.0` contract `IMemoryScanOptionApplicability`. A plugin can now declare whether a Scan Option is relevant for a selected Core-owned Scan Type and First/Next stage in addition to the existing Value Type applicability rule.
+- Extended plugin discovery validation for the new optional metadata. The host rejects unknown presentation kinds, toggle declarations without a label, missing/duplicate checked/unchecked mappings, applicability implementations that throw, and option declarations that do not apply to any current Core Scan Type.
+- Added an automated verification check for generic Scan Option presentation/applicability metadata, increasing the verification suite from 39 to **40 checks**.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev27` to `0.1.3.rev28` with feature title `Scan Type Selection and PS5 Scan Panel Refinement` through centralized `AppInfo`.
+- Advanced Plugin API from `2.7.0` to `2.8.0` for the optional Scan Option presentation/applicability contracts. Existing same-major plugins targeting older 2.x API minors remain compatible; the Mock plugin remains `1.0.0.rev4` targeting API `2.0.0`.
+- Advanced the PS5 plugin from `0.1.0.rev18` to `0.1.0.rev19` and its target Plugin API from `2.7.0` to `2.8.0` because its Scan Option definitions now consume the new optional presentation/applicability contracts.
+- PS5 Endianness still uses the existing `standard.endianness` option and `little`/`big` choice ids, but now declares Toggle presentation with label **Little-endian byte order**. Checked selects Little Endian, unchecked selects Big Endian, and the existing Little Endian default therefore renders checked on a new scan.
+- Generic toggle Scan Options are rendered in the Scan panel's compact checkbox group alongside **Pause target while scanning**. Choice-list Scan Options continue to use the existing label + ComboBox presentation.
+- Scan Option visibility now combines the existing `SupportsValueType(...)` result with optional Core Scan Type/stage applicability. Unsupported option rows collapse instead of remaining as irrelevant disabled controls.
+- PS5 **Floating-point rounding** now declares applicability only for Core **Exact Value**. Together with its existing Float/Double Value Type restriction, this means the control appears only for Exact Value Float/Double scans and is hidden for Fuzzy, Between, changed-value, delta, integer, and other unrelated scan combinations.
+- PS5 Floating-point rounding no longer locks after First Scan. It changes only the current Exact Value comparison mode, not candidate address shape/width, so it remains configurable when a user switches back to Exact Value before a later Next Scan. PS5 Endianness and Alignment retain their existing post-First-Scan locks.
+- Reworked the Scan operand layout so two-input Scan Types such as **Between** render **Value 1** and **Value 2** side-by-side with equal available width. One-input Scan Types continue to use one full-width Value editor, while zero-input Scan Types continue to hide operand input entirely.
+- Updated the PS5 plugin metadata description to describe semantic native Scan Type acceleration with Core fallback rather than the older Exact-only wording.
+
+### Preserved
+
+- Core remains the owner of all 13 standard Scan Type identities, stage rules, operand counts, comparison semantics, previous-value behavior, and Value Type compatibility filtering.
+- The rev26 `INativeScanTypeMappingProvider` / `NativeScanTypeMapping` semantic mapping contract and the PS5 Core-to-ps5debug-NG mapping table are unchanged. No ps5debug-NG compare id, TurboScan flag, request body, snapshot behavior, or native fallback boundary changes in rev28.
+- Disk-backed scan-result generation/storage, the 50,000-row UI preview boundary, massive native stream support, Previous values, Unknown Initial snapshot records, and scan-session lifecycle are unchanged.
+- Value Type ids, parsing, signed/unsigned ranges, default signed **4 Bytes**/Int32 selection, live input filtering, whitespace handling, Address validation, Endianness choice ids, Alignment choices, and Floating-point rounding choice ids are unchanged.
+- Saved Addresses refresh/Frozen scheduling, queued removal, user-intent I/O coordination, concurrent PS5 writer behavior, confirmation dialogs, themes, connection behavior, process selection, and process pause/resume are unchanged.
+
+### Documentation
+
+- Updated README to describe rev28, Plugin API `2.8.0`, PS5 plugin `0.1.0.rev19`, the generic Scan Option presentation/applicability model, post-scan Scan Type selection, side-by-side multi-value operands, the Little-endian checkbox, and Exact-only Floating-point rounding visibility.
+- Updated Plugin SDK, scanner, early-architecture, main-workspace, native-mapping, and PS5 plugin/native-control documentation where the new generic Scan Option boundary or current version identity is relevant.
+- Recorded the user-run rev27 automated verification result of **39/39 PASS** in the rev27 verification document.
+- Added `docs/testing/APP_0.1.3_REV28_VERIFICATION.md` covering build/startup, the post-scan selector regression, Core stage filtering, multi-value layout, Endianness toggle semantics, Floating-point rounding applicability/editability, generic API compatibility, native/Core regression, and theme/layout checks.
+
+### Verification
+
+- Re-read the supplied rev27 documentation set and inventoried all source/XAML/projects before changing code, with special review of scanner lifecycle, Plugin SDK Scan Option contracts, current PS5 option definitions, native mapping/fallback behavior, and WPF Scan-panel bindings.
+- Confirmed the reported Between workflow is not a Core Scan Type restriction: the stale state is caused by the missing `CanSelectScanType` property notification after `IsScanningMemory` returns to `false`.
+- Confirmed the new Scan Option contracts are optional companions rather than new required members on `IMemoryScanOption`, preserving older Plugin API 2.x plugin compatibility.
+- Confirmed WPF rendering remains platform-neutral: `MainWindow.xaml` and `PluginViewModel` branch on generic presentation/applicability metadata and contain no PS5 plugin id, platform name, ps5debug-NG compare id, or Endianness-specific selection logic.
+- Added deterministic metadata assertions for PS5 toggle checked/unchecked mappings, the Exact-only Floating-point applicability rule, and the intentionally unlocked post-First-Scan rounding option.
+- Completed the rev28 static pre-package audit across the complete 228-file tree: all 128 C# files passed structural checks, all 14 XAML/project XML files and all 3 JSON files parsed successfully, all relative links across 81 Markdown files resolve, the verification runner contains 40 registered checks, and no `bin`, `obj`, or `.vs` artifacts are present.
+- Compared rev28 against the supplied rev27 baseline with no removed files. Core scanner code, PS5 transport/native mapping/native scanner/native refiner code, and Mock plugin production code remain byte-identical; host source contains no PS5 protocol/native compare constants or platform-specific scan-option branches.
+- Reviewed the new PluginHost metadata validation under the repository-wide nullable/warnings-as-errors policy and made toggle choice validation flow-analysis-safe before packaging.
+- Per project workflow, native .NET build/runtime verification remains user-run on Windows; the release package is statically reviewed and includes a dedicated rev28 verification checklist.
+
+## TeeKay87's Memory Engine 0.1.3.rev27 - Native Scan Mapping Compile Fix
+
+### Fixed
+
+- Fixed four `CS8604` warnings promoted to build errors by the repository-wide `TreatWarningsAsErrors=true` policy. `FirstScanAsync` and `NextScanAsync` pass the values produced by `TryPrepareScan(...)` into the in-memory and disk-backed scan execution paths; the method already guaranteed that `inputValues` was non-null whenever it returned `true`, but that success-state guarantee was not expressed to nullable-flow analysis.
+- Added `[NotNullWhen(true)]` to the `TryPrepareScan(...)` `inputValues` out parameter so the compiler understands the existing success contract without adding null-forgiving operators at each call site or weakening nullable analysis.
+- Fixed the resulting WPF/XAML designer cascade in which `System.Object`, `ProportionalGridSplitter`, and the `TextBoxInputFilter.Mode` / `TextBoxInputFilter.MemoryValueType` attached properties were reported as unresolved after the App assembly failed to build. No XAML type, attached-property, namespace, control, or assembly-name change was required.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev26` to `0.1.3.rev27` with feature title `Native Scan Mapping Compile Fix` through centralized `AppInfo`.
+- Updated README current-status/version text to identify rev27 as the buildable correction layer over the rev26 native Scan Type mapping implementation.
+- Recorded the failed Windows compile attempt against rev26 in its verification document and added a dedicated rev27 verification checklist.
+
+### Preserved
+
+- Core's 13 standard Scan Types, their semantics, stage/input metadata, and disk-backed previous-value behavior are unchanged from rev26.
+- Plugin API remains `2.7.0`; the generic `INativeScanTypeMappingProvider` / `NativeScanTypeMapping` contract is unchanged.
+- PS5 plugin remains `0.1.0.rev18` targeting Plugin API `2.7.0`; its Core-to-ps5debug-NG mapping table, TurboScan request construction, Unknown Initial snapshot/include-zero path, and Core fallback boundaries are unchanged.
+- Mock plugin remains `1.0.0.rev4` targeting Plugin API `2.0.0`.
+- `MainWindow.xaml`, `TextBoxInputFilter`, `ProportionalGridSplitter`, Core scanner code, Plugin SDK production code, PS5 production code, Mock production code, themes, Saved Addresses coordination, and confirmation-dialog behavior are not changed by this compile correction.
+
+### Verification
+
+- Re-inspected the supplied rev26 package and traced every error shown in the Windows Error List. The four `CS8604` entries all originate from the same nullable-flow omission at `TryPrepareScan(...)`; the XAML errors are downstream assembly-resolution failures rather than independent XAML defects.
+- Confirmed `MainWindow.xaml`, `TextBoxInputFilter.cs`, and `ProportionalGridSplitter.cs` are byte-identical to the previous scanner revision where those UI types were already established, so the correction intentionally avoids unrelated XAML/UI edits.
+- Confirmed `TryPrepareScan(...)` assigns a parsed input list before every successful return and returns `false` on all validation failures before callers can use that value. `[NotNullWhen(true)]` therefore documents existing runtime behavior rather than changing it.
+- Static release review passed all 25 package-preparation checks: expected diff scope, version/API/plugin boundaries, unchanged Core/Plugin SDK/plugin/test trees, unchanged XAML/input/splitter sources, XML/XAML/project parsing, JSON parsing, C# structural checks across all 125 source files, relative-link resolution across all 80 Markdown files, and release-tree cleanliness.
+- Per project workflow, native .NET compilation/runtime verification remains user-run on Windows. Rev27 should be rebuilt before proceeding to the rev26/rev27 scanner verification checklist.
+
+## TeeKay87's Memory Engine 0.1.3.rev26 - Native Scan Type Mapping and Complete Core Scan Types
+
+### Added
+
+- Added Core Scan Types **Fuzzy Value** and **Unknown Initial Low Value**, completing the 13-mode standard Core Scan Type catalog used by every platform plugin.
+- Added optional Plugin API `2.7.0` contract `INativeScanTypeMappingProvider` and the neutral `NativeScanTypeMapping` model. A plugin can now declare that a Core-owned Scan Type has a semantically equivalent native implementation for specific First/Next stages and Value Types without exposing platform-specific compare ids to Core or WPF.
+- Added Core `NativeScanTypeResolver` as the shared decision point for native delegation. When a connected session publishes a mapping table, only declared semantic matches are offered to the native scanner; missing mappings route directly to the shared Core scanner. Older compatible 2.x plugins that do not publish the optional table retain the established try-native-then-fallback behavior.
+- Added the PS5 plugin's explicit Core-to-ps5debug-NG native mapping table. Plugin-owned native ids remain opaque to Core and currently identify either a ps5debug-NG `compareType` or the dedicated snapshot mode used for Unknown Initial Value.
+- Added native PS5 **Unknown Initial Value** through TurboScan snapshot mode with `TS_SNAPSHOT_INCLUDE_ZEROS`, preserving Core's definition that zero-valued candidates are included instead of mapping directly to ps5debug-NG `compareType 11`, which excludes zeros.
+- Added native PS5 protocol coverage for **Between** First Scan with two operands, zero-operand **Changed Value** refinement, and Unknown Initial snapshot creation followed by native refinement.
+- Added verification coverage for the generic mapping contract, Core Fuzzy/Unknown Initial Low semantics, PS5 mapping metadata, native multi/zero-operand payloads, and the PS5 snapshot mapping. The verification executable now contains **39 checks**.
+- Added `docs/architecture/NATIVE_SCAN_TYPE_MAPPING.md` describing the reusable Core-to-plugin native acceleration contract for current and future plugins.
+- Added `docs/testing/APP_0.1.3_REV26_VERIFICATION.md` with host, protocol, fallback, and live PS5 checks for the completed Scan Type work.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev25` to `0.1.3.rev26` with feature title `Native Scan Type Mapping and Complete Core Scan Types` through centralized `AppInfo`.
+- Advanced Plugin API from `2.6.0` to `2.7.0` for the new optional native Scan Type mapping contract/model. Existing compatible 2.x plugins remain valid under the established same-major/older-minor compatibility rule.
+- Advanced the PS5 plugin from `0.1.0.rev17` to `0.1.0.rev18` and moved its declared target API from `2.4.0` to `2.7.0` because the plugin now consumes and exposes the new mapping contract. The Mock plugin remains `1.0.0.rev4` targeting API `2.0.0`.
+- Generalized the PS5 native TurboScan request builder from Exact Value-only payloads to mapped Core predicates with zero, one, or two comparison operands. `compareType`, payload length, and native mode now come from the plugin-owned mapping definition rather than an Exact Value constant in the scanner path.
+- PS5 native First/Next delegation now includes semantically equivalent Exact Value, Fuzzy Value, Bigger Than, Smaller Than, Between, Increased Value, Decreased Value, Changed Value, Unchanged Value, Unknown Initial Value snapshot, and integer Unknown Initial Low Value operations when the connected TurboScan capabilities and current option/value shape permit them.
+- **Increased By** and **Decreased By** deliberately remain Core fallback on PS5. ps5debug-NG `compareType 6/8` performs target-width arithmetic that can wrap at integer boundaries, while Core uses directional, non-wrapping delta semantics; similarly named operations are therefore not declared equivalent.
+- PS5 **Unknown Initial Low Value** maps natively only for integer Value Types. ps5debug-NG's floating implementation compares absolute magnitude, which is not equivalent to Core's positive-nonzero `0 < value <= upperLimit` definition, so Float/Double use Core fallback.
+- Big-endian native routing is now predicate-aware. Endian-independent integer equality/inequality may stay native, while native comparisons that interpret multi-byte numeric magnitude use Core fallback; the Unknown Initial snapshot is endian-independent because it stores raw slots and explicitly includes zeros.
+- Strict Float/Double host-side filtering is now explicitly limited to **Exact Value**. Fuzzy Value and other mapped floating predicates retain their own Core/native semantics instead of being reinterpreted as Exact Value during GET.
+- Ordered and delta Core Scan Types now require a fixed-width Value Type as well as `IMemoryValueComparer`, preventing variable-width Array of Bytes from being offered merely because its reusable implementation class carries the companion interface.
+- Standard Float/Double ordered comparison now treats NaN as unordered rather than relying on .NET `CompareTo` ordering, keeping relational Core predicates aligned with conventional/native comparison semantics.
+
+### Core Scan Type Semantics
+
+- **Exact Value**: First + Next, one operand.
+- **Fuzzy Value**: First + Next, one Float/Double operand, absolute difference strictly below `1.0`.
+- **Bigger Than** / **Smaller Than**: First + Next, one ordered operand.
+- **Between**: First + Next, two inclusive ordered bounds.
+- **Unknown Initial Value**: First only, no operand, includes every fixed-width candidate including zero.
+- **Unknown Initial Low Value**: First only, one positive upper limit, retains positive nonzero numeric candidates up to and including that limit.
+- **Increased Value** / **Decreased Value** / **Changed Value** / **Unchanged Value**: Next only, no operand, compare against the previous committed scan value.
+- **Increased By** / **Decreased By**: Next only, one non-negative delta operand, use Core directional delta semantics.
+
+### Preserved
+
+- Core remains the authoritative owner of standard Scan Type identity and semantics. Plugins still own Value Types, platform-specific Scan Options, transport/native code, and the decision to advertise only genuinely equivalent native accelerators.
+- The native mapping table is optional and does not make native support mandatory. Any unsupported runtime shape, unavailable server capability, native resource refusal, incompatible endianness, or semantic mismatch continues through the established `NotSupportedException`/Core fallback path.
+- Disk-backed result generations and previous-value storage remain unchanged. The existing address-plus-current-value record already provides the previous snapshot required by Core Next Scan predicates.
+- Existing rev20-rev25 Saved Address coordination, textbox filtering, confirmation dialogs, scan cancellation safety, progress handling, and verified PS5 read/write behavior are not changed by this revision.
+- Application version remains `0.1.3` because the completed Scan Type expansion and rev24-rev26 input/scanner work still require Windows/live-target verification before the project version may advance.
+
+### Documentation
+
+- Updated README and scanner/Plugin SDK/workspace documentation to describe the 13 Core Scan Types and the new semantic native mapping model.
+- Updated the PS5 plugin documentation with the exact Core-to-ps5debug-NG mapping/fallback table, snapshot-based Unknown Initial Value handling, new plugin/API versions, and runtime option restrictions.
+- Updated scan-type research notes to distinguish Core-owned semantics from backend-native acceleration opportunities.
+
+### Static Verification
+
+- Reused the full rev25 documentation/source audit completed before implementation and re-reviewed every changed scan/native/test path before packaging.
+- Compared current ps5debug-NG `compareType 0..12`, TurboScan resident refinement, and snapshot/include-zero behavior against each Core predicate before declaring native equivalence.
+- Confirmed no platform-specific compare values or PS5 protocol details were introduced into Core or WPF; the public mapping contract contains only stable Core ids, opaque plugin-native ids, stages, and Value Type restrictions.
+- Confirmed the Mock plugin production code remains unchanged and continues to demonstrate backward compatibility with Plugin API `2.0.0`.
+- Confirmed the final source tree contains 13 Core Scan Type registrations, 11 PS5 semantic native mappings, and 39 registered verification checks.
+- Parsed all 14 XAML/project XML files and all 3 JSON files successfully, checked delimiter/string/comment structure across all 125 C# files, and verified every relative Markdown link across all 79 Markdown files resolves.
+- Confirmed all newly added/modified mapping files contain the required namespace imports, no `bin`, `obj`, or `.vs` build-artifact directories are present, and application/API/plugin version constants consistently identify host `0.1.3.rev26`, Plugin API `2.7.0`, and PS5 plugin `0.1.0.rev18`.
+- Compared the final tree against the supplied rev25 baseline: no files were removed; changes are limited to the documented Core/Plugin SDK/PS5/WPF scan-routing paths, verification code, centralized metadata, and relevant documentation. Mock plugin production files remain byte-identical to rev25.
+- Per project workflow, .NET compilation/runtime and live-target verification remain user-run on Windows.
+
+## TeeKay87's Memory Engine 0.1.3.rev25 - Core Scan Types and Whitespace Filtering Fix
+
+### Added
+
+- Added the Core-owned `MemoryScanTypeCatalog` as the single production catalog for standard scan predicates used by every platform plugin.
+- Added Core Scan Types **Bigger Than**, **Smaller Than**, **Between**, **Unknown Initial Value**, **Increased Value**, **Decreased Value**, **Changed Value**, **Unchanged Value**, **Increased By**, and **Decreased By** alongside the existing **Exact Value** behavior.
+- Added optional Plugin SDK contract `IMemoryValueComparer` for Value Types that support ordered and exact delta comparisons. The reusable standard integer, Float, and Double Value Types implement it; Array of Bytes deliberately does not expose numeric ordering.
+- Added stage-aware/dynamic Scan input layout in WPF: zero-input predicates hide Value, normal predicates render one Value editor, and Between renders Value 1 plus Value 2.
+- Added scan-type input validation through `IMemoryScanType.TryValidateInputValues(...)`, including inclusive Between-bound validation.
+- Added verification coverage for the Core catalog and its direct/previous-value/delta comparison semantics.
+- Added `docs/testing/APP_0.1.3_REV25_VERIFICATION.md` covering the whitespace correction, universal Scan Type UI, shared/PS5 fallback behavior, snapshot scans, and regression checks.
+
+### Changed
+
+- Advanced the host from `0.1.3.rev24` to `0.1.3.rev25` with feature title `Core Scan Types and Whitespace Filtering Fix` through centralized `AppInfo`.
+- Advanced Plugin API from `2.5.0` to `2.6.0` because `IMemoryValueComparer` and Scan Type input-validation support are new optional public contracts. Existing 2.x plugins remain compatible under the same-major/older-minor rule.
+- The production host no longer reads or validates plugin-provided `SupportedScanTypes` or `DefaultScanTypeId`. Those Plugin API 2.x members remain only as obsolete compatibility members; new plugins should not implement them.
+- Advanced PS5 plugin from `0.1.0.rev16` to `0.1.0.rev17` and Mock plugin from `1.0.0.rev3` to `1.0.0.rev4`. Their production `SupportedScanTypes`/`DefaultScanTypeId` implementations were removed because standard Scan Type availability is now supplied by Core and filtered against the selected Value Type.
+- PS5 plugin `0.1.0.rev17` native TurboScan remains an **Exact Value** accelerator. Selecting another Core Scan Type causes the existing native path to return `NotSupportedException`, after which the host uses the established shared Core scanner/refiner without changing the requested predicate semantics.
+- The disk-backed result format remains unchanged: each record already stores address plus current-value bytes, and those stored bytes are reused as the previous snapshot for Changed/Unchanged/Increased/Decreased/By refinement. No large in-memory previous-value dictionary was introduced.
+- `TextBoxInputFilter` now also handles `PreviewKeyDown` for Space. Numeric Value editors and Saved Address Address therefore reject Space immediately, while Array of Bytes still accepts spaces because its Value Type policy treats whitespace as a valid separator. Paste continues to use the same candidate validation.
+
+### Preserved
+
+- Plugin ownership of Value Types, native/backend mappings, connection behavior, and platform-specific Scan Options remains unchanged.
+- Exact Value native PS5 behavior, floating-point Strict versus ps5debug-NG tolerance handling, disk-backed generations, 50,000-row presentation cap, cancellation safety, Saved Address I/O coordination, and themed dialogs are unchanged.
+- Final parser/range validation remains authoritative after live textbox filtering.
+- Application version remains `0.1.3` because the new Scan Type subsystem and rev24/rev25 input-validation work still require Windows/live-target verification. Per project versioning rules, a version increment is deferred until this functionality is complete and verified.
+
+### Documentation
+
+- Updated README, Plugin SDK architecture, Memory Scanner architecture, Main Workspace, input-validation documentation, scan-type research notes, and PS5/Mock plugin documentation for the Core-owned Scan Type model.
+- Documented the compatibility status of the obsolete Plugin API 2.x scan-type declaration members.
+- Added focused rev25 runtime/live-target verification steps.
+
+### Static Verification Preparation
+
+- Re-read the complete supplied rev24 Markdown documentation set before code changes and reviewed the full source inventory before modifying ownership or scan behavior.
+- Confirmed the rev13 disk-backed result record already stores each candidate's current bytes, so snapshot-based Next Scans can use those bytes directly as `previousValue` without changing the on-disk format.
+- Confirmed PS5 native request validation already rejects non-Exact scan ids with `NotSupportedException`, providing the required safe fallback path for the new Core predicates.
+- Confirmed the only platform-plugin source changes are removal of the now-obsolete standard Scan Type declarations plus the independent plugin revision metadata updates; no PS5 transport/protocol implementation changed.
+- Confirmed no new platform-specific branches were added to WPF/Core for PS5, PC, Xbox 360, or other future plugins.
+- Per project workflow, .NET compilation/runtime and live-target verification remain user-run on Windows.
+
+## TeeKay87's Memory Engine 0.1.3.rev24 - Memory Input Validation
+
+### Added
+
+- Added the reusable WPF `TextBoxInputFilter` attached behavior under `TeeKay87.MemoryEngine.App/Input`. The behavior validates the complete candidate text before accepting ordinary text composition or clipboard paste, so fields can reject impossible syntax without duplicating event-handler logic in individual windows.
+- Added host-owned `UnsignedInteger` and `HexAddress` filter modes. `UnsignedInteger` permits only decimal digits while retaining an empty edit state; `HexAddress` permits an optional `0x`/`0X` prefix plus at most 16 hexadecimal digits, matching the application's neutral 64-bit address representation.
+- Added optional Plugin SDK contract `IMemoryValueInputPolicy`. A concrete `IMemoryValueType` may implement this companion interface to describe whether the current editor text is still a potentially valid intermediate state while the user is typing.
+- Added live-input policies to all reusable standard Value Types. Signed and unsigned integers support their existing decimal/`0x` syntax, Float/Double support invariant decimal/scientific notation and normal intermediate edit states, and Array of Bytes supports the separators and hexadecimal token forms already understood by its final parser.
+- Added automated verification for the standard Value Type live-input policies, increasing the dependency-free verification executable from 34 to 35 checks.
+- Added `docs/ui/TEXT_INPUT_VALIDATION.md` documenting the two-layer validation model, reusable host filter, optional plugin contract, standard policies, current consumers, deliberately unrestricted fields, and extension rules.
+- Added `docs/testing/APP_0.1.3_REV24_VERIFICATION.md` with focused Windows/runtime checks for typed input, paste, incomplete edit states, final range validation, Value Type changes, Saved Address address edits, Settings interval fields, and existing regression coverage.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev23` to `0.1.3.rev24` with feature title `Memory Input Validation` through centralized `AppInfo`.
+- Advanced the Plugin API from `2.4.0` to `2.5.0` because `IMemoryValueInputPolicy` is a new public optional Plugin SDK contract. Existing compatible 2.0-2.4 plugins remain accepted by the existing same-major/older-minor compatibility rule.
+- The Scan-panel **Value** TextBox now follows the selected plugin Value Type's optional live-input policy. Standard integer types reject impossible letters/symbols while retaining decimal and `0x` hexadecimal entry; Float/Double retain valid decimal/scientific editing states; Array of Bytes accepts only syntax that can still form the parser's supported hexadecimal sequence.
+- Each Saved Address **Value** TextBox now uses the row's selected plugin Value Type for the same live-input policy. Changing the row's Type changes the editor policy with it; the host does not infer syntax from type ids or display names.
+- Saved Address **Address** now rejects non-hexadecimal typing and paste immediately, preserves the existing optional `0x` prefix, and limits the editable address payload to 16 hexadecimal digits before the established final `ulong` parser runs.
+- The Settings **Value refresh (ms)** and **Frozen write (ms)** TextBoxes now accept decimal digits only while editing. Their existing 50-10,000 ms validation remains authoritative when Settings is saved.
+- Text paste now follows exactly the same candidate validation as ordinary typing in all fields using the reusable filter, preventing clipboard input from bypassing the live restrictions.
+
+### Preserved
+
+- Live filtering is deliberately not the final safety boundary. Scan and Saved Address Value operations still call the selected plugin-owned `IMemoryValueType.TryParse(...)`; Saved Address Address still uses the existing 64-bit hexadecimal parser; Settings still performs its established numeric range validation before persistence.
+- The live policy accepts temporary editor states that may not yet be valid commit values when they can still become valid through continued editing, such as an empty field, `-`, `0x`, `1.`, and `1e-` where appropriate. Committing an incomplete state is still rejected by the final parser.
+- A custom plugin Value Type is not required to implement `IMemoryValueInputPolicy`. Without the optional policy, its Value TextBox remains freely editable and its existing `TryParse(...)` implementation remains the definitive validation path. The host therefore does not hardcode PS5, PC, Xbox 360, or other future platform-specific value grammar.
+- Plugin-defined connection fields remain unrestricted by the host because their grammar is platform/backend owned. The plugin continues to perform authoritative validation for host names, ports, credentials, or other connection-specific values. Description and storage-path fields also remain intentionally free-form.
+- PS5 plugin remains `0.1.0.rev16` targeting Plugin API `2.4.0`; it does not require a revision because no PS5-specific code or metadata changed. Its standard Value Types gain the new live-input behavior through the shared Plugin SDK definitions. Mock plugin remains `1.0.0.rev3` targeting Plugin API `2.0.0` for the same reason.
+- Core scanning/storage code, ps5debug-NG transport/native scan mappings, Saved Address I/O coordination from rev20-rev22, rev23 confirmation-dialog behavior, theme JSON, and all existing Value Type ids/ranges/byte encoding semantics are unchanged.
+
+### Documentation
+
+- Updated README with rev24 as the current build, Plugin API `2.5.0`, the layered input-validation behavior, current field coverage, future-plugin policy behavior, and the 35-check verification count.
+- Updated Plugin SDK architecture documentation with the optional `IMemoryValueInputPolicy` contract, compatibility rationale, and rule that final parsing remains authoritative.
+- Updated Memory Scanner, Saved Addresses, and Main Workspace documentation to describe type-aware Value filtering, strict hexadecimal Address editing, paste handling, numeric Settings filtering, and the unrestricted-field boundary.
+- Added dedicated UI documentation for reusable textbox validation and a rev24 verification checklist.
+
+### Static Verification Preparation
+
+- Re-read the supplied rev23 README, CHANGELOG, and complete `docs/` Markdown inventory before modifying code, then reviewed the full source inventory to identify existing final parsers and avoid duplicating validation logic.
+- Confirmed Scan Value and Saved Address Value already used plugin-owned `IMemoryValueType.TryParse(...)` at commit time; rev24 adds only the live-editing layer in front of those existing authoritative parsers.
+- Confirmed Saved Address Address already used the host's hexadecimal `ulong` parser and Settings intervals already enforced 50-10,000 ms at Save; those existing final checks remain intact behind the new input filters.
+- Confirmed the reusable WPF filter evaluates the complete candidate text for both keyboard text composition and paste, includes the current selection replacement, and leaves deletion/backspace available so users can restructure intermediate input.
+- Confirmed the new Value Type policy is optional rather than being added to `IMemoryValueType` itself, preserving binary/source expectations for older compatible 2.x plugins and custom Value Type implementations.
+- Confirmed no Core, PS5 plugin, Mock plugin, ps5debug-NG protocol, theme JSON, confirmation-dialog, or Saved Address I/O-coordination implementation files were changed by this revision.
+- Per project workflow, .NET compilation/runtime and live-target verification remain user-run on Windows; package preparation performs source, structure, documentation, version-consistency, and archive-integrity review without claiming runtime verification.
+
+## TeeKay87's Memory Engine 0.1.3.rev23 - Themed Confirmation Dialog and Value Type Defaults
+
+### Added
+
+- Added a reusable application-owned confirmation-dialog component under `TeeKay87.MemoryEngine.App/Dialogs`. The component is deliberately independent of Saved Addresses, scanning, target transports, and platform plugins so future host workflows can request the same confirmation surface without creating another one-off window.
+- Added `ConfirmationDialogOptions` for caller-owned title, message, affirmative button text, cancel button text, semantic tone, and default-button behavior.
+- Added `ConfirmationDialogService` as the common owner-modal entry point. The service requires a WPF owner, opens the dialog centered on that owner, and returns a simple affirmative/cancel result while leaving the calling workflow responsible for its business logic.
+- Added Information, Warning, and Danger confirmation tones. The tones reuse existing shared brushes and Primary/Danger button styles instead of adding dialog-specific palettes or theme keys.
+- Added `docs/ui/CONFIRMATION_DIALOG.md` describing the reusable dialog contract, modality, theme integration, semantic tones, keyboard behavior, current Remove All use, and reuse rules.
+- Added `docs/testing/APP_0.1.3_REV23_VERIFICATION.md` with focused Windows/runtime checks for all three bundled themes, modal/keyboard behavior, Remove All regression behavior, Value Type labels/default selection, and existing automated verification.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev22` to `0.1.3.rev23` with feature title `Themed Confirmation Dialog and Value Type Defaults` through centralized `AppInfo`.
+- Replaced the Saved Addresses **Remove All** operating-system `MessageBox` with the reusable host confirmation dialog. The prompt now follows the active Light, Dimmed, or Dark theme and uses the same visual language as the rest of the application.
+- The Remove All confirmation now labels its affirmative action **Remove All**, labels the safe action **Cancel**, and uses the Danger semantic role. The destructive action is deliberately not the Enter-key default.
+- Standard signed integer Value Type display names are now the compact primary labels `1 Byte`, `2 Bytes`, `4 Bytes`, and `8 Bytes`. The corresponding unsigned definitions remain explicit as `1 Byte (Unsigned)`, `2 Bytes (Unsigned)`, `4 Bytes (Unsigned)`, and `8 Bytes (Unsigned)`.
+- Confirmed and regression-checked that both built-in plugins continue to declare signed Int32 (`standard.int32`) as `DefaultValueTypeId`. The default Scan-panel selection is therefore displayed as **4 Bytes** without changing the underlying default type.
+- Extended the existing plugin scan-capability verification to assert both built-in Int32 defaults and the new standard display-name convention.
+
+### Preserved
+
+- Remove All business logic and rev22 pending-removal coordination are unchanged. Confirming while Saved Address I/O is active still records the current rows for safe deferred removal, disables their Frozen state, and completes removal automatically at the established all-I/O idle boundary.
+- The rev22 user-intent/background-I/O coordination for Disconnect, process refresh, target selection, scan startup/reset, Saved Address edits, Frozen behavior, direct Value writes, and individual removal is unchanged.
+- Stable standard Value Type ids are unchanged. `standard.int8`, `standard.int16`, `standard.int32`, `standard.int64`, `standard.uint8`, `standard.uint16`, `standard.uint32`, and `standard.uint64` retain their previous identities.
+- Signed/unsigned numeric ranges, decimal/hex parsing, target-endian byte conversion, value widths, default alignments, exact comparison semantics, saved-address interpretation, disk-backed scanner behavior, and ps5debug-NG native type mappings are unchanged. Rev23 changes display metadata, not memory semantics.
+- Plugin API remains `2.4.0`; no public plugin contract was added or changed.
+- PS5 plugin remains `0.1.0.rev16`; no PS5 transport, TurboScan, concurrent-writer, process-control, or plugin-owned option code was changed.
+- Mock plugin remains `1.0.0.rev3`; no Mock target behavior was changed.
+- Existing Light, Dimmed, and Dark theme JSON files and their schema remain unchanged. The new dialog consumes the existing shared theme resources.
+
+### Documentation
+
+- Updated README to identify rev23 as the current application build, document the reusable confirmation service, describe the standard signed/unsigned display-name policy and built-in 4 Bytes/Int32 default, document the existing Dialogs source area, and point to the rev23 verification checklist.
+- Updated the theme documentation to include the reusable confirmation surface among application-owned modal UI and to require the same Light/Dimmed/Dark regression coverage.
+- Updated the main-workspace and Saved Addresses documentation to describe the themed Remove All confirmation while preserving rev22 deferred-removal semantics.
+- Updated scanner and Plugin SDK architecture documentation to distinguish compact signed integer display names from the unchanged stable ids and signedness semantics.
+
+### Static Verification Preparation
+
+- Re-read the supplied rev22 README, changelog, and complete `docs/` Markdown inventory before modifying code, then reviewed the full source inventory and the relevant WPF, theme, scanner-definition, plugin-default, and verification paths.
+- Confirmed the previous Remove All prompt was the only remaining `MessageBox.Show` call in the supplied codebase and replaced that one path with the reusable service rather than creating parallel confirmation logic.
+- Confirmed both built-in plugins already used signed Int32 as their default before rev23. No plugin default or platform-specific scanner mapping needed to change to satisfy the requested **4 Bytes** default.
+- Confirmed the dialog XAML uses `x:ClassModifier="internal"` and shared `DynamicResource`/style references, matching the application's existing reusable dialog conventions and avoiding a separate palette.
+- Confirmed the new dialog keeps operation-specific text and decisions outside the component; the Remove All caller only asks for a confirmation result and then enters the existing removal code path.
+- Confirmed no theme JSON, Core scanner/storage, PS5 plugin, Mock plugin, native protocol, or Saved Address coordination implementation files were changed by this revision.
+- Per project workflow, .NET compilation/runtime and live-target verification remain user-run on Windows; the package preparation environment is used for source, structure, consistency, and package-integrity review rather than runtime claims.
+
+
+## TeeKay87's Memory Engine 0.1.3.rev22 - User Intent I/O Coordination
+
+### Fixed
+
+- Fixed **Disconnect** sometimes requiring a second click when the first attempt coincided with a Saved Addresses refresh or Frozen operation. Transient Saved Address I/O no longer makes Disconnect non-executable; the request reserves the foreground immediately, waits for already-running Saved Address I/O to reach a safe idle boundary, and then continues automatically.
+- Fixed the same transient-I/O lost-intent pattern for **Refresh Processes**, **Set Active Target**, **First Scan**, **Next Scan**, **New Scan**, and the retained Raw Memory Read/Write/Safe Write Test diagnostic commands. These actions no longer depend on the user clicking outside the short background refresh/Frozen window.
+- Fixed Freeze enable, Address edits, and Value Type edits being rejected when their commit happened to overlap a Saved Address background timer operation. Explicit Saved Address user operations now suppress future timer work and wait for the current background cycle instead of requiring a retry.
+- Fixed **Remove All** requiring another attempt when confirmed during active Saved Address I/O. The rows present at confirmation time are now unfrozen and registered for pending removal, then removed automatically when all Saved Address I/O returns to idle.
+- Fixed a stale freeze-enable sequence being able to re-enable Frozen after the user had issued a newer explicit Off request. Freeze requests now have a per-row generation/state marker and the latest requested state wins.
+- Closed a dispatcher timing edge case where stopping the refresh timer after accepting a foreground action was not sufficient by itself: a timer tick already queued for dispatch could still pass the old operation guard. The foreground reservation is now checked inside the refresh execution guard and both multi-row loops as well as in timer enablement.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev21` to `0.1.3.rev22` with feature title `User Intent I/O Coordination` through centralized `AppInfo`.
+- Generalized the rev20 `_savedAddressUserWriteInProgress` concept into a Saved Address user-operation state used by direct Value writes, Freeze enable, Address commits, and Value Type commits. The generalized state has its own idle signal so target-level foreground transitions can wait for an already-started Saved Address user operation without cancelling it mid-transaction.
+- Added a host-owned foreground target-operation reservation. Once accepted, it immediately stops future Saved Address timers, prevents another foreground target transition from stacking on top of it, makes an already-running multi-row timer cycle stop after its current awaited row, waits for Saved Address I/O to become fully idle, and then lets the original user command continue.
+- The foreground reservation is deliberately **not** a general FIFO command queue. Real foreground conflicts retain their existing `CanExecute` guards; for example a second scan is not stored for later execution while another scan is active, and Disconnect is not queued behind an active scan. This prevents stale user commands from replaying against a materially different target state.
+- First Scan and Next Scan release the foreground reservation immediately after `IsScanningMemory` becomes true. This preserves the verified rev18-rev20 scan interaction: ordinary Saved Address refresh remains paused, while Frozen writes may continue during a scan through `IConcurrentMemoryWriter` when **Pause target while scanning** is Off.
+- Unfreeze remains immediate. Freeze enable is coordinated as an explicit user operation and waits for background Saved Address I/O; its initial refresh/capture/write must complete before repeated Frozen state is enabled. The Frozen checkbox and context-menu label now follow the latest requested Frozen state while that initial operation is pending, giving immediate visual acknowledgement of the click.
+- Address and Value Type commits now wait for background Saved Address I/O. Existing target identity/value-type validation remains in force, and changing Address/Type still disables Frozen before the new location/interpretation is used.
+- Individual queued removal from rev21 is retained. Remove All now reuses that same pending-removal set and all-I/O idle boundary rather than creating a second removal mechanism.
+
+### Documentation
+
+- Added `docs/testing/APP_0.1.3_REV22_VERIFICATION.md` with focused runtime/live-target verification for target-command deferral, scan startup, Freeze latest-intent semantics, Address/Type edits, Remove All, rev20/rev21 regressions, real foreground conflict guards, and PS5 protocol safety.
+- Updated README, Saved Addresses architecture, main-workspace documentation, and early-development architecture to describe the generalized user-intent/background-I/O boundary and the intentional distinction between transient background collisions and genuine foreground conflicts.
+
+### Preserved
+
+- Plugin API remains `2.4.0`.
+- PS5 plugin remains `0.1.0.rev16`; no ps5debug-NG transport, TurboScan, or concurrent-writer code was changed.
+- Mock plugin remains `1.0.0.rev3`.
+- Core scanner/storage code, disk-backed generation semantics, 50,000-row UI preview ceiling, legacy 2,000,000 list-materialization safety ceiling, plugin-owned scan definitions/options, settings persistence, Saved Address interval defaults, rev20 active-editor and target-write-generation protection, rev21 individual queued removal, and target identity/memory-map safety checks remain unchanged.
+- Plugin Reload, application shutdown, plugin selection, settings actions, copy commands, scan-result Save Address, and other UI paths that were not blocked by transient Saved Address I/O are not routed through the new foreground reservation.
+
+### Static Verification Preparation
+
+- Re-read the full supplied rev21 documentation inventory and reviewed the complete code inventory before modifying the host/WPF coordination paths.
+- Audited every `CanExecute` guard and visible command/event surface for transient Saved Address-I/O dependencies. The affected target-level commands now coordinate at execution time instead of disabling solely for that background condition.
+- Traced the foreground reservation against background refresh, Frozen enforcement, concurrent Saved Address Value writes, pending row removal, target-state transitions, scan startup, scan cancellation, disconnect/disposal, and WPF command-state invalidation.
+- Confirmed an accepted foreground operation stops future timer scheduling **and** is checked by the refresh/Frozen execution guards, preventing an already-dispatched tick from starting new work after user intent has priority.
+- Confirmed an already-started Saved Address explicit operation can finish while a later foreground transition is pending; new Saved Address user operations are blocked after that foreground reservation is established.
+- Confirmed First/Next Scan release only the temporary startup reservation after setting scan-active state, so the existing PS5 concurrent Frozen writer can continue during non-paused scans.
+- Confirmed rev22 changes no Core, Plugin SDK, PS5 plugin, Mock plugin, protocol, or scan-storage files. The only XAML change binds the Saved Address Frozen checkbox to the row's latest requested Frozen state so queued intent is reflected immediately.
+- Per project workflow, no .NET build/runtime attempt is made in the preparation environment; Windows compilation/runtime and live PS5 verification remain user-run.
+
+## TeeKay87's Memory Engine 0.1.3.rev21 - Queued Saved Address Removal
+
+### Fixed
+
+- Fixed individual Saved Address removal being rejected whenever a refresh, Frozen write, or direct Saved Address Value write happened to be active. The row-level **Remove** button and **Remove address** context-menu action now retain the user's request and complete it automatically at the next safe Saved Address idle boundary.
+- Fixed the removal path being able to require repeated user attempts at short refresh/Frozen intervals. A removal request now has priority over future timer work: the affected row is unfrozen immediately, both Saved Address timers are suppressed while a removal is pending, and an already-running multi-row refresh/Frozen cycle stops after the currently awaited row.
+- Fixed a pending removal being able to lose priority to the multi-step freeze-enable flow. If removal is requested while the initial live refresh or immediate freeze write is in flight, the freeze sequence observes the pending state before it can capture/re-enable Frozen for another cycle.
+- Fixed an in-flight refresh completion being able to replace the row's display after the user had already requested removal. Pending rows discard that refresh result and are removed as soon as the owning I/O state returns to idle.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev20` to `0.1.3.rev21` with feature title `Queued Saved Address Removal` through centralized `AppInfo`.
+- Added a host-owned pending-removal set for individual Saved Address rows. Duplicate Remove clicks for the same row are coalesced, while separate rows can be queued together if the user removes more than one during the same busy period.
+- Pending removals are processed only when **all** Saved Address I/O is idle. The existing rev20 background-idle transition drains the queue after refresh/Frozen work completes, while the explicit user-write completion path performs the same check after direct Value writes. This preserves ordering when background I/O and a manual write overlap.
+- An already-started target read/write is still allowed to finish normally; rev21 does not introduce transport cancellation into Saved Addresses. This preserves the established protocol-safety rule that in-flight target transactions are completed rather than abandoned mid-frame.
+- The existing **Remove All** confirmation and busy-state behavior is intentionally unchanged. Rev21 changes only individual row removal.
+
+### Documentation
+
+- Added `docs/testing/APP_0.1.3_REV21_VERIFICATION.md` with focused runtime checks for queued removal during value refresh, Frozen enforcement, direct user writes, freeze enablement, multiple queued rows, and idle removal.
+- Updated README, Saved Addresses architecture, and main-workspace documentation to describe the queued individual-removal lifecycle and its interaction with rev20 I/O coordination.
+
+### Preserved
+
+- Plugin API remains `2.4.0`.
+- PS5 plugin remains `0.1.0.rev16`; no ps5debug-NG transport, TurboScan, or concurrent-writer code was changed.
+- Mock plugin remains `1.0.0.rev3`.
+- Core scanner/storage code, disk-backed generation semantics, 50,000-row UI preview ceiling, legacy 2,000,000 list-materialization safety ceiling, scan options, settings persistence, Saved Address refresh/Frozen interval behavior, direct Value-write priority, stale-read generation protection, and rev20 command-state requery behavior remain unchanged.
+
+### Static Verification Preparation
+
+- Re-read the complete project documentation inventory and reviewed the source inventory before changing the Saved Addresses host path.
+- Traced individual removal through row commands, `PluginViewModel`, both Saved Address timers, explicit user writes, freeze enablement, disconnect/disposal cleanup, selection state, and command-state invalidation to avoid introducing a second or conflicting synchronization mechanism.
+- Confirmed queued removal reuses the existing rev20 Saved Address idle transition rather than changing Plugin SDK or platform transport contracts.
+- Confirmed a queued Frozen row is unfrozen before waiting, so no later timer snapshot can start another Frozen write for that row; a write already in flight may complete once but cannot re-arm the row.
+- Confirmed multiple queued rows are removed as one idle-boundary batch and the selected-row reference is repaired after removal.
+- Per project workflow, no .NET build/runtime attempt is made in the preparation environment; Windows compilation/runtime verification remains user-run.
+
+## TeeKay87's Memory Engine 0.1.3.rev20 - Saved Address I/O Coordination and Scan Command State Fix
+
+### Fixed
+
+- Fixed Scan-panel commands occasionally remaining visually disabled after a completed First/Next Scan. The race occurred when scan state returned to idle while a periodic Saved Address refresh/Frozen operation was still active; WPF cached the false `CanExecute` result and no later command notification was emitted when the background operation finished. Background Saved Address I/O now emits a single dependent-command requery when the final in-flight background operation returns to idle.
+- Fixed direct Saved Address Value edits being silently discarded whenever a refresh or Frozen timer tick happened to be active at commit time. Explicit user writes now have their own operation state instead of reusing the background-refresh flag and are coordinated separately from periodic I/O.
+- Fixed the Value TextBox being susceptible to source updates while the user was typing. Background refresh and Frozen completions continue updating the row's internal current bytes, but the displayed editor text is not replaced while that Value cell owns keyboard focus.
+- Fixed a direct-write/read display race by generalizing the rev19 Frozen-only generation marker into a target-write generation. Both manual writes and Frozen writes advance the marker, so an older in-flight read completion cannot overwrite the display after either kind of successful write.
+- Fixed editing a Frozen row being able to race an already-started Frozen write with the old captured value. The user's parsed edit becomes the captured Frozen payload before the manual write is queued; on plugins with `IConcurrentMemoryWriter`, the existing writer serialization guarantees an older already-queued Frozen write completes before the newer manual write, leaving the user's new value authoritative.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev19` to `0.1.3.rev20` with feature title `Saved Address I/O Coordination and Scan Command State Fix` through centralized `AppInfo`.
+- Direct Saved Address Value writes now prefer the existing optional `IConcurrentMemoryWriter` whenever the active plugin provides it. On PS5 this reuses the already verified separate ps5debug-NG writer connection from rev18/rev19; no PS5 protocol code changes are required.
+- Plugins without a concurrent writer no longer lose the user's direct Value edit because a periodic Saved Address operation is active. Future timer ticks are stopped while the explicit write is pending, and the host waits for already-running Saved Address background I/O to become idle before using the primary `IMemoryWriter`.
+- Explicit direct Value writes temporarily suppress new refresh/Frozen timer ticks and update dependent command state at operation start/end. If a timer cycle is already traversing multiple Saved Address rows, it stops after its current awaited row as soon as the pending user write takes priority. Periodic background ticks still do not invalidate commands at start, preserving rev18's no-blinking UI behavior.
+- Manual write failures now always update the Saved Addresses panel status. For a Frozen row, the newly requested frozen bytes are retained so the normal Frozen scheduler can retry them on the next interval.
+
+### Documentation
+
+- Added `docs/testing/APP_0.1.3_REV20_VERIFICATION.md` with focused live verification for scan-command recovery, active Value editor protection, direct-write priority, Frozen-value replacement, and stale-refresh protection.
+- Added the rev19 runtime follow-up that led to this revision without rewriting rev19's historical implementation record.
+- Updated README, Saved Addresses architecture, and main-workspace documentation for the new direct-write/background-I/O coordination behavior.
+- Corrected an obsolete README sentence that still described the Saved Addresses toolbar as removing only the selected row; the implemented toolbar action is confirmed **Remove All**, while per-row Remove remains available.
+
+### Preserved
+
+- Plugin API remains `2.4.0`.
+- PS5 plugin remains `0.1.0.rev16`; its source and separate concurrent writer implementation are unchanged.
+- Mock plugin remains `1.0.0.rev3`.
+- Core scanner/storage code, ps5debug-NG TurboScan protocol paths, disk-backed generation semantics, 50,000-row UI preview ceiling, legacy 2,000,000 list-materialization safety ceiling, scan options, settings persistence, and Saved Address interval defaults remain unchanged.
+
+### Static Verification Preparation
+
+- Re-read all project Markdown documentation and reviewed the complete rev19 source inventory before changing host/WPF Saved Address paths.
+- Reviewed every use of the Saved Address refresh, Frozen-write, target-transition, command-state, and direct Value-write state flags after introducing explicit user-write coordination.
+- Confirmed background timer start still does not raise global command-state notifications, while transition back to background idle now does, preventing stale disabled command state without restoring the rev17 blink behavior.
+- Confirmed the active Value editor cannot receive timer-driven `ValueText` replacement while focused and that successful manual/Frozen writes share one target-write generation for stale-read rejection.
+- Per project workflow, no .NET build/runtime attempt is made in the preparation environment; Windows compilation/runtime verification remains user-run.
+
+## TeeKay87's Memory Engine 0.1.3.rev19 - Frozen Value Reliability and Header Alignment
+
+### Fixed
+
+- Fixed the **Scan Results** section title alignment by giving it the same vertical centering used by the **Saved Addresses** title in the adjacent toolbar-style header.
+- Fixed repeated Frozen writes silently disabling a Saved Address after a transient transport/write exception. The row now remains Frozen, reports the failure, and retries the same captured Frozen bytes on the next configured interval.
+- Fixed ordinary Saved Addresses refresh reads being able to suppress Frozen ticks on plugins that already expose an independent `IConcurrentMemoryWriter`. The concurrent writer is now preferred for repeated Frozen writes whenever it is available, not only while scanning.
+- Fixed a read/write display race where a Saved Addresses refresh started before a successful Frozen write could complete afterward and overwrite the row display with the older read result. Successful Frozen writes now advance a per-row generation marker; a stale in-flight read completion is discarded if that generation changed.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev18` to `0.1.3.rev19` with feature title `Frozen Value Reliability and Header Alignment` through centralized `AppInfo`.
+- Changed the default **Frozen write interval** from `500 ms` to `100 ms`, matching the current Cheat Engine default reviewed for its address-list freeze behavior. The supported `50-10,000 ms` range is unchanged, and an explicitly persisted user value is preserved.
+- Successful initial and repeated Frozen writes now update the Saved Address row's current/display bytes to the value that was actually written, while the separately captured Frozen bytes remain the authoritative repeated-write payload.
+- Outside scans, plugins that expose Plugin API `2.4.0` `IConcurrentMemoryWriter` now use that independent writer for Frozen enforcement so ordinary display refresh can continue without serializing every freeze tick behind the primary reader. Plugins without a concurrent writer retain safe serialized `IMemoryWriter` fallback behavior outside scans.
+- Scan behavior remains unchanged: Saved Addresses display refresh pauses during First/Next Scan; Frozen writes are suppressed when **Pause target while scanning** is enabled; when Pause is disabled, in-scan Frozen writes require `IConcurrentMemoryWriter`.
+- Updated Settings explanatory text to show the distinct 500 ms refresh and 100 ms Frozen defaults.
+
+### Research and Documentation
+
+- Reviewed Cheat Engine's current open-source address-list freeze behavior before changing Memory Engine. The reviewed source separates update/freeze intervals, defaults freeze to 100 ms, captures a dedicated frozen value, repeatedly reapplies that value, and does not silently clear the active/frozen state on an individual repeated-write failure.
+- Added `docs/research/CHEAT_ENGINE_FREEZE_BEHAVIOR.md` with the source paths and the specific behavioral principles adapted for Memory Engine.
+- Added `docs/testing/APP_0.1.3_REV19_VERIFICATION.md` with focused header/Frozen/settings/scan-interaction verification.
+- Updated current README, Saved Addresses architecture, Settings persistence, workspace, and early-development documentation. The early roadmap now records the completed disk-backed massive-result, Saved Addresses, and freeze milestones rather than describing those implemented features as future work.
+- Added a runtime follow-up section to the historical rev18 verification document recording the two issues that led to rev19 without rewriting rev18's historically correct 500 ms default.
+
+### Preserved
+
+- Plugin API remains `2.4.0`.
+- PS5 plugin remains `0.1.0.rev16`; its separate concurrent ps5debug-NG writer implementation is reused without plugin-code changes.
+- Mock plugin remains `1.0.0.rev3`.
+- Core scanner, disk-backed scan-result format/lifecycle, native TurboScan implementation, 50,000-row UI preview ceiling, legacy 2,000,000 list-materialization safety ceiling, plugin settings, Raw Memory diagnostic code, Saved Address row/edit/remove workflow, and export placeholders are unchanged.
+
+### Static Verification Preparation
+
+- Re-read the project documentation and reviewed the complete rev18 codebase before changing the affected host/WPF paths.
+- Reviewed the rev18 Frozen/read schedulers for obsolete or redundant paths after introducing concurrent-writer preference and transient-failure retry semantics.
+- Confirmed the separate captured Frozen bytes remain the authoritative repeated-write value and manual Value edits on a Frozen row still replace that captured value after a successful write.
+- Confirmed `IConcurrentMemoryWriter` already supplies the required safe PS5 background channel, so rev19 does not change Plugin SDK or PS5 protocol code.
+- Per project workflow, no .NET build/runtime attempt is made in the preparation environment; Windows compilation/runtime and live target verification remain user-run.
+
+## TeeKay87's Memory Engine 0.1.3.rev18 - Saved Addresses Workflow Refinement
+
+### Added
+
+- Added a dedicated **Remove** button at the far right of every Saved Addresses row. The existing row context-menu removal path is preserved and both actions remove only that row.
+- Added a toolbar-level **Remove All** action for Saved Addresses. It requires explicit Yes/No confirmation before clearing the table and disables each Frozen row before collection removal.
+- Added a separate application-level **Frozen write interval** setting stored as `frozenWriteIntervalMilliseconds` in the existing shared `settings.json`. It defaults to `500 ms`, accepts `50-10,000 ms`, persists across launches, and applies immediately to already-loaded plugin workspaces after Settings is saved.
+- Added Plugin API `2.4.0` optional `IConcurrentMemoryWriter`. The contract extends `IMemoryWriter` and explicitly identifies a writer that is safe for host use while another long-running operation owns the session's primary transport.
+- Added PS5 `Ps5ConcurrentMemoryWriter`. It opens a second ps5debug-NG connection lazily on the first in-scan Frozen write and serializes repeated writes on that secondary connection, preventing `CMD_PROC_WRITE` traffic from interleaving with TurboScan START/COUNT/GET traffic on the verified primary command stream.
+- Added Scan Results **Export...** toolbar placement matching the Saved Addresses panel. Export remains disabled until the shared export subsystem is implemented.
+- Added `docs/testing/APP_0.1.3_REV18_VERIFICATION.md` covering the focused UI, settings, refresh, Frozen-write, scan-interaction, version, and regression checks for this revision.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev17` to `0.1.3.rev18` with feature title `Saved Addresses Workflow Refinement` through centralized `AppInfo`.
+- Advanced Plugin API from `2.3.0` to `2.4.0` because `IConcurrentMemoryWriter` is a new public optional Plugin SDK contract. Existing 2.0-2.3 plugins remain compatible under the existing same-major/older-minor rule.
+- Advanced the PS5 plugin independently from `0.1.0.rev15` to `0.1.0.rev16` and its targeted Plugin API from `2.3.0` to `2.4.0` because it now exposes the concurrent writer implementation. Mock remains `1.0.0.rev3` targeting `2.0.0`.
+- Changed Saved Addresses background scheduling from one combined refresh/freeze timer to two independent schedules. **Value refresh** uses `savedAddressesUpdateIntervalMilliseconds`; **Frozen writes** use `frozenWriteIntervalMilliseconds`.
+- Changed scan interaction so ordinary Saved Addresses value refresh is stopped for the complete First Scan/Next Scan operation. Frozen writes are treated separately: when **Pause target while scanning** is enabled they are suppressed while the target is paused; when Pause is disabled they continue at the configured Frozen interval through `IConcurrentMemoryWriter` when the plugin provides that service.
+- Changed routine Saved Addresses timer state handling so periodic refresh/freeze ticks no longer raise global Connect/Disconnect/process/raw-memory command `CanExecuteChanged` notifications. This removes the visible enabled/disabled flashing of unrelated UI buttons on every refresh while preserving `CanExecute` safety checks when commands are actually evaluated.
+- Changed new Saved Address Description values from the stored literal `No description` to an empty string. The Description cell remains directly editable and its tooltip communicates the editing affordance.
+- Changed the Scan Results footer back to a direct count presentation: `Showing <displayed> results of <total>.` The footer no longer displays the `Results remain temporary...` sentence.
+- Changed the Saved Addresses toolbar Remove action from selected-row removal to confirmed **Remove All**. Single-row removal remains available through each row's new Remove button and context menu.
+- Changed Frozen status/tooltip text so it refers to the dedicated Frozen write interval rather than the Saved Addresses value-refresh interval.
+- Changed Settings explanatory text to document both independent intervals and their scan behavior.
+- Changed the visible workspace so Raw Memory Read and Raw Memory Write development inspectors are no longer rendered. Their ViewModel properties, commands, validation, Core/plugin memory-access services, Safe Write Test logic, and protocol implementations are intentionally retained in code for development/regression use.
+
+### Removed
+
+- Removed the obsolete selected-row `RemoveSavedAddressCommand` toolbar path now that the toolbar action is Remove All and each row owns its own Remove command.
+- Removed the small disabled `Export` text from the lower-right Scan Results footer; the future export affordance now exists only as the disabled toolbar **Export...** button.
+- Removed Frozen writes from the ordinary Saved Addresses value-refresh code path. Refresh now reads/updates display values only; the dedicated Frozen scheduler is the sole repeated-write path.
+- Removed the literal `No description` value from newly created Saved Address rows.
+- Removed Raw Memory Read/Write inspector XAML from the visible main workspace without removing the underlying diagnostic implementation.
+- Removed the Scan Results **Change value** menu entry because it only loaded the now-hidden Raw Memory Write diagnostic surface; its backing command and diagnostic implementation remain in code.
+
+### Safety and Preserved Behavior
+
+- During a scan with **Pause target while scanning** Off, PS5 Frozen writes never share the native scanner's primary ps5debug-NG TCP stream. The secondary writer connection is created only when required and is disposed with the target session.
+- During a scan with Pause enabled, Frozen writes stop before the suspended target is scanned and resume after the scan finishes and the target has been resumed.
+- Plugins that do not expose `IConcurrentMemoryWriter` are never forced to perform unsafe overlapping writes; an in-scan Frozen write is deferred while the row remains Frozen.
+- Outside scans, existing generic `IMemoryWriter` behavior remains unchanged. Saved Address target identity and readable/writable region checks remain in force.
+- The disk-backed scan-result format, 50,000-row UI preview ceiling, legacy 2,000,000 list-materialization safety ceiling, TurboScan survivor semantics, plugin-owned Value Type/Scan Type definitions, connection persistence, and scan-result storage lifecycle are unchanged.
+
+### Verification Preparation
+
+- Re-read the supplied rev17 README, CHANGELOG, architecture/plugin/UI documentation, verification history, and reviewed the complete source inventory before making changes.
+- Reviewed every changed Saved Addresses scheduler/cell/toolbar/settings path and removed the obsolete selected-row toolbar command after the new Remove All path replaced it.
+- Verified structurally that Raw Memory Read/Write backing properties, commands, and methods remain in source while their XAML inspectors are absent.
+- Verified the Frozen scan path uses `IConcurrentMemoryWriter` only while scanning, ordinary Saved Address refresh remains disabled during scanning, and the PS5 concurrent writer uses an independent lazily opened `Ps5DebugClient`.
+- Updated the existing plugin-settings preservation check so plugin writes must also preserve `frozenWriteIntervalMilliseconds`; the verification executable remains focused and does not add a long-running stress test.
+- Per project workflow, no .NET build/runtime attempt is made in the preparation environment. Windows compilation/runtime and live PS5 verification remain user-run steps documented under `docs/testing/APP_0.1.3_REV18_VERIFICATION.md`.
+
+## TeeKay87's Memory Engine 0.1.3.rev17 - Saved Addresses
+
+### Added
+
+- Added the first functional **Saved Addresses** data model and host workflow. A displayed Scan Result can now be added by double-clicking its row or by choosing **Save Address** from the Scan Result context menu. Saving the same target/address/Value Type identity again selects the existing Saved Address instead of silently adding another duplicate.
+- Added the interactive Saved Addresses columns **Frozen**, **Description**, **Address**, **Type**, and **Value**. The previous placeholder-only layout and duplicate Active/Frozen concept are replaced by a single Frozen state and directly editable row fields.
+- Added generic Saved Address current-value refresh through the active session's neutral `IMemoryReader`. Values are converted back to display text through the row's plugin-owned `IMemoryValueType`, preserving the platform-plugin ownership of concrete Value Types instead of adding a Core/WPF master catalog.
+- Added direct Saved Address value editing through neutral `IMemoryWriter`. Edited text is parsed by the selected plugin Value Type, validated against the writable memory map when available, written to the Active Target, and reflected in the row after a successful write. A successful edit on a Frozen row also becomes the new frozen value.
+- Added direct hexadecimal Address editing. Invalid input is rejected and the last valid display value is restored; changing the address disables an active freeze before the new location is used.
+- Added direct Type selection populated from the same Value Types declared by the active plugin. Changing type updates width/alignment semantics, disables freeze, and refreshes the new representation.
+- Added Saved Address freeze/repeated-write behavior. Enabling **Frozen** first refreshes the live target value, captures those bytes, performs an immediate write, then reapplies the frozen bytes at the Saved Addresses update interval. Disabling Frozen stops the repeated writes.
+- Added a Saved Address row context menu with **Freeze/Unfreeze**, **Copy address**, **Copy value**, and **Remove address**, plus a toolbar Remove action for the selected row. Export remains intentionally disabled until shared export infrastructure exists.
+- Added application-level **Saved Addresses update interval** to Settings. It defaults to `500 ms`, accepts `50-10,000 ms`, is stored in the existing shared `%LocalAppData%\TeeKay87\MemoryEngine\settings.json`, applies to both refresh and Frozen writes, and is propagated immediately to all loaded plugin workspaces after Settings is saved.
+- Added target-safety handling for Saved Addresses. Each row retains the process id/name from the Active Target that produced it; rows remain visible but automatic/direct memory operations are rejected while another process is active. Disconnecting stops scheduled Saved Address work and disables active freezes so repeated writes cannot silently resume after a later connection.
+- Added `docs/architecture/SAVED_ADDRESSES.md` describing row ownership, plugin-owned Value Types, read/write/freeze flow, update scheduling, target safety, scan-session independence, and current non-goals.
+- Added `docs/testing/APP_0.1.3_REV17_VERIFICATION.md` with a concise verification plan covering both Save Address gestures, direct cell interaction, freeze, New Scan independence, target safety, and Settings persistence.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev16` to `0.1.3.rev17` with feature title `Saved Addresses` through the centralized `AppInfo` source. Plugin API remains `2.3.0`; PlayStation 5 remains `0.1.0.rev15`; In-Memory Test Target remains `1.0.0.rev3`.
+- Changed the Scan Result context menu to include **Save Address** and connected row double-click to the same action. Existing Copy address, Copy value, and Int32-only diagnostic Change value behavior is preserved.
+- Changed Saved Addresses from a disabled UI foundation to a live collection owned by each loaded `PluginViewModel`. The collection is intentionally independent from scan-session reset state, so First Scan, Next Scan, and New Scan do not clear user-saved rows. Rev17 does not yet serialize the rows across application launches or Plugin Reload; that belongs to the later project/cheat persistence model.
+- Changed the application Settings document usage so plugin-scoped writes are also verified to preserve the new `savedAddressesUpdateIntervalMilliseconds` application value. The existing Core-owned shared settings/preservation model from rev16 remains unchanged.
+- Updated README and workspace/architecture documentation to describe the implemented Saved Addresses workflow, current project-lifetime boundary, generic Value Type/read/write ownership, Frozen behavior, and update-interval setting.
+
+### Removed
+
+- Removed the obsolete Saved Addresses **Active** column. **Frozen** is now the single user-controlled repeated-write state.
+- Removed the disabled placeholder **Add Address** and **Edit** controls. Addresses now enter the table from Scan Results, while Description, Address, Type, and Value are edited directly in their cells.
+- Removed the placeholder **Notes** column from the current table. Notes remain a future project/cheat metadata feature rather than a non-functional column.
+- Removed documentation that described Saved Addresses, value editing, and freeze as entirely unimplemented future work. Export, pointer work, Memory Viewer/disassembly navigation, hotkeys/groups, address expressions, and cross-launch project persistence remain future features.
+
+### Safety and Preserved Behavior
+
+- Saved Address automatic refresh/freeze work is serialized in the host and intentionally skips conflicting connection/process/map/raw-memory/scan operations rather than intentionally overlapping independent target protocol transactions. The background timer is explicitly stopped for the full duration of First Scan and Next Scan and restarts only after scanning returns to idle; Disconnect, Active Target changes, and New Scan native-session reset likewise suppress it while those target-state transitions are in progress.
+- A Frozen row is never automatically written while another process is Active Target. Active freezes are explicitly disabled when the target connection ends, and removing a row clears its Frozen state before collection removal so a timer snapshot cannot reapply a removed entry.
+- Memory-map-capable targets must contain the complete Saved Address value range inside the appropriate readable/writable region before the host sends refresh/write/freeze operations.
+- Changing a Saved Address's Address or Type disables its existing freeze before using the changed location/interpretation.
+- Scanner code, Core disk-backed result format/lifecycle, Plugin SDK contracts, PS5 plugin source, Mock plugin source, TurboScan behavior, Pause target behavior, the `50,000` UI-preview ceiling, and the legacy `2,000,000` in-memory/list materialization ceiling are not changed by rev17.
+- Plugin-owned concrete Value Types remain authoritative. Saved Addresses consumes the plugin's existing definitions rather than reintroducing a hardcoded Core list.
+
+### Verification
+
+- Re-read README, CHANGELOG, all Markdown documentation under `docs/`, and reviewed the complete rev16 source/test/resource inventory before implementing Saved Addresses.
+- Traced the existing Scan Result model, scan-reset lifecycle, Active Target/process transitions, `IMemoryReader`, `IMemoryWriter`, plugin-owned `IMemoryValueType`, application settings persistence, DataGrid styles, and command infrastructure before adding the new paths.
+- Reviewed the changed code for obsolete/dead/redundant paths. The old Active/placeholder table path is removed; generic scan-result Change value remains intentionally separate because it is still the existing Raw Memory Write Int32 diagnostic, while Saved Addresses now provides the general plugin-defined value editor.
+- Reviewed target-lifetime safety so Saved Addresses survive scan resets without allowing automatic writes to a different Active Target; disconnect explicitly disables active freezes. The final static review also confirmed that the Saved Addresses timer is stopped while First/Next Scan is active and remains suppressed during Disconnect, Set Active Target, and New Scan target/session transitions.
+- Extended the existing plugin-settings deterministic check so plugin writes must preserve the new application-level Saved Addresses interval. The top-level verification count remains 34.
+- Per the established project workflow, no .NET build/runtime attempt is made in the preparation environment. Windows build/runtime verification is left to the user; the focused checklist is recorded in `docs/testing/APP_0.1.3_REV17_VERIFICATION.md`.
+
+## TeeKay87's Memory Engine 0.1.3.rev16 - Plugin Settings Persistence and Platform Selector
+
+### Added
+
+- Added Plugin API `2.3.0` host-managed settings contracts: `IPluginSettings` exposes plugin-scoped `TryGetString`, `TrySetString`, and `TryRemove` operations, while the optional `IPluginSettingsConsumer` contract lets Core attach that scoped service to plugins that need persisted state. Plugins never receive the settings file path and cannot address another plugin's namespace through the injected service.
+- Added Core `JsonSettingsStore` as the shared persistence implementation for the existing application settings document and the new plugin namespaces. It preserves application-level values and plugin-level values in one document, keeps plugin data under stable `PluginMetadata.Id` namespaces, uses case-insensitive JSON property lookup, and retains atomic temporary-file/replace writes.
+- Added Core PluginHost settings injection. After basic metadata/API validation and before connection declarations are read, a plugin implementing `IPluginSettingsConsumer` receives its own settings scope. This allows remembered plugin values to influence generic connection-field defaults without placing platform-specific persistence logic in WPF.
+- Added PS5 persistence keys `connection.host` and `connection.port`. PS5 plugin `0.1.0.rev15` restores valid remembered values as the host/port connection defaults and saves the normalized endpoint only after a ps5debug-NG connection has completed successfully.
+- Added deterministic plugin-settings coverage to the verification executable. The new top-level check validates persistence, plugin-id namespace isolation, preservation of application settings, removal, and reload behavior; existing PS5 metadata/handshake and PluginHost discovery checks now also cover remembered defaults, successful-connection writes, and pre-declaration settings injection. The verification executable now contains 34 top-level checks.
+- Added `docs/architecture/PLUGIN_SETTINGS_PERSISTENCE.md` describing the plugin/Core ownership boundary, JSON layout, injection lifecycle, failure semantics, PS5 usage, and extension rules.
+- Added `docs/testing/APP_0.1.3_REV16_VERIFICATION.md` with focused automated and manual verification steps for plugin settings, remembered PS5 connection fields, and the simplified Platform selector.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev15` to `0.1.3.rev16` with feature title `Plugin Settings Persistence and Platform Selector` through the centralized `AppInfo` source.
+- Advanced Plugin API from `2.2.0` to `2.3.0` because the public SDK now exposes optional plugin-settings contracts. The existing same-major/host-minor-or-newer compatibility rule is unchanged, so the Mock plugin targeting API `2.0.0` remains compatible.
+- Advanced the PlayStation 5 plugin from `0.1.0.rev14` to `0.1.0.rev15` and its targeted Plugin API from `2.2.0` to `2.3.0` because it now consumes the host-managed settings service. Scanner/protocol behavior from rev15 is otherwise unchanged.
+- Refactored App `ApplicationSettingsStore` to delegate theme and Scan Results Storage Location values to Core `JsonSettingsStore`. The existing top-level JSON keys and `%LocalAppData%\TeeKay87\MemoryEngine\settings.json` location are preserved, while application-level saves can no longer discard plugin namespaces. `MainWindowViewModel` receives the public Core store rather than exposing the App-internal wrapper through its public constructor, preserving the existing accessibility boundary.
+- Changed the Platform ComboBox to display only `PluginViewModel.Name`, which maps directly to `PluginMetadata.Name`/the built-in plugin's `xxPluginInfo.Name`. Backend is still shown in the expandable Plugin details section.
+- Updated README, Plugin SDK architecture, scanner/workspace architecture, PS5 plugin/connection documentation, and current protocol/process-control documentation for host `0.1.3.rev16`, PS5 plugin `0.1.0.rev15`, and Plugin API `2.3.0`. The workspace documentation was also brought forward from its obsolete rev9 in-memory-result description to the live-verified disk-backed generation model.
+- Updated the rev15 verification record with the completed physical-PS5 results: 33/33 deterministic checks passed; a signed-byte Exact Value First Scan for `50` committed `10,953,954` results; a same-value Next Scan refined the complete set to `8,796,420`; and First/Next Scan both passed with **Pause target while scanning** enabled.
+
+### Removed
+
+- Removed the obsolete App-only `ApplicationSettings` DTO. The previous serializer would not know about future plugin namespaces and could drop those properties when rewriting the shared file; the Core JSON document store now preserves the complete settings document.
+- Removed the obsolete `PluginViewModel.SelectorDisplay` (`Name · Backend`) presentation path. No other UI or logic used that property after the Platform selector moved to the plugin name directly.
+
+### Preserved
+
+- The settings file remains `%LocalAppData%\TeeKay87\MemoryEngine\settings.json`; existing `themeId` and `scanResultsStorageLocation` values remain valid without migration.
+- PS5 connection fields remain plugin-declared and WPF remains unaware of PS5-specific IP/port semantics. The persistence decision and keys belong to the PS5 plugin.
+- Failed PS5 connection attempts do not replace remembered successful host/port values. A persistence failure does not invalidate an otherwise successful target connection.
+- Plugin Backend metadata remains available and visible under Plugin details; only the Platform dropdown presentation changed.
+- Plugin API `2.2.0` native streaming contracts remain unchanged and continue to back the disk-backed massive-result scanner.
+- The rev13-rev15 disk-backed binary result format, generation commit semantics, complete-set Next Scan behavior, 50,000-row UI preview ceiling, TurboScan survivor retrieval correction, Pause target behavior, and legacy `2,000,000` list-materialization ceiling are unchanged.
+- In-Memory Test Target remains `1.0.0.rev3` targeting Plugin API `2.0.0`.
+
+### Verification
+
+- Re-read README, CHANGELOG, all Markdown documentation under `docs/`, and reviewed the complete rev15 source/test/resource inventory before making the revision.
+- Traced every existing `ApplicationSettingsStore`, theme preference, Settings window, PluginHost discovery, plugin connection-definition, PS5 connection, and Platform-selector call path before replacing or extending it.
+- Reviewed the new settings path for obsolete/duplicate implementations: the App-only `ApplicationSettings` DTO and `SelectorDisplay` path were removed; ThemePreferenceStore remains active as the theme-specific failure-handling wrapper; legacy plugin versions remain intentionally supported through the existing API compatibility rule.
+- Reviewed all new/modified C# files for required `using` directives, nullable flow, plugin namespace isolation, and successful-connection persistence semantics.
+- Native .NET/WPF build/runtime execution is intentionally left to the Windows development machine.
+
+## TeeKay87's Memory Engine 0.1.3.rev15 - TurboScan Survivor Retrieval Fix
+
+### Fixed
+
+- Fixed live PS5 TurboScan Next Scan failures where the target had already reported an address as a resident survivor through `CMD_PROC_TURBOSCAN_COUNT`, but the client aborted while reading `CMD_PROC_TURBOSCAN_GET` because the returned current-value payload did not equal the comparison value a second time.
+- Changed PS5 TurboScan GET handling so START/COUNT remains authoritative for resident survivor membership. Integer, Array-of-Bytes, and ps5debug-NG-tolerance floating-point survivors are no longer rejected by a redundant client-side Exact Value comparison during GET retrieval.
+- Preserved the existing Strict Float/Double behavior. ps5debug-NG's native Float/Double Exact Value comparison uses relative tolerance, so Strict First Scan still exact-filters the returned floating-point records before host commit, while Strict Next Scan continues to close the native resident session and use shared Core disk-backed refinement.
+- Removed the obsolete generic TurboScan value revalidation path and its now-unused fuzzy floating-point helper methods from `Ps5DebugClient`; the remaining strict floating-point helper now expresses the only GET-side predicate check that is still required.
+- Updated the Settings description for Scan Results Storage Location. It now states that complete disk-backed result sets are retained under the managed storage root while the results table keeps only a bounded in-memory preview, replacing the obsolete rev9-era text that said scanner candidates were still kept in memory.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev14` to `0.1.3.rev15` with feature title `TurboScan Survivor Retrieval Fix` through the centralized `AppInfo` source.
+- Advanced the PlayStation 5 plugin from `0.1.0.rev13` to `0.1.0.rev14` because the plugin's TurboScan result-retrieval behavior changed. Plugin API remains `2.2.0`.
+- Extended the existing PS5 native exact-value refinement verification scenario so TurboScan COUNT selects a survivor using one comparison value while the subsequent GET returns a deliberately different current-value payload. The verification now requires the client to preserve the server-selected survivor and the returned current-value bytes instead of throwing a mismatched-value exception.
+- Extended `Ps5ProtocolTestServer` with an optional independent native-refinement GET current-value payload so the survivor-membership/GET-payload distinction can be verified without adding a separate test harness.
+- Updated current scanner, Plugin SDK, PS5 protocol, plugin, README, and revision-verification documentation to describe the corrected survivor retrieval semantics and the new PS5 plugin revision.
+
+### Preserved
+
+- The rev13 disk-backed binary result format, application/scan-session storage lifecycle, generation commit semantics, complete-set Next Scan model, and 50,000-row UI preview ceiling are unchanged.
+- Core still validates native stream framing, value width, mapped-region containment, alignment, ascending address order, duplicate addresses, monotonic source progress, stream completeness, and previous-candidate membership.
+- The legacy list/in-memory APIs retain the historical `2,000,000` safety ceiling; the disk-backed streaming path remains independent of that limit.
+- Plugin API remains `2.2.0`.
+- In-Memory Test Target remains `1.0.0.rev3`.
+- PS5 Endianness, Alignment, Floating-point rounding, Pause target while scanning, process-control, cancellation, connection, memory-read/write, and protocol-framing behavior are otherwise unchanged.
+
+## TeeKay87's Memory Engine 0.1.3.rev14 - Native Stream Enumerator Cancellation Compile Fix
+
+### Fixed
+
+- Fixed the rev13 verification-project build failure `CS8425` in `SyntheticNativeValueScanResultStream.ReadBatchesAsync`. The synthetic async iterator accepts a `CancellationToken` and is consumed through `await foreach`, so its cancellation-token parameter now carries `[EnumeratorCancellation]` as required by the compiler when warnings are promoted to errors.
+- Added the required `System.Runtime.CompilerServices` import to the verification program for `EnumeratorCancellationAttribute`.
+- The `System.Object` error reported by the WPF XAML designer is treated as a downstream solution-build/designer symptom unless it remains after the verification-project compiler error is removed. No unrelated `MainWindow.xaml` change is included in this revision.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev13` to `0.1.3.rev14` with feature title `Native Stream Enumerator Cancellation Compile Fix` through the centralized `AppInfo` source.
+- Updated the rev13 verification record with the actual Windows build result and explicitly left rev13 unverified.
+- Added `docs/testing/APP_0.1.3_REV14_VERIFICATION.md` describing the narrow build correction and the checks to perform on the Windows development machine.
+- Updated current-host documentation to identify `0.1.3.rev14` while retaining PS5 plugin `0.1.0.rev13` and Plugin API `2.2.0` because no plugin or public-contract code changed.
+
+### Preserved
+
+- The complete rev13 disk-backed massive-result implementation is unchanged: bounded native result streaming, compact binary result generations, complete-set Next Scan refinement, the 50,000-row WPF preview ceiling, legacy list fallback behavior, and generation-safe commit/cancellation semantics remain intact.
+- Plugin API remains `2.2.0`.
+- PlayStation 5 plugin remains `0.1.0.rev13` with no source/protocol changes.
+- In-Memory Test Target remains `1.0.0.rev3`.
+- The historical `2,000,000` safety ceiling remains only on legacy list/in-memory materialization paths and is not reintroduced into the disk-backed streaming path.
+- No `MainWindow.xaml`, storage-format, scanner, TurboScan, settings, theme, progress-dialog, or plugin-owned scan-option behavior is changed by this compile-only revision.
+
+### Verification
+
+- Re-read README, CHANGELOG, all Markdown documentation under `docs/`, and reviewed the complete rev13 source/test/resource inventory before making the correction.
+- Reviewed every async iterator in Core, PS5, and Tests that accepts a `CancellationToken`. All production iterators already use `[EnumeratorCancellation]`; the synthetic verification stream was the only missing occurrence.
+- Reviewed the rev13 streaming/storage code paths for duplicate or obsolete alternatives introduced by the new disk-backed architecture. The obsolete metadata-only commit path removed in rev13 remains absent, while legacy list scanning remains intentionally retained as a compatibility fallback rather than dead code.
+- Confirmed the rev14 source change outside documentation/version metadata is limited to the missing async-iterator cancellation annotation/import in the verification program.
+- Native .NET/WPF build/runtime execution is intentionally left to the Windows development machine.
+
+## TeeKay87's Memory Engine 0.1.3.rev13 - Disk-Backed Massive Scan Results
+
+### Added
+
+- Added a versioned binary scan-result record format for temporary scan-session data. Each committed result file stores a fixed header followed by compact address/current-value records, avoiding millions of JSON objects and keeping sequential write/read overhead bounded.
+- Added generation-based disk result commits inside the existing host-owned scan-session lifecycle. First Scan publishes generation 1; each successful Next Scan publishes a new generation and only then replaces the active metadata reference. An incomplete, cancelled, or failed replacement generation cannot displace the previous committed result set.
+- Added `IScanResultWriter` and `IScanResultSet` abstractions in Core for bounded sequential result writes, batched reads, result counts, stored value width/alignment, and neutral address-batch enumeration.
+- Added disk-backed Core First Scan and Next Scan paths. First Scan writes every matching candidate to the active scan-result writer while retaining only the bounded UI preview. Next Scan reads and refines the entire committed result file rather than the rows materialized for the WPF table.
+- Added optional streaming native-scan contracts to Plugin SDK: `INativeValueScanStreamProvider`, `INativeValueScanResultStream`, `INativeValueScanStreamRefiner`, and `INativeValueScanCandidateSource`, plus neutral `NativeValueScanResultBatch` payloads. These contracts allow plugins to deliver very large target-side result sets in bounded batches instead of returning one `IReadOnlyList` containing every result.
+- Added PS5 TurboScan streaming support. TurboScan GET records are fetched and normalized in bounded batches and can be written directly into the host disk-backed result store without constructing a multi-million-result managed list first.
+- Added streaming resident TurboScan refinement support for compatible PS5 Next Scans. The host supplies the complete disk-backed candidate source identity/count, while ps5debug-NG keeps its compatible resident survivor set target-side and returns refined survivors in batches.
+- Added three automated regression checks for the massive-result implementation: generation-commit replacement safety, Next Scan survival of a candidate outside the 50,000-row UI preview, and a synthetic 2,000,001-result native stream that proves the disk-backed path exceeds the legacy two-million in-memory limit while retaining a bounded preview.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev12` to `0.1.3.rev13` with feature title `Disk-Backed Massive Scan Results` through the centralized `AppInfo` source.
+- Advanced Plugin API from `2.1.0` to `2.2.0` because rev13 adds optional public streaming scan contracts. The compatibility rule remains same-major/host-minor-or-newer, so the existing Mock plugin targeting API `2.0.0` remains compatible.
+- Advanced the PlayStation 5 plugin from `0.1.0.rev12` to `0.1.0.rev13` and its targeted Plugin API to `2.2.0` because its TurboScan implementation now exposes the streaming First/Next Scan services.
+- Separated **total/stored result count** from **materialized UI result count**. `MemoryScanExecutionResult` now carries the true total independently from the preview list, and scan progress uses 64-bit result counts.
+- The WPF Scan Results table continues to materialize at most the first `50,000` results, but the status/header reports the complete result count and explicitly indicates when only the first 50,000 are displayed.
+- The reusable modal operation-progress dialog introduced by the storage foundation is now used for large native result transfers/commits. It reports stored/received counts, blocks conflicting host interaction, and links optional dialog cancellation to the active scan cancellation token.
+- The PS5 plugin's former `2,000,000` check is now retained only on the legacy list-materialization compatibility API. The new streaming TurboScan path does not reject a valid result set merely because its count exceeds two million.
+- Core's established `MemoryScanner.MaximumResultCount = 2,000,000` remains in the legacy in-memory/list fallback path as a safety boundary. It is no longer the data limit for the new disk-backed streaming/shared paths.
+
+### Removed
+
+- Removed the rev9 metadata-only `BeginWriting()` / `Commit(...)` scan-session path and the now-obsolete `ScanResultCommitInfo` type. Rev13 has a real disk-backed result format, so a session can now reach `Committed` only by publishing a flushed and validated result-file generation. This removes the contradictory state where metadata could claim `Committed` even though no usable result file existed.
+
+### Safety and Correctness
+
+- Scan-result files remain temporary application-session implementation state. They are still bound to unique application-session and scan-session GUIDs and are never adopted from stale directories by filename or recency.
+- Result publication is transactional at the generation level: a writer flushes and validates its binary file before scan metadata is updated to reference that generation. If publication fails, the new file is removed when possible and the previous committed generation remains authoritative.
+- A cancelled or failed **First Scan** still terminates/invalidates its scan-storage session. A cancelled or failed **Next Scan** leaves the previous committed generation active, allowing the user to retry refinement without losing the last valid result set.
+- Native streamed results are validated for value width, address ordering, duplicate addresses, alignment, readable mapped regions, and monotonic source-progress counts before being committed.
+- Disk-backed native Next Scan cross-checks streamed survivor addresses against the complete previous committed result set so a plugin cannot silently introduce candidates that were not part of the prior host scan session.
+- The PS5 resident survivor count must match the host's committed candidate count before native refinement is allowed. Incompatible state closes the resident session and falls back to shared Core refinement.
+- Strict Float/Double semantics remain unchanged: ps5debug-NG's native relative `1e-6` behavior is used only when selected. Strict refinement falls back to Core, and host-side strict filtering can intentionally make the host count differ from the resident native count, causing a safe shared-refinement fallback on Next Scan.
+- Disk-backed Next Scan now treats only the streaming native refiner as a native path; a legacy list-only refiner no longer leaves the progress UI indeterminate or labels a shared full-set refinement as native.
+- Legacy materialized native results are accepted for disk persistence only when the reported total equals the materialized list, and they are ordered by address before being written so the sequential disk-refinement invariant cannot be violated by an unsorted legacy plugin result list.
+- PS5 native refinement now closes any active resident TurboScan session when the requested refinement is unsupported by the native path before Core falls back to shared disk-backed refinement, preventing stale resident state from lingering after an incompatible Next Scan.
+- First Scan now determines its native-progress/status path after scan-result storage session creation. If storage is unavailable, a plugin that only provides the new streaming native capability falls back cleanly to the usable legacy/shared path instead of displaying a native indeterminate state for a stream the in-memory fallback cannot consume.
+
+### Preserved
+
+- Plugin-owned concrete Value Types, Scan Types, and Scan Options remain authoritative. Core stores stable plugin-defined ids and neutral records; it does not regain a concrete scan/type catalog.
+- PS5 **Pause target while scanning**, **Endianness**, **Alignment**, and **Floating-point rounding** remain plugin-declared controls with their established semantics.
+- The existing transaction-safe ps5debug-NG command-channel cancellation rules, process control, memory reads/writes, Safe Write Test, target selection, memory-map handling, tooltip wrapping, Scan-panel overflow behavior, Settings layout, theme persistence, and storage-root configuration are preserved.
+- The In-Memory Test Target remains `1.0.0.rev3` targeting Plugin API `2.0.0`.
+- Infinite scrolling/paging through millions of rows is not introduced. Rev13 deliberately keeps the 50,000-row presentation ceiling while retaining all records for refinement.
+
+### Verification
+
+- Expanded the verification executable from 30 to 33 top-level checks.
+- Added a generation safety check proving an abandoned replacement writer cannot replace a prior committed file and that a later successful generation becomes active.
+- Added a deterministic Mock-target check where First Scan stores more than 50,000 matches, a value outside the visible preview is changed, and Next Scan finds that hidden candidate from the complete disk-backed set.
+- Added a synthetic native-stream check containing `2,000,001` records, one more than the legacy limit, with a 32-row preview. The check verifies the complete count is written, committed, re-read, and retains the expected final address.
+- Extended PS5 capability checks so streaming scan/refinement services are hidden when TurboScan is unavailable and exposed when the server advertises the required capability.
+- Performed repository-level static verification of the rev13 source/resource/package structure in the preparation environment. Native .NET/WPF compilation and execution of the 33-check verification executable cannot be run in that environment because no .NET SDK is installed; the Windows build, automated run, and real >2M PS5 live scan therefore remain required before rev13 is declared a verified runtime baseline.
+
+## TeeKay87's Memory Engine 0.1.3.rev12 - Settings Storage Panel Auto Height Fix
+
+### Fixed
+
+- Fixed the application-level Settings window clipping the lower content of the **Scan Results Storage Location** card when wrapped explanatory text required more vertical space than the fixed window layout supplied.
+- Replaced the Settings window's fixed `Height="390"` sizing with `SizeToContent="Height"`, allowing the window to measure its content vertically instead of constraining the storage card to a predetermined initial height.
+- Changed the main Settings content Grid row from star sizing to `Auto` so the storage card receives its desired height. Wrapped explanatory text, long active storage paths, and visible validation errors can now increase the card/window height instead of being clipped.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev11` to `0.1.3.rev12` with feature title `Settings Storage Panel Auto Height Fix` through the centralized `AppInfo` source.
+- Updated the rev11 verification record with the reported successful Windows build/startup result and the subsequently discovered Settings layout defect.
+- Added `docs/testing/APP_0.1.3_REV12_VERIFICATION.md` with build, automated, Settings-layout, theme, storage-foundation, and regression verification steps.
+- Updated README and current PS5 implementation documentation to identify the current host revision.
+
+### Preserved
+
+- The rev11 `x:ClassModifier="internal"` accessibility correction remains unchanged for both Settings and operation-progress windows.
+- Settings persistence, storage-path validation, next-session activation, application/scan-session identity, storage metadata state, stale cleanup, New Scan invalidation, shutdown cleanup, logging, and the reusable modal progress framework are unchanged.
+- Main workspace XAML, `ProportionalGridSplitter`, shared control metrics/styles, Core scanner source, Plugin SDK, PS5 plugin, and Mock plugin are unchanged.
+- The scanner continues to use the established in-memory/native candidate path.
+- The `2,000,000` scan-result safety limit and `50,000` WPF presentation cap remain unchanged.
+- Plugin API remains `2.1.0`; PS5 plugin remains `0.1.0.rev12`; In-Memory Test Target remains `1.0.0.rev3`.
+- Disk-backed massive-result handling remains deferred until the Scan Result Storage Foundation is fully verified.
+
+### Verification
+
+- Re-read README, CHANGELOG, every Markdown file under `docs/`, and reviewed the complete rev11 solution/source/resource inventory before applying the layout correction.
+- Confirmed the clipping is caused by the fixed Settings window height together with the star-sized card row rather than by the card style, text style, storage-path logic, or theme resources.
+- Confirmed the fix is isolated to Settings layout plus centralized version/documentation updates; no scanner, plugin, Core storage-lifecycle, shared-control, main-workspace, or progress-dialog behavior is changed.
+- Parsed XAML/XML and JSON resources after the change and verified `SettingsWindow` retains `x:ClassModifier="internal"`.
+- Native .NET/WPF build execution still needs to be performed on the Windows development machine because the preparation environment does not provide a .NET SDK.
+
+## TeeKay87's Memory Engine 0.1.3.rev11 - WPF Dialog Accessibility Compile Fix
+
+### Fixed
+
+- Fixed the rev10 App-project `CS0262` compile failures for `OperationProgressDialog` and `SettingsWindow`. Both code-behind classes are intentionally `internal`, but the corresponding XAML roots omitted an explicit class modifier and therefore produced WPF-generated partial declarations with conflicting accessibility. Both XAML roots now declare `x:ClassModifier="internal"` so markup-generated and code-behind partial declarations have the same accessibility.
+- Resolved the related `CS0051` error on `SettingsWindow` without exposing application-internal settings infrastructure publicly. Once the XAML-generated `SettingsWindow` partial is internal as intended, its constructor no longer forms an externally visible API surface containing the internal `ApplicationSettingsStore` parameter.
+- Identified the reported `System.Object` and `ProportionalGridSplitter` XAML-designer errors as downstream App-build/designer failures unless they remain after the accessibility correction. `MainWindow.xaml`, `ProportionalGridSplitter.cs`, and their existing namespace relationship are unchanged.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev10` to `0.1.3.rev11` with feature title `WPF Dialog Accessibility Compile Fix` through the centralized `AppInfo` source.
+- Updated the rev10 verification document with the actual Windows build result and explicitly recorded rev10 as unverified.
+- Added `docs/testing/APP_0.1.3_REV11_VERIFICATION.md` with clean-build expectations, all 30 automated checks, rev9 foundation runtime checks, downstream XAML-designer guidance, and the unchanged massive-result boundary.
+- Updated README and current PS5 implementation documentation to identify the current host revision.
+- The disk-backed massive-result phase remains deferred until the Scan Result Storage Foundation can be built and runtime-verified; no part of that phase is included in this compile-only revision.
+
+### Preserved
+
+- `OperationProgressDialog`, `SettingsWindow`, and `ApplicationSettingsStore` remain host-internal implementation details rather than being made public solely to satisfy the compiler.
+- Rev9 Scan Result Storage Foundation behavior is otherwise unchanged: settings persistence, configurable storage root, application/scan-session identities, metadata lifecycle, stale-session isolation, cleanup semantics, and reusable modal progress behavior are preserved.
+- `MainWindow.xaml` and `ProportionalGridSplitter.cs` are unchanged.
+- The scanner continues to use the established in-memory/native result path.
+- The `2,000,000` scan-result safety limit and `50,000` WPF presentation cap remain unchanged.
+- Plugin API remains `2.1.0`; PS5 plugin remains `0.1.0.rev12`; In-Memory Test Target remains `1.0.0.rev3`.
+- Plugin-owned Value Types, Scan Types, Scan Options, PS5 Endianness, Alignment, Floating-point rounding, Pause target, TurboScan protocol/session behavior, raw memory access, Safe Write Test, tooltip wrapping, and Scan-panel overflow behavior are unchanged.
+
+### Verification
+
+- Re-read README, CHANGELOG, all Markdown documentation under `docs/`, and reviewed the complete rev10 solution/source/resource inventory before applying the correction.
+- Confirmed both reported `CS0262` errors map directly to the two new internal code-behind window classes whose XAML roots lacked an explicit `x:ClassModifier`.
+- Confirmed the reported `CS0051` is a consequence of the same effective public XAML partial declaration rather than a requirement to publish `ApplicationSettingsStore`.
+- Parsed all XAML/XML and JSON resources after the change and verified both affected windows explicitly declare `x:ClassModifier="internal"`.
+- Confirmed `MainWindow.xaml`, `ProportionalGridSplitter.cs`, Plugin SDK, PS5 plugin, Mock plugin, scanner limits, and massive-result behavior are unchanged from rev10.
+- Native .NET/WPF build execution remains to be performed on the Windows development machine because the preparation environment does not provide a .NET SDK.
+
+## TeeKay87's Memory Engine 0.1.3.rev10 - Scan Result Storage Compile Fix
+
+### Fixed
+
+- Fixed the rev9 Core compile failure in `ScanResultStorageSession.Cancel()`. `TransitionToTerminalState` requires a parameterless `Action`, but the cancellation path supplied `ScanResultStorageManager.LogCommitCancelled` directly even though that method requires a scan-session `Guid`. The callback now captures the active `ScanSessionId` through a parameterless lambda and invokes `LogCommitCancelled(ScanSessionId)`, matching the established callback pattern already used by the failure path.
+- Resolved the root cause of the downstream build errors reported by Visual Studio: missing Core metadata references in the App/Tests projects and XAML designer failures for `System.Object`/`ProportionalGridSplitter`. No XAML, project reference, or `ProportionalGridSplitter` implementation change was required; those errors were consequences of Core not producing its assembly.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev9` to `0.1.3.rev10` with feature title `Scan Result Storage Compile Fix` through the existing centralized `AppInfo` source.
+- Recorded the actual failed Windows build result in the rev9 verification document so rev9 cannot be mistaken for a verified baseline.
+- Added `docs/testing/APP_0.1.3_REV10_VERIFICATION.md` with the required clean-build, 30-check automated verification, rev9 manual foundation verification, regression checks, and explicit massive-result scope boundary.
+- Updated current-host version references in README and PS5 implementation documentation.
+- The previously planned disk-backed massive-result work moves to the revision after this compile correction; no part of that feature is implemented here.
+
+### Preserved
+
+- Rev9 Scan Result Storage Foundation behavior is otherwise unchanged: settings persistence, configurable storage root, application/scan session identities, metadata lifecycle, cleanup rules, stale-session isolation, and reusable modal progress infrastructure remain as implemented.
+- The scanner still keeps candidate address/value data in the established in-memory/native paths.
+- The `2,000,000` scan-result safety limit remains unchanged.
+- The `50,000` WPF result presentation cap remains unchanged.
+- Plugin API remains `2.1.0`.
+- PlayStation 5 plugin remains `0.1.0.rev12` with no source or protocol changes.
+- In-Memory Test Target remains `1.0.0.rev3`.
+- Plugin-owned Value Types, Scan Types, Scan Options, PS5 Endianness, Alignment, Floating-point rounding, Pause target behavior, TurboScan semantics, cancellation framing, raw memory access, Safe Write Test, rev8 tooltip wrapping, and Scan-panel overflow behavior are unchanged.
+
+### Verification
+
+- Re-read the supplied rev9 README, CHANGELOG, all Markdown documentation under `docs/`, and reviewed the complete solution/source/resource inventory before applying the compile correction.
+- Confirmed the reported `CS1503` is caused by a single callback-signature mismatch at the rev9 cancellation transition and that the failure-path call already demonstrates the intended parameterless-lambda pattern.
+- Confirmed the reported `CS0006` and XAML designer errors are downstream of the failed Core build and require no unrelated UI/project changes.
+- Confirmed no PS5 plugin source, Plugin SDK contract, scanner limits, or massive-result behavior is changed by this revision.
+- Native .NET/WPF build execution remains to be performed on the Windows development machine because the preparation environment does not provide a .NET SDK.
+
+## TeeKay87's Memory Engine 0.1.3.rev9 - Scan Result Storage Foundation
+
+### Added
+
+- Added an application-level **Settings** window to the main application bar. Settings are host-owned and remain available independently of the selected platform plugin.
+- Added a persisted **Scan Results Storage Location** setting. The default is `%LocalAppData%\TeeKay87\MemoryEngine\ScanResults`, the current path can be changed with a native folder picker or restored to the default, and candidate paths are validated with a real create/write/flush/delete probe before they are accepted.
+- Extended the existing `%LocalAppData%\TeeKay87\MemoryEngine\settings.json` persistence path instead of introducing a parallel settings system. Theme persistence now delegates to the shared application settings store, so saving a theme preserves the scan-storage location and saving the scan-storage location preserves the selected theme.
+- Added centralized `ApplicationPaths` definitions for application-local settings, themes, plugins, scan-result storage, and logs.
+- Added a Core-owned scan-result storage abstraction and implementation with a unique GUID application-session identity created for every launch and a unique GUID scan-session identity created for every First Scan.
+- Added managed storage-root ownership metadata plus versioned application `session.json` and scan `scan.json` metadata. Scan metadata records the application/scan identities, plugin id, target process id, plugin-defined Value Type/Scan Type ids, record-format version, lifecycle state, timestamps, and committed result count.
+- Added explicit scan-result metadata states: `Creating`, `Writing`, `Committed`, `Failed`, `Cancelled`, and host invalidation state `Invalidated`. Only `Committed` represents a successfully committed storage session; no partial or terminal non-committed state is eligible for future storage-backed use.
+- Added atomic metadata replacement using same-directory temporary files, explicit stream flush-to-disk, and final atomic move/replace so a partially written metadata file is not published as the active state.
+- Added conservative startup stale-session cleanup. The host only considers GUID-named child directories whose `session.json` contains the expected Memory Engine ownership signature, supported format version, and matching application-session id. Unrelated directories are ignored.
+- Added New Scan/session replacement invalidation and cleanup hooks. A previous scan session becomes ineligible before best-effort physical deletion, and a later First Scan always receives a new scan-session GUID.
+- Added normal-shutdown cleanup for the current application-session directory and best-effort stale cleanup logging. Cleanup failure does not block shutdown or permit a stale session to be reused.
+- Added application lifecycle logging to `%LocalAppData%\TeeKay87\MemoryEngine\Logs\MemoryEngine.log` for storage-root initialization, application/scan session creation, commit, cancellation/failure, invalidation, stale detection/deletion, and cleanup failure. Individual scan results are never logged.
+- Added a reusable platform-neutral `OperationProgress` contract with optional status, optional detail text, and a nullable 0-1 fraction. A null fraction explicitly represents indeterminate progress.
+- Added a reusable theme-aware WPF modal operation-progress dialog/service. It supports determinate and indeterminate progress, live status/detail updates, optional cancellation, owner-window modality, controlled close behavior, and propagation of operation results, cancellation, and exceptions to the caller.
+- Added five deterministic verification checks covering storage-path validation, application-session isolation, conservative stale-session cleanup, scan-session lifecycle/commit semantics, and the generic operation-progress model. The verification executable now contains 30 top-level checks.
+- Added detailed storage architecture, progress-dialog, and rev9 verification documentation under `docs/`.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev8` to `0.1.3.rev9` with feature title `Scan Result Storage Foundation` through the existing centralized `AppInfo` source.
+- First Scan now creates host-side scan-session metadata before scan execution and commits only the session metadata/result count after a successful scan. Compatible Next Scan operations retain that same host scan-session identity; New Scan, target replacement, plugin reload, or ViewModel disposal invalidates it.
+- Storage initialization uses the persisted configured root or the documented default. If that configured location cannot be initialized, the application reports/logs the failure and does not silently redirect scan-storage state to a different folder. Because rev9 does not yet depend on disk-backed candidate records, the existing scanner remains usable while the storage setting is corrected.
+- A changed Scan Results Storage Location is persisted but becomes active on the next application launch. The active application-session directory is never migrated between storage roots while it is in use.
+- Updated README and architecture/UI/plugin documentation to describe the new host infrastructure and clearly separate it from the future disk-backed massive-result implementation.
+
+### Safety and Lifecycle Guarantees
+
+- Scan-session correctness does not depend on successful file deletion. Active storage state is bound to explicit current application-session and scan-session GUIDs; old files are never selected because they merely exist or appear recent.
+- Failed, cancelled, invalidated, interrupted, or otherwise uncommitted scan-session metadata is never promoted to `Committed` by cleanup or startup discovery.
+- Startup cleanup is scoped to positively identified Memory Engine scan-storage directories and does not recursively remove arbitrary content from a user-selected parent folder.
+- Recursive managed-directory deletion refuses filesystem reparse-point roots and validates that the directory being removed is an immediate child of the expected managed parent.
+- Storage metadata remains host/Core infrastructure. No PS5-specific storage branch, Windows-path responsibility, cleanup responsibility, or progress-dialog responsibility was added to a platform plugin.
+
+### Preserved
+
+- The current scanner result data path remains in memory. Rev9 does **not** write candidate addresses/values to disk and does not make Next Scan depend on the new metadata files.
+- The `2,000,000` scan-result safety limit remains unchanged.
+- The `50,000` WPF result presentation cap and existing virtualization remain unchanged.
+- Plugin-owned Value Types, Scan Types, and Scan Options remain authoritative. Core records stable plugin-defined ids only as metadata and does not reintroduce concrete scanner catalogs or PS5-specific type checks.
+- Plugin API remains `2.1.0`.
+- PlayStation 5 plugin remains `0.1.0.rev12`; Pause target while scanning, Endianness, Alignment, Floating-point rounding, TurboScan behavior, cancellation framing, process control, memory reads/writes, and Safe Write Test behavior are unchanged.
+- In-Memory Test Target remains `1.0.0.rev3` targeting Plugin API `2.0.0`.
+- The rev8 Scan-panel overflow behavior and long-tooltip wrapping remain unchanged.
+
+### Deferred to the Massive-Result Revision
+
+- Candidate address/value files such as `addresses.bin`/`values.bin` are not introduced in rev9.
+- First Scan does not yet stream/batch very large result sets to disk.
+- Next Scan does not yet read/refine a disk-backed full result set.
+- The existing 2,000,000-result rejection is not removed in this revision.
+- The reusable modal progress dialog is not yet invoked for scan-result persistence because rev9 performs only small lifecycle-metadata writes. The future large-result writer is expected to use this generic component.
+
+### Verification Scope
+
+- Build the complete solution in Release configuration with zero warnings/errors; warnings remain treated as errors.
+- Run the dependency-free verification executable and require `All 30 checks passed.`.
+- Confirm the Settings window opens from the application bar in Light, Dimmed, and Dark, displays the current configured storage root, supports Browse/Use Default, rejects an unwritable location with a controlled message, and persists a valid custom path without losing the selected theme.
+- Restart after changing the storage location and confirm the new root becomes active only for the new application session.
+- Confirm each launch creates a different application-session GUID and each First Scan creates a different scan-session GUID; compatible Next Scan must retain the same scan-session identity and New Scan must invalidate the previous session.
+- Confirm normal exit removes the active application-session directory when deletion succeeds.
+- Seed a valid managed stale session and confirm startup removes it; seed an unrelated GUID directory without valid Memory Engine ownership metadata and confirm startup leaves it untouched.
+- Simulate a stale/incomplete `Writing` session and confirm a subsequent application session never adopts it as current state even if physical deletion is prevented.
+- Exercise the reusable progress component in determinate/indeterminate modes, with and without cancellation, in all bundled themes. Confirm the owner cannot be interacted with while the dialog is open and failures propagate to the caller after controlled dialog closure.
+- Re-run the existing scanner/UI regression checks, including rev8 tooltip/Scan-panel behavior and the unchanged 2,000,000/50,000 boundaries.
+
+## TeeKay87's Memory Engine 0.1.3.rev8 - Scan Panel Overflow and Tooltip Fix
+
+### Fixed
+
+- Fixed long application-owned ToolTips/hints being clipped at the configured popup `MaxWidth` instead of wrapping to additional lines. The shared ToolTip template now applies `TextWrapping=Wrap` to the `TextBlock`/`AccessText` elements WPF materializes for string tooltip content, so plugin-provided descriptions such as the PS5 Alignment hint remain fully readable without expanding beyond the intended tooltip width.
+- Fixed the right-side Scan panel becoming vertically clipped when plugin-provided Scan Options increase the required control height beyond the available workspace height. The complete Scan-panel content is now hosted in an automatic vertical `ScrollViewer`; horizontal scrolling is disabled.
+- Added an explicit 10-DIP content gap between Scan controls and the vertical scrollbar while preserving the panel's existing 14-DIP outer padding. Controls therefore do not sit directly against the scroll track when the scrollbar is visible.
+- Kept Scan-panel content stretched to the available viewport width inside the new `ScrollViewer`, preventing selectors/buttons from collapsing to their desired text width after the scrolling container was introduced.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev7` to `0.1.3.rev8` with feature title `Scan Panel Overflow and Tooltip Fix`.
+- Updated host UI documentation to define long-tooltip wrapping and Scan-panel overflow behavior as reusable application presentation rules rather than PS5-specific exceptions.
+- Added `docs/testing/APP_0.1.3_REV8_VERIFICATION.md` covering tooltip wrapping, automatic Scan-panel scrolling, scrollbar/control spacing, window resize behavior, bundled themes, and rev7/regression checks.
+
+### Preserved
+
+- Plugin API remains `2.1.0`.
+- PlayStation 5 plugin remains `0.1.0.rev12`; its Endianness, Alignment, Floating-point rounding, and Pause target controls are unchanged functionally.
+- In-Memory Test Target remains `1.0.0.rev3` targeting Plugin API `2.0.0`.
+- The rev6 global disabled-button text rendering fix remains unchanged.
+- Plugin-owned Value Type/Scan Type/Scan Option architecture, PS5 TurboScan protocol behavior, scan-session locking, floating-point semantics, alignment handling, cancellation, process pause/resume, memory read/write, Safe Write Test, result limits, Saved Addresses placeholders, and all other scanner behavior are unchanged.
+- This revision does not introduce Settings, disk-backed massive scan results, result-storage cleanup, or the planned reusable modal progress dialog.
+
+### Verification Scope
+
+- Build the complete solution in Release configuration and require zero compiler errors.
+- Run the existing dependency-free verification executable and require `All 25 checks passed.`.
+- At a window height where all Scan controls fit, confirm the Scan-panel vertical scrollbar is hidden.
+- Reduce the window height until the PS5 Scan Options no longer fit. Confirm an automatic vertical scrollbar appears, every control including New Scan and Cancel Scan remains reachable, no horizontal scrollbar appears, and there is visible spacing between the controls and scroll track.
+- Hover the PS5 Alignment selector and other long hints. Confirm the complete hint wraps over multiple lines instead of being clipped at the right edge.
+- Repeat visual checks in Light, Dimmed, and Dark and confirm rev6 disabled-button label rendering remains correct.
+
+## TeeKay87's Memory Engine 0.1.3.rev7 - PS5 Scan Options
+
+### Added
+
+- Added the optional `IMemoryScanOption` Plugin SDK contract and `MemoryScanOptionChoice` model. A platform plugin can now declare additional scan controls without the WPF host knowing the platform name or hard-coding a PS5-specific control.
+- Added `ITargetPlugin.SupportedScanOptions` with an empty default implementation. Existing Plugin API 2.0 plugins therefore continue to load without implementing the new property, while Plugin API 2.1 plugins can supply concrete scan options.
+- Added immutable `MemoryScanOptions` state and carried the selected option values through shared scanner execution and `NativeValueScanRequest`. Native and shared paths therefore receive the same scan-session option state.
+- Added reusable standard option ids/choice ids for Endianness, Alignment, and Floating-point rounding. These are neutral shared concepts, not a Core-owned list of target capabilities; the active plugin still decides which options and choices it exposes.
+- Added a generic `ScanOptionViewModel` and Scan-panel item template. Any plugin-provided option is rendered as a theme-aware selector using the plugin's own display name, description, choices, default, Value Type applicability, and First Scan lock policy.
+- Extended plugin discovery validation to cover scan-option declarations: option ids must be unique, every option must expose valid unique choices, the default must reference a declared choice, and option applicability must be evaluable against the plugin's declared Value Types. Invalid option metadata is rejected before it reaches the UI.
+- Added three concrete PS5 scan options:
+  - **Endianness** — Little Endian (default) or Big Endian for multi-byte values;
+  - **Alignment** — Default natural alignment or explicit 1, 2, 4, 8, 16, 32, 64, or 128 byte scan steps;
+  - **Floating-point rounding** — Strict (default) or **ps5debug-NG tolerance (1e-6)** for Float/Double.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev6` to `0.1.3.rev7` with feature title `PS5 Scan Options`.
+- Advanced Plugin API from `2.0.0` to `2.1.0`. The change is additive: the current host accepts plugins targeting an older 2.x minor API, and the Mock plugin intentionally remains `1.0.0.rev3` targeting API `2.0.0` to verify this compatibility path.
+- Advanced the PlayStation 5 plugin from `0.1.0.rev11` to `0.1.0.rev12` and updated its target Plugin API to `2.1.0`.
+- Scan value parsing/formatting now uses an effective per-scan `TargetArchitecture` when a plugin supplies the standard Endianness option. The target metadata itself remains the physical architecture; selecting Big Endian changes only the scan representation.
+- Shared Core scanning now honors an explicit standard Alignment choice when supplied. `Default` retains the selected Value Type's plugin-defined natural alignment.
+- Extended standard Exact Value comparison with an opt-in ps5debug-NG-compatible relative floating-point tolerance. Strict remains the default and unchanged behavior for plugins/options that do not request tolerance.
+- PS5 native validation now accepts any positive alignment that fits ps5debug-NG's `uint8 alignment` field instead of incorrectly requiring only the natural Value Type alignment.
+- PS5 native Float/Double behavior is now explicit:
+  - Strict First Scan may still use TurboScan, but host retrieval filters any additional fuzzy native matches back to strict numeric equality;
+  - Strict Next Scan closes the resident TurboScan session and uses shared Core refinement, preserving the existing strict semantics;
+  - `ps5debug-NG tolerance (1e-6)` intentionally accepts the payload's native relative tolerance and allows compatible resident Float/Double Next Scan through TurboScan COUNT/GET;
+  - Big-endian Float/Double uses the shared Core path because ps5debug-NG interprets native floating-point values in little-endian form.
+- Applicable PS5 scan options lock after a successful First Scan and unlock on New Scan. Options that do not apply to the selected Value Type remain visible but disabled; Floating-point rounding is therefore available only for Float/Double, while Endianness is disabled for one-byte and Array-of-Bytes representations where byte order has no effect.
+
+### ps5debug-NG Mapping Verified
+
+- Confirmed from the current ps5debug-NG protocol/source that TurboScan START contains an explicit one-byte `alignment` field and that the server uses `alignment ? alignment : value_length` as its candidate step. Memory Engine sends the selected explicit alignment directly.
+- Confirmed that ps5debug-NG command/multi-byte protocol fields are little-endian and that there is no separate TurboScan wire field for Endianness. Memory Engine therefore implements Endianness as scan-value encoding/decoding semantics rather than inventing a protocol flag.
+- Confirmed from current `scan_compare.c` that native Exact Value Float/Double comparisons use a relative tolerance of `1e-6`. The new floating-point mode names that behavior explicitly instead of presenting it as strict equality.
+
+### Verification
+
+- Expanded the dependency-free verification executable from 22 to 25 top-level checks.
+- Added assertions for Plugin API `2.1.0`, PS5 plugin `0.1.0.rev12`, the PS5 option declaration order/defaults/applicability, and API 2.0 Mock-plugin compatibility with no declared scan options.
+- Added shared scan-option verification for Big Endian encoding, custom one-byte alignment, and Strict versus relative-`1e-6` floating-point matching.
+- Added PS5 protocol verification that a custom alignment reaches TurboScan START and that opt-in tolerant Float refinement remains on the resident native COUNT/GET path.
+- Added `docs/testing/APP_0.1.3_REV7_VERIFICATION.md` covering automated verification, generic UI rendering, session locking, live Endianness/Alignment/Float tests, and regressions.
+
+### Preserved
+
+- Core still does not own concrete Value Type or Scan Type catalogs. Plugins continue to own the concrete scanner definitions and decide what appears in the host selectors.
+- Rev6 global disabled-button text rendering remains unchanged.
+- The current 2,000,000-result safety limit, 50,000-row display cap, result model, cancellation framing, target pause/resume workflow, raw memory read/write, Safe Write Test, preferred `eboot.bin` selection, and Saved Addresses placeholders remain unchanged.
+- Settings/result-storage configuration, disk-backed massive result sets, and the reusable modal progress dialog remain planned later work and are not introduced by this revision.
+
+## TeeKay87's Memory Engine 0.1.3.rev6 - Disabled Button Text Rendering Fix
+
+### Fixed
+
+- Fixed the remaining global disabled-button label rendering defect discovered during live rev5 verification. The rev5 template correctly applied the disabled background and border and also set the button/content-presenter foreground, but WPF can materialize a string `Button.Content` as an internal `AccessText` or `TextBlock`. That generated text element could retain a normal text foreground instead of visually consuming the disabled foreground, leaving disabled labels white in every standard button style.
+- Added local `AccessText` and `TextBlock` styles inside the shared `ButtonBaseStyle` content presenter. Generated button-label text now binds its enabled foreground directly to the containing `Button.Foreground`, preserving Primary/Secondary/Danger semantic colors, and has an explicit ancestor-`IsEnabled=False` trigger that applies `DisabledButtonTextBrush` directly to the rendered text element.
+- Kept the existing rev5 disabled background/border enforcement and content-presenter `TextElement.Foreground` setter as complementary safeguards. The resulting disabled state no longer depends on one WPF foreground inheritance path.
+- The fix remains application-wide. All current application buttons use string content and the shared button template, so command-disabled and explicitly disabled labels now follow the active theme's disabled text brush without Scan-panel-specific styling.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev5` to `0.1.3.rev6` with feature title `Disabled Button Text Rendering Fix`.
+- Updated button/theme documentation and added a rev6 verification checklist focused on the rendered foreground color of disabled labels in all bundled themes.
+
+### Preserved
+
+- Plugin API remains `2.0.0`.
+- PlayStation 5 plugin remains `0.1.0.rev11`.
+- In-Memory Test Target plugin remains `1.0.0.rev3`.
+- Plugin-owned Value Type and Scan Type architecture, scanner behavior, PS5 transport/protocol handling, result limits, cancellation, process control, Raw Memory Read/Write, Safe Write Test, target selection, and all other verified functionality are unchanged.
+- Button command availability and semantic enabled colors are unchanged; this revision only corrects how disabled label text is rendered.
+- Future Settings/result-storage work, disk-backed massive result sets, reusable modal progress UI, and PS5 Scan-panel options for Endianness, Alignment, and Floating-point rounding remain outside this revision.
+
+### Verification Scope
+
+- Build the complete solution in Release configuration and require zero compiler errors.
+- Run the existing verification executable and require `All 22 checks passed.`.
+- In Dimmed, Dark, and Light themes, start with no active target and verify the labels of disabled **First Scan**, **Next Scan**, **New Scan**, and **Cancel Scan** buttons use the theme's disabled text color rather than the normal white/primary text color.
+- Verify the explicitly disabled Saved Addresses **Add Address**, **Edit**, **Remove**, and **Export...** labels use the same disabled text brush.
+- Connect to the Mock target and verify buttons immediately return to their normal semantic foreground when enabled and return to disabled foreground when command state becomes unavailable.
+- Verify the enabled Primary, Secondary, and Danger button text colors remain unchanged.
+
+## TeeKay87's Memory Engine 0.1.3.rev5 - Global Disabled Button State Fix
+
+### Fixed
+
+- Fixed the application-wide WPF button disabled-state presentation. Buttons whose `IsEnabled` becomes `False` through command `CanExecute`, bindings, or a direct property value could keep the normal semantic foreground/background/border supplied by `PrimaryButtonStyle`, `SecondaryButtonStyle`, or `DangerButtonStyle`, even though the shared base style already declared disabled palette setters. This made disabled actions such as **Next Scan**, **New Scan**, **Cancel Scan**, and the Saved Addresses placeholder buttons look substantially more usable than they actually were.
+- Moved the visual enforcement of the disabled button palette into the shared `ButtonBaseStyle` control template. The template now names the content presenter and, while disabled, directly applies `DisabledButtonBackgroundBrush`, `DisabledButtonBorderBrush`, and `DisabledButtonTextBrush` to the rendered border/content. This avoids relying only on inherited style-property precedence when semantic or view-local derived styles also set Foreground, Background, or BorderBrush.
+- Kept the existing disabled cursor behavior, hover/pressed overlay suppression, and focus-outline suppression. The correction therefore changes only the visual reliability of the already-defined disabled state and does not change button commands or availability logic.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev4` to `0.1.3.rev5` with feature title `Global Disabled Button State Fix`.
+- Updated shared button/theme documentation and added a dedicated rev5 verification checklist covering Primary, Secondary, Danger, workflow-aware Scan buttons, command-driven disabled state, explicit `IsEnabled="False"`, and all three bundled themes.
+
+### Preserved
+
+- Plugin API remains `2.0.0`.
+- PlayStation 5 plugin remains `0.1.0.rev11`.
+- In-Memory Test Target plugin remains `1.0.0.rev3`.
+- Rev3/rev4 plugin-owned Value Type and Scan Type architecture is unchanged.
+- PS5 scanning, native refinement, Float/Double fallback, cancellation/session safety, process pause/resume, Raw Memory Read/Write, Safe Write Test, target selection, result limits, and result presentation behavior are unchanged.
+- ComboBox, TextBox, CheckBox, ContextMenu/MenuItem, DataGrid, tooltip, splitter, and workspace behavior are unchanged.
+- Future Settings/result-storage work, massive disk-backed result sets, reusable modal progress UI, and PS5 Scan-panel options for Endianness, Alignment, and Floating-point rounding remain outside this revision.
+
+### Verification Scope
+
+- Build the complete solution in Release configuration and require zero compiler errors.
+- Run the existing verification executable and require `All 22 checks passed.`; no scanner/plugin test count changes are required because rev5 is a WPF presentation-only host correction.
+- In Light, Dimmed, and Dark themes, verify that disabled Primary, Secondary, and Danger buttons visibly use the disabled background, border, and text palette rather than their semantic enabled colors.
+- Verify the initial Scan panel state: **First Scan** remains enabled/primary while **Next Scan**, **New Scan**, and **Cancel Scan** are visibly disabled, including clearly dimmed label text.
+- Verify a successful First Scan/Next Scan workflow still changes command availability and primary emphasis correctly, and that disabled buttons immediately return to the common disabled visual state when `CanExecute` becomes false.
+- Verify the permanently disabled Saved Addresses placeholder buttons use the same disabled visuals, proving the fix applies globally rather than only to the Scan panel.
+
+## TeeKay87's Memory Engine 0.1.3.rev4 - Incremental Upgrade Compile Fix
+
+### Fixed
+
+- Fixed the rev3 source-package upgrade path when the package is extracted over an existing rev2 project directory. Rev3 correctly removed the old Core-owned scan catalogs and enums from its clean package, but normal archive extraction does not delete files that are absent from the newer archive. The obsolete rev2 `Core.Scanning.MemoryScanValue` source could therefore remain on disk and shadow `PluginSdk.Models.MemoryScanValue` inside the Core namespace, producing the CS0029/CS1503/CS1061 errors reported from `MemoryScanner.cs` and `MemoryScanResult.cs`.
+- Added inert upgrade tombstones at all six source paths removed by the rev3 architecture change: `MemoryScanValue.cs`, `MemoryScanValueCodec.cs`, `MemoryValueTypeCatalog.cs`, `MemoryScanTypeCatalog.cs`, `MemoryValueType.cs`, and `MemoryScanType.cs`. Each file intentionally defines no type. Extracting rev4 over a rev2/rev3 working tree therefore overwrites any stale rev2 implementation instead of leaving it eligible for SDK-style wildcard compilation.
+- Prevented stale rev2 `MemoryValueType` and `MemoryScanType` enum source files from silently surviving an incremental extraction and violating the Plugin API 2.0.0 plugin-owned definition model.
+- Extended the existing plugin-owned scan-definition verification to assert that Core does not contain the obsolete rev2 `MemoryScanValue` type and that Plugin SDK does not contain the obsolete rev2 `MemoryValueType` or `MemoryScanType` enum types. The automated suite remains 22 top-level checks because these assertions strengthen the existing contract check rather than create separate test cases.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev3` to `0.1.3.rev4` with feature title `Incremental Upgrade Compile Fix`.
+- Kept Plugin API at `2.0.0`, the PlayStation 5 plugin at `0.1.0.rev11`, and the In-Memory Test Target plugin at `1.0.0.rev3`; no plugin contract or plugin runtime behavior changed in this revision.
+- Updated README and the current verification documentation to describe the safe incremental source-package upgrade behavior and the rev4 acceptance procedure.
+
+### Preserved
+
+- The rev3 plugin-owned Value Type and Scan Type architecture is unchanged: Core owns only generic contracts/orchestration, while each plugin supplies the concrete definitions shown by the UI.
+- Rev2's stronger disabled-state styling is unchanged.
+- PS5 scan behavior, ps5debug-NG wire mappings, TurboScan First/Next behavior, Float/Double Core-refinement fallback, cancellation/session safety, process suspend/resume, target selection, raw memory read/write, Safe Write Test, the 2,000,000-result safety limit, and the 50,000-row presentation cap are unchanged.
+- Future Settings/result-storage work, massive disk-backed result sets, the reusable modal progress dialog, and PS5 Scan-panel options for Endianness, Alignment, and Floating-point rounding remain outside this revision.
+
+### Verification Scope
+
+- Extract rev4 over a copy of the rev2 source tree and verify that all six obsolete source paths are replaced by inert tombstones rather than their previous class/enum/catalog implementations.
+- Build the complete solution in Release configuration and require zero compiler errors. In particular there must be no conversion between `Core.Scanning.MemoryScanValue` and `PluginSdk.Models.MemoryScanValue`, because the Core type must no longer exist.
+- Run the verification executable and require `All 22 checks passed.`.
+- Verify that the application identifies itself as `0.1.3.rev4`, Plugin API as `2.0.0`, the PS5 plugin as `0.1.0.rev11`, and the Mock plugin as `1.0.0.rev3`.
+- Re-run the rev3 selector/disabled-state checks and a representative PS5 Exact Value First/Next Scan to confirm the compile fix did not alter runtime behavior.
+- Native Windows compilation remains the authoritative compile verification because the package-preparation environment does not provide the .NET 9 WPF SDK/toolchain.
+
+## TeeKay87's Memory Engine 0.1.3.rev3 - Plugin-Owned Scan Definitions
+
+### Added
+
+- Added the public `IMemoryValueType` Plugin SDK contract. A Value Type now describes its own stable id, display metadata, fixed or dynamic width, default alignment, text parsing, scan-shape resolution, byte-to-display conversion, and equality semantics. Core can execute a Value Type without knowing what concrete representation it describes.
+- Added the public `IMemoryScanType` Plugin SDK contract. A Scan Type now describes its own stable id, display metadata, First Scan/Next Scan availability, required input count, supported Value Types, and comparison behavior for the shared reader-based scanner.
+- Added `MemoryScanStage` to the Plugin SDK so Scan Type implementations can distinguish First Scan and Next Scan without depending on WPF or Core-specific UI state.
+- Moved the neutral parsed scan-value model into the Plugin SDK. `MemoryScanValue` now carries the plugin-provided Value Type id/display name, encoded bytes, display text, width, and alignment across the plugin/Core boundary.
+- Added `NativeValueScanResult` so native scanners return both an address and the current bytes found at that address. Core converts those bytes through the active plugin-provided `IMemoryValueType` instead of assuming a Core-owned codec.
+- Added optional reusable standard implementations in `TeeKay87.MemoryEngine.PluginSdk.Scanning`. `StandardMemoryValueTypes` provides the eleven already implemented integer/floating-point/Array-of-Bytes definitions and `StandardMemoryScanTypes.ExactValue` provides the existing exact-comparison behavior. These are reusable SDK building blocks, not a host-owned registry: a plugin may use them, omit them, wrap them, or provide entirely custom definitions with its own ids and behavior.
+- Added explicit plugin-owned scan-definition containers for the PS5 and Mock plugins. Each plugin now selects the concrete Value Type and Scan Type objects that it exposes to the host and supplies its own default ids.
+- Added deterministic verification that Core contains no concrete Value Type catalog, Scan Type catalog, or value codec, and that the shared scanner accepts a completely custom test-only Value Type and Scan Type that are unknown to Core.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev2` to `0.1.3.rev3` with feature title `Plugin-Owned Scan Definitions`.
+- Advanced Plugin API from `1.3.0` to `2.0.0`. This is intentionally a major contract change because the rev2 enum/catalog capability model is replaced rather than extended.
+- Updated the PlayStation 5 plugin from `0.1.0.rev10` to `0.1.0.rev11` and its target Plugin API to `2.0.0`.
+- Updated the In-Memory Test Target plugin from `1.0.0.rev2` to `1.0.0.rev3` and its target Plugin API to `2.0.0`.
+- Changed `ITargetPlugin.SupportedValueTypes` from a list of shared enum identifiers to a list of concrete `IMemoryValueType` definitions supplied by the plugin.
+- Changed `ITargetPlugin.SupportedScanTypes` from a list of shared enum identifiers to a list of concrete `IMemoryScanType` definitions supplied by the plugin.
+- Added `DefaultValueTypeId` and `DefaultScanTypeId` to the plugin contract so a plugin controls its initial Scan-panel selections without a host-side platform/type assumption.
+- Reworked `MemoryScanner` so shared First Scan and Next Scan orchestration remains in Core, while parsing, value width/alignment, formatting, equality, stage validity, input requirements, and comparison semantics are delegated to the selected plugin-owned definitions.
+- Reworked native scan requests to use stable string Value Type and Scan Type ids plus explicit width, alignment, and encoded input values rather than Core-owned enums. This keeps native transport implementations extensible without adding new concrete type identifiers to Core.
+- Reworked native result normalization so Core receives current bytes from the native plugin and asks the active Value Type definition to create the neutral displayed value.
+- Reworked the Scan panel bindings so Value Type and Scan Type entries are created directly from the active plugin's definition objects. The host no longer looks up plugin declarations in a Core catalog.
+- Reworked Scan Type filtering so the active plugin definition itself declares whether it is available for First Scan/Next Scan and whether it supports the selected Value Type.
+- Kept Value Type selection available whenever the active plugin exposes scanner definitions, even if the currently selected Value Type has no compatible Scan Type. This prevents a plugin-defined unsupported combination from trapping the UI in an unchangeable selection while preserving normal Scan Type filtering.
+- Reworked plugin-host validation to validate plugin definitions structurally: non-null collections/entries, stable non-empty ids/display names, unique ids, valid width/alignment metadata, usable scan-stage declarations, valid input counts, and default ids that belong to the plugin's own declaration set.
+- The PS5 native TurboScan implementation now maps the stable ids of the standard definitions it deliberately exposes to ps5debug-NG wire ids internally. Exact Value validation and Float/Double native-refinement fallback are likewise owned by the PS5 plugin rather than Core.
+
+### Removed
+
+- Removed the rev2 Core `MemoryValueTypeCatalog`. Core no longer contains or maintains a master list of concrete Value Types.
+- Removed the rev2 Core `MemoryScanTypeCatalog`. Core no longer contains or maintains a master list of concrete Scan Types.
+- Removed the shared `MemoryValueType` and `MemoryScanType` enum registries introduced by rev2.
+- Removed `MemoryScanValueCodec` from Core. Parsing, encoding/decoding, display formatting, scan width/alignment, and value equality now belong to the selected `IMemoryValueType` implementation.
+- Removed plugin discovery's dependency on recognizing declarations through a host-owned catalog. A plugin may now expose a new custom Value Type or Scan Type without requiring a Core update first.
+
+### Preserved
+
+- The rev2 global disabled-state styling remains unchanged. Disabled buttons, ComboBoxes, CheckBoxes, context-menu items, and related controls continue to use the stronger theme-aware visual treatment introduced there.
+- The PS5 Scan panel continues to expose exactly the same eleven currently implemented Value Types: UInt8, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float, Double, and Array of Bytes. Its only Scan Type remains Exact Value.
+- Existing PS5 TurboScan wire ids, multi-segment First Scan, server-resident compatible refinement, strict Float/Double Core fallback, cancellation/session preservation, process pause/resume, preferred `eboot.bin` selection, raw memory read/write, Safe Write Test, scan keyboard workflow, result presentation, 2,000,000-result safety limit, and 50,000-row presentation cap are not intentionally changed.
+- Raw Memory Write remains a signed Int32 diagnostic and Scan Results -> Change value remains enabled only for the existing standard signed Int32 result type.
+- Massive-result disk storage, configurable result-storage paths, stale-session cleanup, the reusable modal progress dialog, and additional PS5 scan options remain separate future work.
+
+### Verification Scope
+
+- Verify that the application identifies itself as `0.1.3.rev3`, Plugin API as `2.0.0`, the PS5 plugin as `0.1.0.rev11`, and the Mock plugin as `1.0.0.rev3`.
+- Run the deterministic verification executable and require all 22 checks to pass.
+- Confirm that Core contains no concrete Value Type/Scan Type catalog or codec and that the custom `test.byte` / `test.equals` definitions execute through the shared scanner without being registered in Core.
+- With the PS5 plugin active, confirm that the Value Type list still contains exactly its eleven plugin-supplied entries and Scan Type still contains only Exact Value.
+- Confirm that Value Type remains locked after First Scan, New Scan restores selection, and Scan Type applicability is taken from the active plugin definition rather than a host catalog.
+- Re-run representative PS5 Exact Value First/Next Scan coverage and the existing cancellation/process-control/raw-memory regressions.
+- Re-check rev2 disabled-state presentation in Light, Dimmed, and Dark because rev3 intentionally preserves that unverified rev2 UI change while replacing its catalog architecture.
+- Native Windows compilation and the 22-check executable must be run on the Windows development machine if the preparation environment does not provide the .NET 9 SDK/WPF toolchain.
+
+## TeeKay87's Memory Engine 0.1.3.rev2 - Capability-Driven Scan Catalogs and Disabled States
+
+### Added
+
+- Added a shared Core Value Type catalog that defines the platform-neutral scanner vocabulary independently of any one platform plugin. The catalog now covers the value-type families identified through a survey of Cheat Engine, PINCE, scanmem/GameConqueror, Squalr, ArtMoney, GameGuardian, MemoryEngine360, DijoScan, Bit Slicer, PyMemoryEditor, ReClass.NET, and related memory-editing tooling.
+- Expanded the shared `MemoryValueType` identifiers beyond the previously reserved primitive/string set. The catalog now includes signed/unsigned 24-bit integers, IEEE half precision, legacy six-byte Real48, 80-bit extended floating point, Boolean, Binary, BitField, target-sized Pointer values, UTF-32, XOR-encoded values, aggregate integer/float/number/all modes, Grouped values, typed arrays, structures, and a deliberately extensible Custom representation. Existing enum numeric values `0..13` remain unchanged so the SDK update does not renumber previously published identifiers.
+- Added a shared Core Scan Type catalog. It defines direct comparisons, unknown/snapshot comparisons, change-based refinements, percentage/difference variants, and specialized search methods including sequence, hex-sequence, encoded-value, formula, structure, address-mask, fuzzy, and regular-expression searches. Catalog definitions also record whether a mode is meaningful for First Scan, Next Scan, or both and how many primary input values it requires.
+- Added `MemoryScanType` to the Plugin SDK so Scan Type capability declarations are no longer represented by application-specific UI assumptions.
+- Added `ITargetPlugin.SupportedValueTypes` and `ITargetPlugin.SupportedScanTypes`. Default empty implementations preserve load compatibility for older same-major Plugin API binaries; older plugins simply expose no scanner choices until they adopt the new capability contract.
+- Added plugin-host validation for declared scan capabilities. Unknown catalog entries, duplicate Value Type declarations, duplicate Scan Type declarations, and null collections are rejected during discovery instead of reaching the UI as an invalid plugin state.
+- Added a dedicated research record at `docs/research/MEMORY_EDITOR_SCAN_TYPE_SURVEY.md` documenting the external memory-editor survey, normalization decisions, deliberate exclusions, and the distinction between catalog vocabulary and actually implemented plugin capabilities.
+- Added deterministic verification for Core catalog completeness and built-in plugin scan declarations. The verification executable now contains 22 checks.
+
+### Changed
+
+- Advanced the host application from `0.1.3.rev1` to `0.1.3.rev2`.
+- Advanced Plugin API from `1.2.0` to `1.3.0` for the new scanner capability declarations.
+- Updated the PlayStation 5 plugin from `0.1.0.rev9` to `0.1.0.rev10` and its target Plugin API to `1.3.0`.
+- Updated the In-Memory Test Target plugin from `1.0.0.rev1` to `1.0.0.rev2` and its target Plugin API to `1.3.0`.
+- The PlayStation 5 plugin now explicitly declares only the eleven Value Types it actually implements through ps5debug-NG (`UInt8`, `Int8`, `UInt16`, `Int16`, `UInt32`, `Int32`, `UInt64`, `Int64`, `Float32`, `Float64`, and `ByteArray`) and `ExactValue` as its only supported Scan Type. The Mock plugin declares the same currently implemented shared scanner set for deterministic regression coverage.
+- The Scan panel no longer builds Value Type choices from a Core implementation list and no longer hard-codes an `Exact Value` ComboBox item in XAML. Both selectors are populated from the active plugin's declarations and use the shared Core catalogs only for common naming/metadata.
+- Scan Type is now a real bound selection. Core catalog metadata marks each Scan Type as valid for First Scan, Next Scan, or both, and the UI filters the active plugin's declaration to the current scan stage. A plugin exposing one applicable Scan Type produces a single-item disabled selector; a future plugin exposing multiple applicable types can make the selector available without a platform-specific application change. Value Type remains locked after First Scan, while Scan Type can change between supported Next Scan predicates as required by Cheat Engine-style refinement workflows.
+- `MemoryScanValueCodec` continues to own only the Exact Value representations that the shared scanner can currently parse/compare. Display names are delegated to the Core Value Type catalog so the complete catalog and the currently implemented codec are no longer conflated.
+- Strengthened disabled-state presentation across bundled themes. Disabled text is deliberately dimmer and disabled button/input surfaces use lower-contrast backgrounds and borders so `IsEnabled="False"` is visibly different from an enabled control.
+- Updated ComboBox styling so the drop-down arrow follows the control foreground and therefore dims together with disabled text. Disabled CheckBox content receives reduced opacity, and disabled context-menu items such as Scan Results -> **Change value** now dim the whole item and cannot retain a hover-like highlighted surface.
+
+### Fixed
+
+- Removed the architectural assumption that every platform must expose the PS5 scanner's Value Type set.
+- Removed the architectural assumption that the application itself owns the Scan Type list.
+- Fixed disabled context-menu items being visually almost indistinguishable from enabled items under some themes even though WPF correctly blocked interaction.
+- Fixed disabled ComboBox arrows remaining visually active while the rest of the control was disabled.
+
+### Preserved
+
+- No new Scan Type comparison algorithm is enabled by this revision. `ExactValue` remains the only Scan Type advertised by the current PS5 and Mock plugins, so all previously verified scan semantics remain unchanged.
+- The PS5 plugin still exposes exactly the eleven ps5debug-NG Value Types verified in `0.1.3.rev1`; adding the complete Core master catalog does not cause unsupported types to appear in the PS5 UI.
+- Native PS5 TurboScan First Scan, compatible resident Next Scan, Float/Double Core fallback, cancellation/session preservation, process pause/resume, preferred `eboot.bin` selection, raw memory read/write, Safe Write Test, keyboard scan workflow, result presentation, and current result safety/display limits are unchanged.
+- Massive-result disk storage, configurable scan-result storage paths, stale-session cleanup, and the reusable modal progress dialog remain separate future work. This revision establishes capability/catalog architecture only and does not change scan-result persistence.
+
+### Verification Scope
+
+- Verify that the application identifies itself as `0.1.3.rev2`, the PS5 plugin as `0.1.0.rev10`, the Mock plugin as `1.0.0.rev2`, and Plugin API as `1.3.0`.
+- Run the deterministic verification executable and require all 22 checks to pass.
+- With the PS5 plugin active, confirm that Value Type contains exactly its eleven implemented ps5debug-NG types and Scan Type contains only `Exact Value`; unsupported Core catalog entries must not appear.
+- Confirm that Value Type locks after First Scan, New Scan restores the First Scan selection state, and Scan Type is filtered by its Core First/Next-stage metadata while remaining selectable whenever the active plugin exposes more than one applicable mode.
+- Verify disabled-state contrast in Light, Dimmed, and Dark themes, including ordinary buttons, disabled ComboBoxes, the pause-scan CheckBox when unavailable, and the disabled Scan Results -> **Change value** context-menu item for non-Int32 results.
+- Re-run representative Exact Value First/Next Scan and existing regression checks to confirm that the capability-driven lists did not change the verified PS5 scanner behavior.
+- Native Windows compilation and the 22-check executable must be run on the Windows development machine because the source-preparation environment does not contain the .NET SDK/WPF toolchain.
+
 ## TeeKay87's Memory Engine 0.1.3.rev1 - PS5 Value Type Expansion
 
 ### Added

@@ -7,7 +7,7 @@ namespace TeeKay87.MemoryEngine.PluginSdk.Contracts;
 
 public interface INativeValueScanRefiner
 {
-    Task<IReadOnlyList<ulong>> RefineAsync(
+    Task<IReadOnlyList<NativeValueScanResult>> RefineAsync(
         TargetProcess process,
         IReadOnlyList<ulong> previousAddresses,
         NativeValueScanRequest request,
