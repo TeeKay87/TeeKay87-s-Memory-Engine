@@ -9,6 +9,7 @@ internal static class Ps5DebugProtocol
     public const uint CommandPlatformId = 0xBD000502;
     public const uint CommandProcessList = 0xBDAA0001;
     public const uint CommandProcessRead = 0xBDAA0002;
+    public const uint CommandProcessReadStack = 0xBDAA0023;
     public const uint CommandProcessWrite = 0xBDAA0003;
     public const uint CommandProcessMaps = 0xBDAA0004;
     public const uint CommandProcessAuth = 0xBDAACCFF;
@@ -20,12 +21,19 @@ internal static class Ps5DebugProtocol
     public const uint CommandProcessNop = 0xBDAACC06;
     public const uint CommandDebugAttach = 0xBDBB0001;
     public const uint CommandDebugDetach = 0xBDBB0002;
+    public const uint CommandDebugSetBreakpoint = 0xBDBB0003;
+    public const uint CommandDebugSetWatchpoint = 0xBDBB0004;
     public const uint CommandDebugGetThreadList = 0xBDBB0005;
     public const uint CommandDebugSuspendThread = 0xBDBB0006;
     public const uint CommandDebugResumeThread = 0xBDBB0007;
     public const uint CommandDebugGetRegisters = 0xBDBB0008;
+    public const uint CommandDebugGetFloatingPointRegisters = 0xBDBB000A;
+    public const uint CommandDebugGetDebugRegisters = 0xBDBB000C;
+    public const uint CommandDebugGetFsGsBase = 0xBDBB000E;
     public const uint CommandDebugContinue = 0xBDBB0010;
     public const uint CommandDebugThreadInfo = 0xBDBB0011;
+    public const uint CommandDebugStep = 0xBDBB0012;
+    public const uint CommandDebugStepThread = 0xBDBB0013;
     public const uint CommandDebugProcessStop = 0xBDBB0500;
     public const uint WireStatusSuccess = 0x80000000;
     public const uint WireStatusError = 0xF0000001;
@@ -35,6 +43,10 @@ internal static class Ps5DebugProtocol
     public const int HeaderSize = 12;
     public const int DebuggerInterruptPort = 755;
     public const uint MaximumDebuggerThreadCount = 65_536;
+    public const int MaximumSoftwareBreakpointCount = 30;
+    public const int MaximumHardwareWatchpointCount = 4;
+    public const int DebuggerBreakpointRequestSize = 16;
+    public const int DebuggerWatchpointRequestSize = 24;
     public const int DebuggerThreadInfoResponseSize = 40;
     public const int DebuggerThreadInfoNameOffset = 8;
     public const int DebuggerThreadInfoNameLength = 32;
@@ -45,9 +57,28 @@ internal static class Ps5DebugProtocol
     public const int DebuggerInterruptThreadNameLength = 40;
     public const int DebuggerInterruptRegisterOffset = 0x030;
     public const int DebuggerGeneralRegisterSize = 0xB0;
+    public const int DebuggerInterruptFloatingPointRegisterOffset =
+        DebuggerInterruptRegisterOffset + DebuggerGeneralRegisterSize;
+    public const int DebuggerInterruptDebugRegisterOffset = 0x420;
+    public const int DebuggerRegisterFramePointerOffset = 0x50;
+    public const int DebuggerRegisterStackPointerOffset = 0xA0;
+    public const int DebuggerStackRequestSize = 24;
+    public const int DebuggerStackFrameHeaderSize = 44;
+    public const int DebuggerStackMaximumDepth = 64;
+    public const int DebuggerStackMaximumLocalsLength = 0x1000;
+    public const int DebuggerStackMaximumCodeLength = 200;
+    public const int DebuggerStackMaximumPayloadSize =
+        sizeof(uint) + DebuggerStackMaximumDepth *
+        (DebuggerStackFrameHeaderSize + DebuggerStackMaximumLocalsLength + DebuggerStackMaximumCodeLength);
+    public const int DebuggerFloatingPointRegisterSize = 0x340;
+    public const int DebuggerDebugRegisterSize = 0x80;
+    public const int DebuggerFsGsBaseSize = 0x10;
     public const int DebuggerRegisterInstructionPointerOffset = 0x88;
+    public const int DebuggerDebugRegisterStatusOffset = 0x30;
     public const int DebuggerInterruptInstructionPointerOffset =
         DebuggerInterruptRegisterOffset + DebuggerRegisterInstructionPointerOffset;
+    public const int DebuggerInterruptDebugRegisterStatusOffset =
+        DebuggerInterruptDebugRegisterOffset + DebuggerDebugRegisterStatusOffset;
     public const int ProcessListNameLength = 32;
     public const int ProcessListEntrySize = 36;
     public const int ProcessMapNameLength = 32;

@@ -24,10 +24,13 @@ internal sealed class Ps5TargetSession :
 {
     private static readonly IDisassemblerProvider DisassemblerProvider = new Ps5X64DisassemblerProvider();
 
+    private readonly object _memoryRegionCacheGate = new();
     private readonly Ps5DebugClient _client;
     private readonly Ps5ConcurrentMemoryWriter _concurrentMemoryWriter;
     private readonly Ps5DebuggerProvider _debuggerProvider;
     private IReadOnlyList<TargetProcess> _lastProcesses = Array.Empty<TargetProcess>();
+    private TargetProcess? _memoryRegionCacheProcess;
+    private IReadOnlyList<MemoryRegion>? _memoryRegionCache;
     private bool _disposed;
 
     public Ps5TargetSession(PluginMetadata plugin, Ps5DebugClient client, string host, int port)
@@ -35,7 +38,7 @@ internal sealed class Ps5TargetSession :
         Plugin = plugin ?? throw new ArgumentNullException(nameof(plugin));
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _concurrentMemoryWriter = new Ps5ConcurrentMemoryWriter(host, port);
-        _debuggerProvider = new Ps5DebuggerProvider(host, port);
+        _debuggerProvider = new Ps5DebuggerProvider(host, port, client.ConnectionInfo, GetCachedMemoryRegions);
     }
 
     public PluginMetadata Plugin { get; }
@@ -126,13 +129,21 @@ internal sealed class Ps5TargetSession :
             .GetMemoryRegionsAsync(checked((int)process.Id), cancellationToken)
             .ConfigureAwait(false);
 
-        return regions
+        IReadOnlyList<MemoryRegion> mappedRegions = regions
             .Select(region => new MemoryRegion(
                 region.Start,
                 checked(region.End - region.Start),
                 ConvertProtection(region.Protection),
                 region.Name))
             .ToArray();
+
+        lock (_memoryRegionCacheGate)
+        {
+            _memoryRegionCacheProcess = process;
+            _memoryRegionCache = mappedRegions;
+        }
+
+        return mappedRegions;
     }
 
 
@@ -345,6 +356,24 @@ internal sealed class Ps5TargetSession :
         await _debuggerProvider.DisposeAsync().ConfigureAwait(false);
         await _concurrentMemoryWriter.DisposeAsync().ConfigureAwait(false);
         await _client.DisposeAsync().ConfigureAwait(false);
+    }
+
+
+    private IReadOnlyList<MemoryRegion>? GetCachedMemoryRegions(TargetProcess process)
+    {
+        ArgumentNullException.ThrowIfNull(process);
+
+        lock (_memoryRegionCacheGate)
+        {
+            if (_memoryRegionCacheProcess is null ||
+                _memoryRegionCacheProcess.Id != process.Id ||
+                !string.Equals(_memoryRegionCacheProcess.Name, process.Name, StringComparison.Ordinal))
+            {
+                return null;
+            }
+
+            return _memoryRegionCache;
+        }
     }
 
     private static MemoryProtection ConvertProtection(ushort protection)

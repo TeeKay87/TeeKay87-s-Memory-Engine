@@ -11,15 +11,15 @@ This directory contains documentation that belongs specifically to the PS5 plugi
 | Property | Value |
 | --- | --- |
 | Plugin id | `platform.ps5.ps5debug-ng` |
-| Plugin version | `0.1.0.rev27` |
-| Plugin API | `2.13.0` |
+| Plugin version | `0.1.0.rev36` |
+| Plugin API | `2.15.0` |
 | Platform | PlayStation 5 |
 | Backend | ps5debug-NG |
 | Architecture | x64, 64-bit pointers, little-endian |
 
 The plugin version/revision is independent from the TeeKay87's Memory Engine host version and from the ps5debug-NG server version.
 
-Host application `0.1.7.rev7` uses public Plugin API `2.13.0` and advances the PS5 plugin to `0.1.0.rev27`. The rev3 debugger transport carried through the intervening UI revisions was fully hardware-verified in rev5, including Attach/Detach/Pause/Continue, TCP 755 callback ownership, transport isolation, cleanup, reconnection-generation safety, and multiple-window exclusivity. Rev6 preserves those verified paths and adds the first real PS5 consumers of `IDebuggerThreadService` and `IDebuggerThreadControlService` through the existing dedicated debugger command connection.
+Host application `0.1.7.rev28` uses public Plugin API `2.15.0` and PS5 plugin `0.1.0.rev36`. Rev28 makes no PS5 plugin change; it corrects only a stale host source-verification assertion after rev27 completed 134/135 Windows checks. Rev16 is the verified Hardware Watchpoints baseline after **118/118 PASS** plus complete focused Mock/live-PS5 acceptance. Rev34 added `CallStack` plus `StepExecution`; rev24 later completed the redesigned host workspace and full Mock Call Stack/stepping runtime cycle. Rev25/rev35 then corrected current ps5debug-NG's software-breakpoint event/live-register timing mismatch and passed the live logical-stop/Step-Into gate. Rev26 was host-only: it preserved the original neutral instruction before Software/Execute breakpoint installation so host-composed Step Over could still recognize a breakpointed `call` after ps5debug-NG had rearmed `INT3`. Rev27 keeps that behavior and advances the PS5 plugin to rev36 for defensive software-breakpoint restoration before detach/disposal. Step Over, Step Out, and Run to Address remain host-composed from neutral frames, Disassembler information, and temporary software execute breakpoints.
 
 ## Current Capability Scope
 
@@ -38,23 +38,122 @@ The PS5 plugin currently advertises:
 - `Debugger`;
 - `ThreadEnumeration`;
 - `ThreadControl`;
-- `RegisterAccess`.
+- `RegisterAccess`;
+- `Breakpoints`;
+- `Watchpoints`;
+- `CallStack`;
+- `StepExecution`.
 
 These capability flags describe functionality actually exposed by this plugin revision. ps5debug-NG supports additional commands, but Memory Engine must not advertise those capabilities until the corresponding neutral service/UI path exists and has been verified.
 
-Disassembly remains advertised because the connected session exposes the verified neutral `IDisassemblerProvider`. Rev27 retains the verified debugger/thread services and adds `RegisterAccess`: while the target is Paused, the selected thread can expose a read-only general-register snapshot through the dedicated debugger command transport. Breakpoints/watchpoints, call stacks, stepping, assembly/instruction editing, pointer scanning, and cheat operations remain unadvertised. Register writing is intentionally not exposed in rev7 because the upstream SETREGS path has not yet been hardware-verified.
+Disassembly remains advertised because the connected session exposes the verified neutral `IDisassemblerProvider`. Rev29 retains the verified debugger/thread services and `RegisterAccess`: while the target is Paused, the selected thread exposes the mandatory read-only general-register snapshot and, when negotiated and healthy, optional floating-point/SIMD plus FS/GS-base groups through guarded debugger command probes. Rev30 advertises `Breakpoints` because the attached debugger session exposes the neutral breakpoint lifecycle/state services. Rev33 additionally advertises `Watchpoints` and reuses that same neutral service for hardware data conditions. Rev34 introduced `CallStack` and `StepExecution`; rev35 retains those capabilities and corrects the platform-private software-breakpoint stop semantics without changing public capability flags. Assembly/instruction editing, pointer scanning, and cheat operations remain unadvertised. Register writing remains intentionally disabled because the upstream SET-register paths have not been hardware-verified for use by Memory Engine.
 
-## Debugger General Registers
 
-PS5 plugin `0.1.0.rev27` implements `IDebuggerRegisterService` for paused-thread general-register snapshots. The plugin sends ps5debug-NG `CMD_DEBUG_GET_REGISTERS` (`0xBDBB0008`) with the selected 32-bit backend thread id and reads the 176-byte amd64 register block after a successful status. The FreeBSD `struct reg` offsets are decoded entirely inside the PS5 plugin and converted to neutral `DebuggerRegister` rows.
+## Software Execute Breakpoints
 
-RIP, RSP, and RBP are tagged with the neutral InstructionPointer, StackPointer, and FramePointer roles. WPF uses those roles rather than architecture-specific names. The values are marked `UnsignedLittleEndian`. All PS5 rows are read-only in rev7; the plugin deliberately does not expose SETREGS until that backend path has been separately reviewed and hardware-verified. Floating-point/SIMD and debug-register blocks remain deferred to rev8.
+PS5 plugin `0.1.0.rev36` retains the verified neutral software-breakpoint surface through ps5debug-NG `CMD_DEBUG_SET_BREAKPOINT` (`0xBDBB0003`). The wire body remains 16 bytes: a plugin-owned slot index, a 32-bit enabled flag, and the 64-bit target address. ps5debug-NG currently provides 30 software-breakpoint slots; that limit and slot allocation remain private to the PS5 plugin. Before a slot is selected or a backend request is sent, rev32 requires the requested address to belong to the cached current target memory map and to an executable, non-guarded region. The cache is populated by the plugin's normal `IMemoryMapProvider` enumeration, so breakpoint validation does not introduce concurrent command traffic on the target or debugger sockets.
+
+The host creates one-byte Software/Execute requests and may mark them persistent or temporary. The plugin rejects duplicate managed addresses and does not reuse a slot while an earlier breakpoint is awaiting backend cleanup. Running-state Enable/Disable/Remove maps directly to the backend command.
+
+Breakpoint hits arrive through the existing TCP 755 async event channel. Current ps5debug-NG restores the original instruction byte, rewinds the **interrupt packet** RIP to the breakpoint address, writes that RIP to the stopped thread, single-steps the original instruction, waits for completion, reinserts the INT3, and only then sends the original logical packet to the client. The packet therefore describes the pre-instruction logical breakpoint stop while a later live GETREGS is already post-instruction. Live rev24 isolation confirmed this both for `0xE9F747 -> 0xE9F74C` and for `0xE9F74E call 0x1A3BC30 -> live 0x1A3BC30`. Rev35 caches the matching packet's 176-byte GP and 832-byte FPU blocks as the authoritative logical stop snapshot for that managed breakpoint/thread. Rev30's SIGTRAP attribution rule remains: a neutral managed breakpoint hit is emitted only when the logical event RIP matches an active managed breakpoint address. Temporary records are removed from the manager after their first hit and backend slot cleanup remains staged. See [`../../bug-reports/ps5debug-ng-software-breakpoint-event-and-live-register-state-diverge.md`](../../bug-reports/ps5debug-ng-software-breakpoint-event-and-live-register-state-diverge.md).
+
+### Paused Disable/Remove Safety
+
+Current ps5debug-NG has a side effect in the disable branch of `debug_set_breakpoint_handle`: after restoring the saved byte and handling potentially stuck threads, it calls `PT_CONTINUE` on the target before returning success. Sending that command while the user has the debugger Paused can therefore resume the target unexpectedly. See [`../../bug-reports/ps5debug-ng-disabling-software-breakpoint-resumes-paused-target.md`](../../bug-reports/ps5debug-ng-disabling-software-breakpoint-resumes-paused-target.md).
+
+Rev30 avoids that behavior by staging disable/remove for an enabled breakpoint while Paused. The neutral breakpoint presentation changes immediately, but the plugin sends the backend disable only immediately before the next explicit Continue. Re-enable before Continue cancels the pending disable. This is a PS5/backend-specific safety rule and does not change the public breakpoint model.
+
+Rev36 adds a separate teardown-only path. Once explicit detach or disposal begins, all software-breakpoint slots still known to be backend-active, including paused removals already staged for later cleanup, are explicitly disabled/restored before the normal backend detach command. The local event channel remains open during this restore pass so complete callback packets can be drained, but packets received while detach is active are ignored for session state/event projection; the channel is closed after the detach attempt. Detach is still attempted if one of those defensive restore requests fails, and successful detach clears the client tables only after the backend detach request has completed. This does not change normal paused Disable/Remove behavior.
+
+Current ps5debug-NG also stops its own detach-time software-breakpoint restore loop at the first empty indexed slot. A previously disabled lower slot can therefore hide a later active slot from that loop. The source-level issue is recorded in [`../../bug-reports/ps5debug-ng-debugger-detach-stops-breakpoint-restore-at-first-empty-slot.md`](../../bug-reports/ps5debug-ng-debugger-detach-stops-breakpoint-restore-at-first-empty-slot.md). Rev36 does not change the backend; it defensively restores every software-breakpoint slot still tracked by the client before requesting detach.
+
+## Hardware Data Watchpoints
+
+PS5 plugin `0.1.0.rev36` reuses `IDebuggerBreakpointService` / `IDebuggerBreakpointStateService` for neutral `Hardware` data-watchpoint requests and advertises `TargetCapabilities.Watchpoints`. The host does not receive DR-register indices or encoding values.
+
+The current ps5debug-NG request is `CMD_DEBUG_SET_WATCHPOINT` (`0xBDBB0004`) with a 24-byte body containing backend slot, enabled flag, DR7 length encoding, DR7 access encoding, and address. Current upstream accepts slot indices `0-3`. The plugin maps neutral sizes as 1 -> `0`, 2 -> `1`, 4 -> `3`, and 8 -> `2`; Write maps to DR7 R/W value `1`, while ReadWrite maps to value `3`. A neutral Read-only request is rejected instead of being silently broadened because amd64 DR7 has no separate read-only data mode.
+
+Before allocating a hardware slot or sending the backend command, the plugin requires:
+
+- Hardware kind with Write or ReadWrite access;
+- size 1, 2, 4, or 8 bytes;
+- natural alignment to the selected size;
+- the complete byte range to fit inside one cached current-process memory region;
+- the target region not to be guarded.
+
+Persistent and temporary lifetimes use the same neutral manager semantics as software breakpoints. Enable, Disable, Remove, and Remove All operate through the hardware command path. Temporary hardware records are removed only when the responsible slot can be attributed safely.
+
+### Watchpoint event attribution
+
+The 1184-byte ps5debug-NG interrupt already contains a 128-byte debug-register block at offset `0x420`; DR6 is at packet offset `0x450`. Rev33 reads that in-band value and does **not** issue paused `GETDBREGS`, preserving the verified rev29/rev10 transport guard. If DR6 B0-B3 identifies an active hardware slot, the plugin emits a neutral `Watchpoint` event. `InstructionPointer` remains the instruction that performed the memory access, and `TriggeredBreakpoint.Request.Address` identifies the watched data range.
+
+Current upstream `dispatch_debug_events()` clears `pkt_dr[6]` before later preserving the data-watchpoint status, so a client can receive zero DR6 bits even though a hardware watchpoint caused the trap. Rev33 handles this conservatively: when exactly one enabled/backend-active hardware watchpoint exists, a signal-5 stop with zero DR6 can be attributed to that sole record; with more than one active watchpoint, the same stop remains an unattributed signal event and no temporary record is removed. The source-level backend issue is documented in [`../../bug-reports/ps5debug-ng-watchpoint-interrupt-clears-dr6-trigger-status.md`](../../bug-reports/ps5debug-ng-watchpoint-interrupt-clears-dr6-trigger-status.md).
+
+## Call Stack and Stepping
+
+PS5 plugin `0.1.0.rev36` implements `IDebuggerCallStackService` and `IDebuggerStepService` while keeping all backend stack-walk and stepping mechanics plugin-private. Both services require the existing attached debugger session, and Call Stack requires a current Paused stop context for the selected neutral thread.
+
+### Server-side Call Stack
+
+For an ordinary paused context, the call-stack path reuses the verified live general-register read for the selected debugger thread to obtain RIP, RBP, and RSP. For a matching rev35 logical software-breakpoint stop, those three values instead come from the cached interrupt-packet GP block so frame zero remains on the reported breakpoint instruction even though the backend has already transparently stepped it. The plugin then sends ps5debug-NG `CMD_PROC_READ_STACK` (`0xBDAA0023`) with the same packed 24-byte request `{ uint32 pid; uint64 rbp; uint64 rsp; uint32 depth; }`. The requested depth is capped at the backend maximum of 64 frames.
+
+ps5debug-NG performs the RBP-chain walk server-side and returns a length-prefixed variable payload. Every backend frame contains current RBP/RSP, saved RBP, return address, flags, a locals length, a code-window length, and optional locals/code bytes. Rev34 validates the declared payload length, frame count, fixed frame headers, variable lengths, truncation, backend maxima, and trailing bytes before publishing neutral data. Locals and code-window bytes are intentionally not exposed because the shared `DebuggerStackFrame` model does not require them.
+
+The first neutral frame uses the selected thread's current RIP. Later neutral frame instruction addresses are derived from the preceding backend return address. RSP/RBP are mapped into StackPointer/FramePointer, zero return addresses become null, and module names are resolved through the existing current-process memory map when possible. Symbol names remain optional. If the backend safely returns no walked frames, rev34 can still publish one current frame from the selected thread's verified register context instead of inventing caller frames.
+
+### Native Step Into
+
+Selected-thread Step Into maps to `CMD_DEBUG_STEP_THREAD` (`0xBDBB0013`) with the 32-bit backend thread id. The process-wide `CMD_DEBUG_STEP` (`0xBDBB0012`) is also mapped internally for a call without a selected thread id, although the current host normally steps the selected thread. Before stepping, pending software-breakpoint and watchpoint disables are flushed through their existing safe cleanup path.
+
+After a successful ordinary native step command the session enters neutral Running state and records the pending step thread. The matching asynchronous signal-5 trap is translated to a Paused `StepCompleted` event. Managed software-breakpoint and hardware-watchpoint attribution is evaluated first so a known breakpoint/watchpoint hit is never relabeled as a step completion. Rev35 adds one special case for Step Into requested while the selected thread is represented by a logical software-breakpoint snapshot: ps5debug-NG has already performed the transparent step, so the plugin reads the current live post-step RIP, consumes the snapshot, and emits one neutral Resumed/StepCompleted transition **without sending a second `CMD_DEBUG_STEP_THREAD`**. Manual Pause, explicit Continue, Detach, new interrupt receipt, and snapshot consumption clear that special state. Detach/disposal and target invalidation retain the existing debugger cleanup rules.
+
+Step Over, Step Out, and Run to Address are intentionally not implemented as PS5-specific commands. The host composes those workflows through neutral Disassembler/call-frame data and the already verified temporary software-breakpoint mechanism. Host rev26 additionally preserves the original neutral instruction before a Software/Execute breakpoint is installed; on the matching logical breakpoint stop, Step Over uses that instruction before live disassembly so the backend-rearmed `INT3` cannot hide an original `call`. No PS5-specific Step Over command or new wire behavior is introduced.
+
+## Debugger Register State
+
+PS5 plugin `0.1.0.rev36` retains `IDebuggerRegisterService` for paused-thread register snapshots. The already verified general-register read remains mandatory and unchanged: the plugin sends ps5debug-NG `CMD_DEBUG_GET_REGISTERS` (`0xBDBB0008`) with the selected 32-bit backend thread id and reads the 176-byte FreeBSD amd64 general-register block on the debugger-owner command connection.
+
+The backend also exposes the following extended commands:
+
+| Group | ps5debug-NG command | Response size | Current paused-register use |
+| --- | --- | ---: | --- |
+| Floating-point / SIMD | `CMD_DEBUG_GET_FPREGS` (`0xBDBB000A`) | 832 bytes | guarded disposable probe; exposes FCW, FSW, FTW, FOP, FIP, FDP, MXCSR, MXCSR_MASK, ST0-ST7, XMM0-XMM15, YMM0-YMM15 |
+| Debug registers | `CMD_DEBUG_GET_DBREGS` (`0xBDBB000C`) | 128 bytes | **suppressed while Paused in rev29** because the current backend handler can block after the stop event has already been consumed |
+| Segment bases | `CMD_DEBUG_GET_FSGSBASE` (`0xBDBB000E`) | 16 bytes | guarded disposable probe; exposes FSBASE, GSBASE |
+
+The 832-byte FPU payload is decoded from the FreeBSD amd64 FXSAVE/xstate layout entirely inside the PS5 plugin. x87 values are preserved as exact 80-bit raw register bytes. XMM rows use their 128-bit lower state, while each 256-bit YMM row is reconstructed from the corresponding XMM lower half plus the upper half from the xstate YMM area. RIP, RSP, and RBP retain the neutral InstructionPointer, StackPointer, and FramePointer roles. For an ordinary pause these values still come from the live GETREGS plus safe optional probes. For the selected thread at a managed rev35 logical software-breakpoint stop, the packet GP/FPU blocks are used instead so register presentation matches the breakpoint event; FSBASE/GSBASE remain the existing disposable live probe because they are not carried in that packet area. The existing plugin-private debug-register decoder remains in place for future safe backend/event use, but paused register refresh does not invoke GETDBREGS. All PS5 values use `UnsignedLittleEndian` and all remain read-only.
+
+A fully successful current paused snapshot contains **76 rows**: 26 mandatory general rows, 48 FPU/SIMD rows, and 2 FS/GS-base rows. If the safe optional blocks are unavailable, the surface degrades toward the verified 26-row general-only snapshot.
+
+### Rev9 live failure and rev29 transport guard
+
+The rev28 implementation originally requested GETFPREGS, GETDBREGS, and GETFSGSBASE serially on the debugger-owner command connection after GETREGS. Host rev9 passed **108/108** automated checks and focused Mock Gates B-D. On real PS5 hardware, however, Attach and Pause succeeded and thread enumeration completed, while the register refresh remained pending at `Registers 0` / unavailable IP. Because a response read on a reusable framed command stream cannot safely be abandoned halfway through, rev28's optional post-dispatch reads had no timeout and could hold the complete refresh indefinitely.
+
+The rev10 source review also identified a concrete ps5debug-NG stopped-target problem in GETDBREGS. The debugger Pause path sends `SIGSTOP` and consumes the stop event with `wait4()`. GETDBREGS later calls `is_process_stopped()`, which uses another non-blocking `wait4()` as its state test. With the stop event already consumed, that check can report false even though the target is still stopped. GETDBREGS then sends another stop signal and waits for a new stop transition that may never arrive. Because debugger commands are serialized behind shared backend locks, that blocked wait can also prevent later debugger commands from progressing. The external issue is documented in [`../../bug-reports/ps5debug-ng-getdbregs-can-hang-after-pause.md`](../../bug-reports/ps5debug-ng-getdbregs-can-hang-after-pause.md).
+
+Rev29 changes the client boundary accordingly:
+
+- the mandatory GETREGS request stays on the verified debugger-owner connection;
+- safe optional probing is enabled only when the already-read connection metadata reports ps5debug-NG protocol `1.3` or newer and capability level `1.0` or newer;
+- GETFPREGS and GETFSGSBASE each open a fresh short-lived command connection and have a linked two-second timeout;
+- paused GETDBREGS is not sent;
+- backend error/data-null status, timeout, socket/connection failure, or a malformed/unexpected probe-local response disables only that safe optional group;
+- a failed safe optional command is cached as unavailable for the current debugger attachment so Refresh does not repeatedly hit the same failure;
+- independently successful safe optional groups continue refreshing;
+- Detach/dispose clears that unavailable set so a new attachment starts cleanly;
+- caller/session cancellation still propagates and is not converted into an unsupported-group result.
+
+A timed-out probe socket is discarded rather than reused, so it cannot leave the debugger-owner command stream partially framed. Current ps5debug-NG source also assigns debugger ownership to the connection that performs Attach; cleanup of a non-owner connection does not invoke full debugger teardown. Rev29 relies on that source contract for the safe disposable read probes.
+
+If the backend does not advertise the required protocol/capability metadata, the plugin sends no optional register command and returns the verified general-register snapshot only. If both safe optional probes succeed, the current 76-row surface is available. If only one succeeds, only that group is appended.
+
+The plugin deliberately does not expose SETREGS, SETFPREGS, SETDBREGS, or FS/GS write operations in rev31. Those target-side write paths require separate review and hardware verification before the neutral UI may enable PS5 register editing.
 
 Rev6 live verification also found that the current tested ps5debug-NG backend returns on-wire `CMD_ERROR` (`0xF0000001`) for the documented individual-thread suspend request even when the LWP id came directly from thread enumeration. The failure did not crash the game, console, or debugger session. The reproduction and server-code notes are recorded in [`../../bug-reports/ps5debug-ng-thread-suspend-returns-cmd-error.md`](../../bug-reports/ps5debug-ng-thread-suspend-returns-cmd-error.md). Memory Engine keeps the existing ThreadControl client path so it can be retested against a corrected payload without redesigning the wire request.
 
 ## x86-64 Disassembly
 
-The current PS5 plugin `0.1.0.rev27` retains the `IDisassemblerProvider` implementation introduced in rev24 under Plugin API `2.11.0` and continues to advertise `TargetCapabilities.Disassembly`. The provider is deliberately decode-only: Core obtains a bounded readable-region byte window through the existing `IMemoryReader` service, then passes those bytes to the plugin for architecture-specific interpretation.
+The current PS5 plugin `0.1.0.rev36` retains the `IDisassemblerProvider` implementation introduced in rev24 under Plugin API `2.11.0` and continues to advertise `TargetCapabilities.Disassembly`. The provider is deliberately decode-only: Core obtains a bounded readable-region byte window through the existing `IMemoryReader` service, then passes those bytes to the plugin for architecture-specific interpretation.
 
 The implementation uses Iced `1.21.0` inside the PS5 plugin to decode 64-bit little-endian x86-64 instructions and format operands using NASM-style text. It returns the neutral instruction model used by Core, including direct branch/call destinations when statically known. Rev24 also maps Iced formatter text kinds to the optional Plugin API `2.11.0` Mnemonic/FlowControlMnemonic/Register/Number/Keyword/Text presentation tokens; no Iced enum or x86 register list crosses into Core/WPF. Register- or memory-indirect calls/jumps are classified without inventing a destination. Invalid or truncated bytes remain bounded invalid instruction records.
 
@@ -73,7 +172,7 @@ The plugin defines its own connection fields through the Plugin SDK:
 
 The WPF application renders these definitions generically. It does not contain PS5-specific host or port fields.
 
-Plugin `0.1.0.rev27` continues to use the optional Plugin API `2.3.0` `IPluginSettingsConsumer` contract. Core attaches a settings scope owned by `platform.ps5.ps5debug-ng` before the host reads these connection definitions. If `connection.host` and `connection.port` contain remembered valid values, the plugin exposes them as the connection-field defaults. After a connection successfully completes, the plugin writes the normalized host and port back through `IPluginSettings`. Failed connection attempts do not replace the previous successful values. The plugin never opens or parses `settings.json` itself.
+Plugin `0.1.0.rev32` continues to use the optional Plugin API `2.3.0` `IPluginSettingsConsumer` contract. Core attaches a settings scope owned by `platform.ps5.ps5debug-ng` before the host reads these connection definitions. If `connection.host` and `connection.port` contain remembered valid values, the plugin exposes them as the connection-field defaults. After a connection successfully completes, the plugin writes the normalized host and port back through `IPluginSettings`. Failed connection attempts do not replace the previous successful values. The plugin never opens or parses `settings.json` itself.
 
 ## Connection Validation
 
@@ -116,13 +215,13 @@ The raw memory diagnostic code remains available for development/regression use,
 
 ### Concurrent Frozen Writes
 
-Plugin API `2.4.0` adds the optional `IConcurrentMemoryWriter` marker contract. PS5 plugin `0.1.0.rev27` exposes this service through the unchanged dedicated `Ps5ConcurrentMemoryWriter`. It lazily opens a second fully validated ps5debug-NG connection on the first in-scan Frozen write and serializes writes on that connection. The normal session's primary `Ps5DebugClient` remains responsible for TurboScan and all previously verified command flows.
+Plugin API `2.4.0` adds the optional `IConcurrentMemoryWriter` marker contract. PS5 plugin `0.1.0.rev36` exposes this service through the unchanged dedicated `Ps5ConcurrentMemoryWriter`. It lazily opens a second fully validated ps5debug-NG connection on the first in-scan Frozen write and serializes writes on that connection. The normal session's primary `Ps5DebugClient` remains responsible for TurboScan and all previously verified command flows.
 
 The host uses this concurrent writer only when a Frozen row must be reapplied while First/Next Scan is active and **Pause target while scanning** is Off. When Pause is On, Frozen writes are intentionally suppressed for the duration of the paused scan. The secondary client is disposed with the target session.
 
 ## Scanner Capability Declarations
 
-Plugin `0.1.0.rev27` targets Plugin API `2.13.0` and supplies the concrete Value Types and PS5-specific Scan Options that the current implementation can execute. `SupportedValueTypes` contains eleven `IMemoryValueType` objects: UInt8, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, Float64, and ByteArray. `SupportedScanOptions` contains Endianness, Alignment, and Floating-point rounding.
+Plugin `0.1.0.rev36` targets Plugin API `2.15.0` and retains the concrete Value Types and PS5-specific Scan Options that the current implementation can execute. `SupportedValueTypes` contains eleven `IMemoryValueType` objects: UInt8, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, Float64, and ByteArray. `SupportedScanOptions` contains Endianness, Alignment, and Floating-point rounding.
 
 Core owns the universal 13-mode Scan Type catalog. The PS5 plugin does not publish its own production Scan Type list. Instead, the connected session implements `INativeScanTypeMappingProvider` and publishes only the Core predicates that have semantically equivalent ps5debug-NG native implementations for the declared First/Next stages and Value Types. The mapping's native id is opaque to Core/WPF; compare ids, TurboScan flags, and request construction remain inside this plugin.
 
@@ -155,7 +254,7 @@ Changed Value and Unchanged Value are snapshot-byte predicates in Core: they com
 
 The Scan panel renders the plugin's three scan options generically through Plugin API `2.8.0` presentation/applicability metadata. Endianness is presented as **Little-endian byte order**: checked selects Little Endian and unchecked selects Big Endian, with Little Endian checked by default. Toggle Scan Options are grouped with the host's Pause-target checkbox rather than rendered as choice lists. Alignment remains a choice list and defaults to the active Value Type's natural alignment, with explicit 1/2/4/8/16/32/64/128-byte choices. Floating-point rounding is visible only when the selected Value Type is Float/Double and the selected Core Scan Type is Exact Value; it defaults to Strict with an opt-in `ps5debug-NG tolerance (1e-6)` mode. Endianness and Alignment lock after First Scan because they affect session interpretation/shape. Floating-point rounding does not lock, allowing the Exact Value comparison mode to be selected before any later Exact Next Scan.
 
-PS5 plugin `0.1.0.rev27` advertises `NativeValueScanning`. After runtime TurboScan capability negotiation, the connected session exposes legacy `INativeValueScanner`/`INativeValueScanRefiner`, API 2.2 streaming `INativeValueScanStreamProvider`/`INativeValueScanStreamRefiner`, API 2.7 `INativeScanTypeMappingProvider`, and API 2.9 resident result handles from authoritative native streams through `INativeValueScanResidentResultSet`. If the required TurboScan capabilities are absent, the native scanner services are hidden and the host uses the shared Core scanner. If the mapping provider is available but no semantic mapping matches the selected Core Scan Type/stage/Value Type, the host skips native execution and goes directly to Core.
+PS5 plugin `0.1.0.rev32` advertises `NativeValueScanning`. After runtime TurboScan capability negotiation, the connected session exposes legacy `INativeValueScanner`/`INativeValueScanRefiner`, API 2.2 streaming `INativeValueScanStreamProvider`/`INativeValueScanStreamRefiner`, API 2.7 `INativeScanTypeMappingProvider`, and API 2.9 resident result handles from authoritative native streams through `INativeValueScanResidentResultSet`. If the required TurboScan capabilities are absent, the native scanner services are hidden and the host uses the shared Core scanner. If the mapping provider is available but no semantic mapping matches the selected Core Scan Type/stage/Value Type, the host skips native execution and goes directly to Core.
 
 The PS5 wire value-type set remains:
 
@@ -197,7 +296,7 @@ See [`NATIVE_SCAN_AND_PROCESS_CONTROL.md`](NATIVE_SCAN_AND_PROCESS_CONTROL.md) a
 
 ## Process Suspend and Resume
 
-PS5 plugin `0.1.0.rev27` also exposes `IProcessControl` and advertises both `ProcessSuspend` and `ProcessResume`.
+PS5 plugin `0.1.0.rev32` also exposes `IProcessControl` and advertises both `ProcessSuspend` and `ProcessResume`.
 
 The implementation uses ps5debug-NG `CMD_DEBUG_PROCESS_STOP` (`0xBDBB0500`) with the packed five-byte body:
 
@@ -221,7 +320,7 @@ The pause workflow is host orchestration through the neutral interface; no ps5de
 
 ## Debugger Transport and Session
 
-PS5 plugin `0.1.0.rev25` was the first PS5 revision to consume Plugin API `2.13.0` debugger contracts through `IDebuggerProvider` / `IDebuggerSession`. Current plugin `0.1.0.rev27` keeps that verified transport and additionally advertises `TargetCapabilities.ThreadEnumeration` and `TargetCapabilities.ThreadControl`. Register access, breakpoints, watchpoints, call-stack access, and step execution remain intentionally unadvertised.
+PS5 plugin `0.1.0.rev25` was the first PS5 revision to consume the neutral debugger contracts through `IDebuggerProvider` / `IDebuggerSession`. Current plugin `0.1.0.rev36` keeps that verified transport, advertises `TargetCapabilities.ThreadEnumeration`, `TargetCapabilities.ThreadControl`, `TargetCapabilities.RegisterAccess`, `TargetCapabilities.Breakpoints`, `TargetCapabilities.Watchpoints`, `TargetCapabilities.CallStack`, and `TargetCapabilities.StepExecution`, provides general plus guarded extended read-only register snapshots while Paused, retains persistent/temporary software execute breakpoints and hardware Write/ReadWrite data watchpoints, and adds server-side call-stack access plus native Step Into.
 
 The connected target session exposes `IDebuggerProvider`. The provider owns one active debugger attachment and uses a dedicated `Ps5DebuggerCommandClient`. The debugger command connection is separate from both the primary `Ps5DebugClient` and the concurrent Frozen-write client, so debugger attach/control traffic cannot interleave with an in-flight memory/scan transaction.
 
@@ -229,7 +328,7 @@ The connected target session exposes `IDebuggerProvider`. The provider owns one 
 
 Current ps5debug-NG requires the debugger client to listen on TCP `755` before attachment because the server opens an outbound connection to the client's IP for async interrupts. Rev25 therefore starts the local listener first, opens the dedicated command connection, sends `CMD_DEBUG_ATTACH` (`0xBDBB0001`) with the signed 32-bit PID, and accepts the outbound event socket. A successful session begins in neutral `Running` state.
 
-Explicit detach uses `CMD_DEBUG_DETACH` (`0xBDBB0002`). Window/session disposal performs best-effort detach and always tears down the local event/command sockets. Only one debugger session can be active for a connected PS5 target session at a time.
+Explicit detach uses `CMD_DEBUG_DETACH` (`0xBDBB0002`). Rev36 explicitly restores every software-breakpoint slot still known to be backend-active or staged for paused cleanup and then sends the normal detach request. The event callback remains connected during the restore phase to drain any complete backend packets generated when breakpoint disable resumes a paused target, but those packets are ignored while detach is active; the callback is closed after the detach attempt. Backend detach is still attempted if one of those defensive restore requests fails. Window/session disposal applies the same restore-before-detach path on a best-effort basis and always tears down the local event/command sockets. Only one debugger session can be active for a connected PS5 target session at a time.
 
 ### Pause / continue
 
@@ -252,13 +351,13 @@ The outbound event channel sends fixed 1184-byte packets. Rev25 currently extrac
 - thread name from the 40-byte field at `0x008`;
 - instruction pointer from the GP-register block at absolute offset `0x0B8`.
 
-The PS5 plugin maps those fields to neutral `DebuggerEvent` data and never exposes the FreeBSD register/FPU/debug-register structs to Core or WPF. An interrupt leaves the neutral session `Paused`. Current ps5debug-NG resumes the application layer after sending the packet but does not `PT_CONTINUE` the traced process at that point; the ptrace stop remains until debugger Continue sends stop-go action `0`.
+The PS5 plugin maps those fields to neutral `DebuggerEvent` data and never exposes the FreeBSD register/FPU/debug-register structs to Core or WPF. An interrupt leaves the neutral session `Paused`. Ordinary stops continue to use live register reads. For a managed software-breakpoint hit, current ps5debug-NG has already restored and transparently single-stepped the breakpointed instruction before the interrupt packet is delivered; rev35 therefore preserves the packet's pre-instruction GP/FPU state as the logical stop context for the matching thread instead of mixing that event with later post-step GETREGS state.
 
 If the event channel disconnects unexpectedly while the backend remains attached, the neutral session becomes `Unknown` and emits a backend diagnostic event so run/pause controls cannot pretend the execution state is known. Detach remains the cleanup path.
 
 ### Thread enumeration and individual-thread control
 
-Rev26 implements the already-public API `2.13.0` optional attached-session thread services:
+Rev26 implements the already-public API `2.12.0` optional attached-session thread services:
 
 - `IDebuggerThreadService` through `CMD_DEBUG_GET_THREAD_LIST` (`0xBDBB0005`) plus optional `CMD_DEBUG_THREAD_INFO` (`0xBDBB0011`) lookups;
 - `IDebuggerThreadControlService.SuspendThreadAsync` through `CMD_DEBUG_SUSPEND_THREAD` (`0xBDBB0006`);
@@ -266,7 +365,7 @@ Rev26 implements the already-public API `2.13.0` optional attached-session threa
 
 The plugin maps backend thread ids and optional names into neutral `DebuggerThreadInfo` rows. The host never receives FreeBSD LWP terminology, wire structs, command ids, or priority fields. Current ps5debug-NG list/info replies do not provide a reliable individual execution-state field, so rev26 derives ordinary Running/Stopped presentation from the whole debugger session and tracks successful individual Suspend/Resume operations it owns. Per-thread control is accepted only while the overall debugger target is Running.
 
-Register services, breakpoints/watchpoints, call-stack access, and step execution remain later PS5 debugger revisions.
+Register services are implemented through the current read-only `IDebuggerRegisterService`. Rev30 additionally exposed the neutral software-breakpoint lifecycle/state services described above; rev33 adds hardware data watchpoints through the same generic manager/service. Call-stack access and step execution remain later PS5 debugger revisions.
 
 ## Command-Stream Safety
 
@@ -326,7 +425,7 @@ Host `0.1.3.rev18` originally continued the then-current plugin-owned scanner-de
 
 Rev15 subsequently completed the large-result live PS5 verification: a signed-byte Exact Value First Scan for `50` committed `10,953,954` results, and a same-value Next Scan refined the complete disk-backed set to `8,796,420`. The survivor set included addresses beyond the 50,000-row UI preview, confirming complete-set refinement. First Scan and Next Scan were also repeated successfully with **Pause target while scanning** enabled.
 
-Rev25 / host `0.1.7.rev5` is the current debugger transport candidate; rev5 retains the rev3 PS5 debugger implementation unchanged and supersedes rev4 only for responsive row-1 host sizing. The current source review is documented in `docs/testing/APP_0.1.7_REV5_SOURCE_REVIEW.md`; the authoritative remaining gate is a clean Windows **97/97** run followed by focused responsive-header/button UI review and live-PS5 Attach/Pause/Continue/Detach acceptance in `docs/testing/APP_0.1.7_REV5_VERIFICATION.md`. Rev3 was superseded before live acceptance, so no live rev3 debugger result is claimed.
+Host `0.1.7.rev8` completed the debugger register/stop-context acceptance baseline: **107/107** Windows checks and all **11/11** focused Mock/live-PS5 register, current-instruction, read-only-safety, transport, and cleanup steps passed. Host `0.1.7.rev9` / PS5 plugin `0.1.0.rev28` added extended read-only register groups and exposed the unsafe optional owner-stream wait; host rev10 / PS5 rev29 corrected that transport boundary and is fully verified after **110/110** plus focused live-PS5 acceptance. Host rev11 / PS5 rev30 introduced software execute breakpoints, rev12 / PS5 rev31 corrected the PS5 nullable compile issue, rev13 repaired the test harness, and rev14 passed **114/114** plus the complete live breakpoint acceptance cycle. Host `0.1.7.rev15` / PS5 plugin `0.1.0.rev32` completed the verified breakpoint-address/runtime correction baseline. Host `0.1.7.rev16` / PS5 plugin `0.1.0.rev33` completed Hardware Watchpoints and passed **118/118** plus focused Mock/live-PS5 acceptance. Current host `0.1.7.rev31` / PS5 plugin `0.1.0.rev38` targets Plugin API `2.16.0`. Rev29 adds host/Core logical Disassembler presentation and debugger markers without changing the PS5 debugger transport or decoder. The logical software-breakpoint event/register/frame reconciliation remains unchanged from rev35. Rev36 adds defensive teardown handling for software breakpoints: before explicit detach or disposal, every software-breakpoint slot still marked backend-active, together with staged paused removals, is explicitly disabled/restored before the backend detach command is issued. Rev38 extends the same ownership rule to hardware watchpoints by explicitly disabling every client-owned active or staged hardware slot before backend detach/disposal. The event channel remains connected during that sequence to drain any interrupts caused by cleanup, but detach-state gating prevents those packets from altering the logical debugger state; the channel is closed after the detach attempt. The current host registry target is **142 checks**. The existing PS5 protocol coverage for active plus staged software-breakpoint restoration during detach remains unchanged, while rev29 adds host/Core logical-disassembly and marker checks.
 
 See:
 
@@ -353,7 +452,7 @@ Only the neutral id, optional name, and neutral execution state reach the host i
 
 ## Current Disassembler Host Integration
 
-PS5 plugin `0.1.0.rev27` contains the same verified x86-64 disassembly implementation used by current host `0.1.7.rev5`; rev25 changes debugger integration, not the decoder, and rev4/rev5 do not change PS5 plugin code. The complete host `0.1.6.rev14` Disassembler block is now fully tested and hardware-verified; rev12-rev14 added only shared host/Core selection, copy/export, readable-region/module-relative presentation, and host selection/copy corrections. The plugin's Iced decoder, direct/indirect branch-target semantics, bounded caller-supplied byte contract, and ps5debug-NG transport remain unchanged. Rev25 now consumes the Plugin API `2.13.0` debugger contracts through its separate debugger provider/session; the existing Iced disassembly implementation remains unchanged from rev24.
+PS5 plugin `0.1.0.rev38` contains the same verified x86-64 disassembly implementation used by current host `0.1.7.rev31`; later debugger revisions change debugger integration and host presentation, not the decoder. The complete host `0.1.6.rev14` Disassembler block is fully tested and hardware-verified; rev12-rev14 added only shared host/Core selection, copy/export, readable-region/module-relative presentation, and host selection/copy corrections. The plugin's Iced decoder, direct/indirect branch-target semantics, bounded caller-supplied byte contract, and ordinary ps5debug-NG memory-read transport remain unchanged. Rev25 first consumed the Plugin API `2.12.0` debugger contracts through its separate debugger provider/session; rev30 introduced API `2.14.0` consumption for the additive breakpoint-state contract; rev33 consumes API `2.15.0` for optional triggered-breakpoint event context; rev34 added call-stack/step service consumption on the same API; rev35 adds only debugger stop-context reconciliation and does not alter the decoder.
 
 ## Source Layout
 
@@ -370,6 +469,8 @@ src/Plugins/TeeKay87.MemoryEngine.Platform.PS5/
 ├── Ps5DebuggerCommandClient.cs
 ├── Ps5DebuggerProvider.cs
 ├── Ps5DebuggerSession.cs
+├── Ps5ExtendedRegisterMapper.cs
+├── Ps5GeneralRegisterMapper.cs
 ├── Ps5NativeScanTypeMappings.cs
 ├── Ps5ScanDefinitions.cs
 ├── Ps5X64DisassemblerProvider.cs
@@ -386,3 +487,19 @@ src/Plugins/TeeKay87.MemoryEngine.Platform.PS5/
 Host `0.1.3.rev26` presents the same Core-owned Scan Type names regardless of target platform. The PS5 session publishes semantic mappings through `INativeScanTypeMappingProvider`; the host therefore attempts ps5debug-NG native execution only for mapped stage/Value Type combinations. Native identifiers remain private to the plugin.
 
 The mapping table deliberately distinguishes capability from equivalence. Direct `compareType 11` is **not** used for Core Unknown Initial Value because it drops zero values; snapshot mode with include-zero semantics is used instead. `compareType 6/8` are not advertised for Increased By/Decreased By because target-width wrapping can change boundary results. Float/Double `compareType 12` is not advertised for Unknown Initial Low because upstream compares absolute magnitude. Those cases automatically use the shared Core scanner without changing the UI-selected predicate.
+
+
+## Rev37 Request Validation for Host Address Shortcuts
+
+PS5 plugin `0.1.0.rev37` added no ps5debug-NG command and did not change breakpoint/watchpoint transport. It targets Plugin API `2.16.0` and exposes optional `IDebuggerBreakpointValidationService` so the generic host can grey out impossible Scan Results/Saved Addresses debugger shortcuts before sending a backend request. Software/Execute validation reuses the existing current-process mapped/executable/non-guarded rules plus slot/duplicate/staged-cleanup checks. Hardware/Write validation reuses the existing mapped-range, guard, supported-width, natural-alignment, access-mode, DR0-DR3 slot, duplicate, and staged-cleanup rules. Final Add remains authoritative.
+
+The rev29 live marker test also exposed an upstream ps5debug-NG interaction when a Software breakpoint is placed on the exact instruction whose execution would trigger an active hardware watchpoint. The backend's internal restored-instruction single-step consumes the overlapping watchpoint stop. See `docs/bug-reports/ps5debug-ng-software-breakpoint-step-consumes-overlapping-watchpoint-hit.md`.
+
+
+## Rev38 Safe Hardware Watchpoint Teardown
+
+PS5 plugin `0.1.0.rev38`, used by host `0.1.7.rev31`, adds explicit client-owned hardware-watchpoint cleanup before explicit debugger detach and session disposal. Every hardware slot still known to be backend-enabled is disabled through the existing watchpoint command before the backend detach request is sent. This includes temporary watchpoints that have already been removed from the logical list but are still staged in pending backend cleanup.
+
+The rev36 software-breakpoint restore pass remains independent, so software and hardware debugger instrumentation are both removed before detach without one cleanup category suppressing the other. No Plugin API change or new ps5debug-NG wire command was required.
+
+This protection was added after live shutdown testing showed that leaving a hardware watchpoint enabled and closing the debugger client could leave the target with an armed debug register; the game then terminated when that watchpoint condition occurred later. The upstream teardown issue and relevant ps5debug-NG source path are documented in [`../../bug-reports/ps5debug-ng-detach-can-leave-hardware-watchpoints-active.md`](../../bug-reports/ps5debug-ng-detach-can-leave-hardware-watchpoints-active.md).

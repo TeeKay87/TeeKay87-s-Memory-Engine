@@ -1,5 +1,7 @@
 # Application 0.1.7.rev7 Verification — Registers and Stop Context
 
+
+> **Status:** Superseded by `0.1.7.rev8` after the packaged rev7 Windows verification repeatedly produced **106/107**. The only failure was `Debugger workspace command and event source contract`; investigation showed the production connection-generation binding was intact and the source-contract check was falsely requiring the old explicit `new DebuggerViewModel(...)` spelling instead of accepting the rev7 target-typed `new(...)` constructor expression.
 ## Purpose
 
 This checklist verifies `0.1.7.rev7 - Registers and Stop Context` on Windows, first with the deterministic Mock backend and then with a live PS5/ps5debug-NG target. Rev7 starts from the accepted rev6 baseline: **101/101** Windows checks passed, all Mock/live-PS5 thread gates passed except individual PS5 Suspend/Resume, and that one request is documented as an external ps5debug-NG backend blocker rather than a client crash/regression.

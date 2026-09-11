@@ -37,6 +37,8 @@ public sealed class DebuggerSessionCoordinator : IAsyncDisposable
 
     public DebuggerSessionIdentity Identity { get; }
 
+    public DebuggerDisassemblyOverlayState DisassemblyOverlayState { get; } = new();
+
     public DebuggerSessionState State
     {
         get
@@ -69,6 +71,7 @@ public sealed class DebuggerSessionCoordinator : IAsyncDisposable
                 throw new InvalidOperationException("The debugger session can only attach from the Detached state.");
             }
 
+            DisassemblyOverlayState.Reset();
             ChangeState(DebuggerSessionState.Attaching);
 
             IDebuggerSession? attachedSession = null;
@@ -202,6 +205,7 @@ public sealed class DebuggerSessionCoordinator : IAsyncDisposable
             IDebuggerSession? session = _session;
             if (session is null)
             {
+                DisassemblyOverlayState.Reset();
                 if (State != DebuggerSessionState.Detached)
                 {
                     ChangeState(DebuggerSessionState.Detached);
@@ -230,6 +234,7 @@ public sealed class DebuggerSessionCoordinator : IAsyncDisposable
             }
             finally
             {
+                DisassemblyOverlayState.Reset();
                 ChangeState(DebuggerSessionState.Detached);
             }
 

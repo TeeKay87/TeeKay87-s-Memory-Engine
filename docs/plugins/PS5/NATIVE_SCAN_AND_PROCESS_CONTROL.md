@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes the PlayStation 5-specific native scanner and process-control implementation established by TeeKay87's Memory Engine `0.1.3.rev32` / PS5 plugin `0.1.0.rev22`. The same verified scanner/process-control behavior remains active unchanged in host `0.1.7.rev5` / PS5 plugin `0.1.0.rev25`; rev25 targets Plugin API `2.12.0` for its separate debugger backend, while the debugger additions do not redesign this scanner/process-control subsystem.
+This document describes the PlayStation 5-specific native scanner and process-control implementation established by TeeKay87's Memory Engine `0.1.3.rev32` / PS5 plugin `0.1.0.rev22`. The same verified scanner/process-control behavior remains active unchanged in current host `0.1.7.rev31` / PS5 plugin `0.1.0.rev38`; later plugin revisions target newer compatible Plugin API minors for Disassembler/Debugger work, but those additions do not redesign this scanner/process-control subsystem.
 
 Core owns the user-facing Scan Type catalog and comparison semantics. The PS5 plugin owns ps5debug-NG protocol details, native capability negotiation, the Core-to-native mapping table, request translation, resident-session management, and process suspend/resume. The host does not contain ps5debug-NG compare ids or command constants.
 
@@ -22,11 +22,11 @@ The generic mapping contract is documented in [`../../architecture/NATIVE_SCAN_T
 ## Version Boundaries
 
 ```text
-Current host application:     0.1.7.rev6
-Host Plugin API:              2.12.0
-PS5 target Plugin API:        2.12.0
-PlayStation 5 plugin:         0.1.0.rev25 (targets API 2.12.0)
-In-Memory Test Target plugin: 1.0.0.rev8 (targets API 2.12.0)
+Current host application:     0.1.7.rev31
+Host Plugin API:              2.16.0
+PS5 target Plugin API:        2.16.0
+PlayStation 5 plugin:         0.1.0.rev38 (targets API 2.16.0)
+In-Memory Test Target plugin: 1.0.0.rev16 (targets API 2.16.0)
 Scanner baseline verified at:  host 0.1.3.rev32 / PS5 0.1.0.rev22 / API 2.9.0
 ```
 
@@ -43,6 +43,8 @@ Plugin API milestones relevant to this subsystem:
 - `2.9.0` — optional `INativeValueScanResidentResultSet` plus Previous-value payloads on `NativeValueScanResultBatch` for bounded authoritative backend-resident result windows.
 - `2.10.0` — neutral disassembly contracts; no change to the native-scan/process-control contracts documented here.
 - `2.11.0` — optional neutral disassembly syntax-presentation tokens; no change to the native-scan/process-control contracts documented here.
+- `2.12.0` — neutral debugger contracts; no change to the native-scan/process-control contracts documented here.
+- `2.13.0` — neutral debugger register value-encoding metadata; no change to the native-scan/process-control contracts documented here.
 
 ## Core-to-ps5debug-NG Semantic Mapping
 

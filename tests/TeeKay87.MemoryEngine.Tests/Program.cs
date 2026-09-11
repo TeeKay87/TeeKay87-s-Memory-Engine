@@ -35,6 +35,7 @@ internal static class Program
     {
         ("Plugin API and independent plugin versions", VerifyPluginVersioningAsync),
         ("Debugger neutral model contracts", VerifyDebuggerModelContractsAsync),
+        ("Debugger triggered breakpoint event context", VerifyDebuggerTriggeredBreakpointEventAsync),
         ("Debugger optional service contracts", VerifyDebuggerServiceContractsAsync),
         ("Debugger session target identity", VerifyDebuggerSessionIdentityAsync),
         ("Core debugger session lifecycle and event binding", VerifyDebuggerSessionCoordinatorLifecycleAsync),
@@ -66,13 +67,34 @@ internal static class Program
         ("Mock debugger deterministic pause and continue events", VerifyMockDebuggerEventFlowAsync),
         ("Mock debugger thread enumeration and control", VerifyMockDebuggerThreadServicesAsync),
         ("Mock debugger register snapshots and writes", VerifyMockDebuggerRegisterServicesAsync),
+        ("Mock debugger deterministic call stack", VerifyMockDebuggerCallStackServicesAsync),
+        ("Mock debugger native Step Into", VerifyMockDebuggerStepServicesAsync),
+        ("Mock debugger software breakpoint lifecycle and hits", VerifyMockDebuggerBreakpointServicesAsync),
+        ("Mock debugger hardware watchpoint lifecycle and hits", VerifyMockDebuggerWatchpointServicesAsync),
+        ("Debugger breakpoint request validation service", VerifyDebuggerBreakpointValidationServiceAsync),
         ("Mock debugger attachment exclusivity and target cleanup", VerifyMockDebuggerAttachmentIsolationAsync),
         ("Debugger workspace command and event source contract", VerifyDebuggerWorkspaceSourceAsync),
         ("Debugger workspace thread panel source contract", VerifyDebuggerThreadWorkspaceSourceAsync),
         ("Debugger workspace register panel source contract", VerifyDebuggerRegisterWorkspaceSourceAsync),
+        ("Debugger thread/register pane splitter source contract", VerifyDebuggerPaneSplitterSourceAsync),
         ("Debugger register value codec source contract", VerifyDebuggerRegisterValueCodecSourceAsync),
         ("Debugger register edit dialog source contract", VerifyRegisterEditDialogSourceAsync),
         ("Debugger current instruction Disassembler integration", VerifyDebuggerCurrentInstructionIntegrationSourceAsync),
+        ("Debugger breakpoint manager source contract", VerifyDebuggerBreakpointManagerSourceAsync),
+        ("Debugger breakpoint dialog source contract", VerifyBreakpointDialogSourceAsync),
+        ("Debugger hardware watchpoint manager source contract", VerifyDebuggerWatchpointManagerSourceAsync),
+        ("Debugger breakpoint classification source contract", VerifyDebuggerBreakpointClassificationSourceAsync),
+        ("Main workspace debugger address actions source contract", VerifyMainWorkspaceDebuggerAddressActionsSourceAsync),
+        ("Debugger call-stack and stepping workspace source contract", VerifyDebuggerCallStackAndSteppingSourceAsync),
+        ("Debugger breakpoint-aware Step Over source contract", VerifyDebuggerBreakpointAwareStepOverSourceAsync),
+        ("Debugger workspace mode switcher source contract", VerifyDebuggerWorkspaceModeSwitcherSourceAsync),
+        ("Debugger workspace switch-button theme source contract", VerifyDebuggerWorkspaceSwitchButtonThemeSourceAsync),
+        ("Debugger workspace panel layout source contract", VerifyDebuggerWorkspacePanelLayoutSourceAsync),
+        ("Modeless tool-window independent z-order source contract", VerifyToolWindowIndependentZOrderSourceAsync),
+        ("Main-window tool cleanup source contract", VerifyMainWindowToolCleanupSourceAsync),
+        ("Main-window shutdown re-entry guard source contract", VerifyMainWindowShutdownReentrySourceAsync),
+        ("Debugger Run to Address source contract", VerifyDebuggerRunToAddressSourceAsync),
+        ("Debugger interrupted composed-operation cleanup source contract", VerifyDebuggerInterruptedComposedOperationCleanupSourceAsync),
         ("Debugger target lifetime and stale-session source contract", VerifyDebuggerTargetLifetimeSourceAsync),
         ("Mock target process and memory map", VerifyMockTargetProcessAndMemoryMapAsync),
         ("Mock target memory read and write", VerifyMockTargetMemoryReadWriteAsync),
@@ -80,6 +102,8 @@ internal static class Program
         ("Disassembly syntax token model", VerifyDisassemblySyntaxTokenModelAsync),
         ("Mock disassembly capability and provider", VerifyMockDisassemblyProviderAsync),
         ("Core disassembly bounded read", VerifyDisassemblyBoundedReadAsync),
+        ("Core disassembly debugger-byte overlay", VerifyDisassemblyDebuggerByteOverlayAsync),
+        ("Core debugger disassembly overlay lifecycle", VerifyDebuggerDisassemblyOverlayLifecycleAsync),
         ("Core disassembly bidirectional context", VerifyDisassemblyBidirectionalContextAsync),
         ("Core disassembly continuous origin resolution", VerifyDisassemblyContinuousOriginResolutionAsync),
         ("Core disassembly region-boundary handling", VerifyDisassemblyRegionBoundaryAsync),
@@ -88,6 +112,7 @@ internal static class Program
         ("Core disassembly cancellation", VerifyDisassemblyCancellationAsync),
         ("Disassembly session target identity", VerifyDisassemblySessionIdentityAsync),
         ("Disassembler direct target navigation contract", VerifyDisassemblerFollowTargetSourceAsync),
+        ("Disassembler debugger markers and logical instruction source contract", VerifyDisassemblerDebuggerMarkersSourceAsync),
         ("Disassembly export source structured data", VerifyDisassemblyExportSourceAsync),
         ("Disassembler selection, copy, and export contract", VerifyDisassemblerSelectionCopyExportSourceAsync),
         ("Disassembler right-click preserves extended selection", VerifyDisassemblerRightClickSelectionSourceAsync),
@@ -115,7 +140,17 @@ internal static class Program
         ("PS5 debugger dedicated transport isolation", VerifyPs5DebuggerTransportIsolationAsync),
         ("PS5 debugger thread enumeration and control protocol", VerifyPs5DebuggerThreadServicesAsync),
         ("PS5 debugger general register snapshot protocol", VerifyPs5DebuggerRegisterServicesAsync),
+        ("PS5 debugger server-side call-stack protocol", VerifyPs5DebuggerCallStackServicesAsync),
+        ("PS5 debugger native Step Into protocol and completion", VerifyPs5DebuggerStepServicesAsync),
+        ("PS5 debugger extended register capability gating", VerifyPs5DebuggerExtendedRegisterCapabilityGatingAsync),
+        ("PS5 debugger optional register timeout isolation", VerifyPs5DebuggerOptionalRegisterTimeoutIsolationAsync),
+        ("PS5 debugger software breakpoint protocol and hit mapping", VerifyPs5DebuggerBreakpointServicesAsync),
+        ("PS5 debugger logical software-breakpoint stop context", VerifyPs5DebuggerLogicalSoftwareBreakpointStopContextAsync),
+        ("PS5 debugger safe detach restores software breakpoints", VerifyPs5DebuggerSafeDetachBreakpointCleanupAsync),
+        ("PS5 debugger safe detach clears hardware watchpoints", VerifyPs5DebuggerSafeDetachWatchpointCleanupAsync),
+        ("PS5 debugger hardware watchpoint protocol and hit mapping", VerifyPs5DebuggerWatchpointServicesAsync),
         ("Main workspace target controls and connection status layout", VerifyMainWorkspaceTargetLayoutAsync),
+        ("Main status bar content alignment source contract", VerifyMainStatusBarContentAlignmentAsync),
         ("Main workspace passive memory-map status removal", VerifyMainWorkspaceMemoryMapStatusRemovalAsync),
         ("Main workspace two-row target header standard", VerifyMainWorkspaceTwoRowHeaderAsync),
         ("Main workspace responsive target input widths", VerifyMainWorkspaceResponsiveTopInputWidthAsync),
@@ -180,14 +215,14 @@ internal static class Program
         MockTargetPlugin mock = new();
         Ps5TargetPlugin ps5 = new();
 
-        AssertEqual(new Version(2, 13, 0), PluginApiInfo.CurrentVersion, "Unexpected Plugin API version.");
-        AssertTrue(PluginApiInfo.IsCompatible(new Version(2, 12, 0)), "Plugin API 2.13 host rejected an older compatible 2.12 plugin contract.");
+        AssertEqual(new Version(2, 16, 0), PluginApiInfo.CurrentVersion, "Unexpected Plugin API version.");
+        AssertTrue(PluginApiInfo.IsCompatible(new Version(2, 12, 0)), "Plugin API 2.16 host rejected an older compatible 2.12 plugin contract.");
         AssertTrue(PluginApiInfo.IsCompatible(mock.Metadata.ApiVersion), "Mock plugin API version is incompatible.");
         AssertTrue(PluginApiInfo.IsCompatible(ps5.Metadata.ApiVersion), "PS5 plugin API version is incompatible.");
-        AssertEqual("1.0.0.rev10", mock.Metadata.DisplayVersion, "Unexpected mock plugin display version.");
-        AssertEqual(new Version(2, 13, 0), mock.Metadata.ApiVersion, "Unexpected Mock plugin API version.");
-        AssertEqual("0.1.0.rev27", ps5.Metadata.DisplayVersion, "Unexpected PS5 plugin display version.");
-        AssertEqual(new Version(2, 13, 0), ps5.Metadata.ApiVersion, "Unexpected PS5 plugin API version.");
+        AssertEqual("1.0.0.rev16", mock.Metadata.DisplayVersion, "Unexpected mock plugin display version.");
+        AssertEqual(new Version(2, 16, 0), mock.Metadata.ApiVersion, "Unexpected Mock plugin API version.");
+        AssertEqual("0.1.0.rev38", ps5.Metadata.DisplayVersion, "Unexpected PS5 plugin display version.");
+        AssertEqual(new Version(2, 16, 0), ps5.Metadata.ApiVersion, "Unexpected PS5 plugin API version.");
 
         return Task.CompletedTask;
     }
@@ -224,7 +259,7 @@ internal static class Program
                 typeof(DebuggerRegisterRole),
                 typeof(bool)
             }) is not null,
-            "Plugin API 2.13 removed the existing seven-parameter DebuggerRegister constructor required by older compiled plugins.");
+            "Plugin API 2.15 removed the existing seven-parameter DebuggerRegister constructor required by older compiled plugins.");
 
         AssertThrows<ArgumentException>(
             () => _ = new DebuggerRegister("bad", "Bad", 64, new byte[] { 0x01 }),
@@ -269,6 +304,62 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static Task VerifyDebuggerTriggeredBreakpointEventAsync()
+    {
+        DebuggerBreakpointRequest request = new(
+            0x2000,
+            size: 4,
+            kind: DebuggerBreakpointKind.Hardware,
+            access: DebuggerBreakpointAccess.Write);
+        DebuggerBreakpoint watchpoint = new("wp-1", request);
+        DebuggerEvent watchpointEvent = new(
+            DebuggerEventKind.Watchpoint,
+            DebuggerExecutionState.Paused,
+            DebuggerStopReason.Watchpoint,
+            threadId: 3,
+            instructionPointer: 0x4000,
+            triggeredBreakpoint: watchpoint,
+            message: "Watchpoint hit.");
+
+        AssertTrue(ReferenceEquals(watchpoint, watchpointEvent.TriggeredBreakpoint),
+            "Debugger watchpoint event did not retain the triggered neutral breakpoint snapshot.");
+        AssertEqual<ulong?>(0x4000, watchpointEvent.InstructionPointer,
+            "Debugger watchpoint event replaced the accessing instruction pointer with the watched data address.");
+        AssertEqual(0x2000UL, watchpointEvent.TriggeredBreakpoint!.Request.Address,
+            "Debugger watchpoint event lost the watched data address.");
+
+        DebuggerEvent legacyEvent = new(
+            DebuggerEventKind.Breakpoint,
+            DebuggerExecutionState.Paused,
+            DebuggerStopReason.Breakpoint,
+            threadId: 3,
+            instructionPointer: 0x4010,
+            message: "Legacy constructor path.");
+        AssertTrue(legacyEvent.TriggeredBreakpoint is null,
+            "Existing DebuggerEvent construction unexpectedly created triggered-breakpoint context.");
+        AssertTrue(
+            typeof(DebuggerEvent).GetConstructor(new[]
+            {
+                typeof(DebuggerEventKind),
+                typeof(DebuggerExecutionState),
+                typeof(DebuggerStopReason),
+                typeof(ulong?),
+                typeof(ulong?),
+                typeof(string),
+                typeof(DateTimeOffset?)
+            }) is not null,
+            "Plugin API 2.16 removed the pre-existing DebuggerEvent constructor required by older compiled plugins.");
+
+        DebuggerBreakpointValidationResult valid = DebuggerBreakpointValidationResult.Valid();
+        DebuggerBreakpointValidationResult invalid = DebuggerBreakpointValidationResult.Invalid("blocked");
+        AssertTrue(valid.IsValid && string.IsNullOrEmpty(valid.Message),
+            "Debugger breakpoint validation success result is malformed.");
+        AssertFalse(invalid.IsValid, "Debugger breakpoint validation failure result is malformed.");
+        AssertEqual("blocked", invalid.Message, "Debugger breakpoint validation failure message changed unexpectedly.");
+
+        return Task.CompletedTask;
+    }
+
     private static Task VerifyDebuggerServiceContractsAsync()
     {
         TargetProcess process = new(99, "debug-target");
@@ -294,27 +385,23 @@ internal static class Program
 
         MockTargetPlugin mock = new();
         Ps5TargetPlugin ps5 = new();
-        TargetCapabilities rev7Capabilities =
+        TargetCapabilities rev17Capabilities =
             TargetCapabilities.Debugger |
+            TargetCapabilities.Breakpoints |
+            TargetCapabilities.Watchpoints |
             TargetCapabilities.ThreadEnumeration |
             TargetCapabilities.ThreadControl |
-            TargetCapabilities.RegisterAccess;
+            TargetCapabilities.RegisterAccess |
+            TargetCapabilities.CallStack |
+            TargetCapabilities.StepExecution;
         AssertEqual(
-            rev7Capabilities,
+            rev17Capabilities,
             mock.Capabilities & debuggerCapabilities,
-            "Mock plugin did not advertise exactly the debugger/thread/register capabilities implemented in rev7.");
+            "Mock plugin did not advertise exactly the debugger capabilities implemented through rev17.");
         AssertEqual(
-            TargetCapabilities.None,
-            mock.Capabilities & (debuggerCapabilities & ~rev7Capabilities),
-            "Mock plugin advertised debugger capabilities beyond the rev7 register scope.");
-        AssertEqual(
-            rev7Capabilities,
+            rev17Capabilities,
             ps5.Capabilities & debuggerCapabilities,
-            "PS5 plugin did not advertise exactly the debugger/thread/register capabilities implemented in rev7.");
-        AssertEqual(
-            TargetCapabilities.None,
-            ps5.Capabilities & (debuggerCapabilities & ~rev7Capabilities),
-            "PS5 plugin advertised debugger capabilities beyond the rev7 register scope.");
+            "PS5 plugin did not advertise exactly the debugger capabilities implemented through rev17.");
 
         return Task.CompletedTask;
     }
@@ -1719,6 +1806,10 @@ internal static class Program
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.ThreadEnumeration), "Mock thread-enumeration capability is missing.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.ThreadControl), "Mock thread-control capability is missing.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.RegisterAccess), "Mock register-access capability is missing.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.Breakpoints), "Mock breakpoint capability is missing.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.Watchpoints), "Mock watchpoint capability is missing.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.CallStack), "Mock call-stack capability is missing.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.StepExecution), "Mock step-execution capability is missing.");
 
         return Task.CompletedTask;
     }
@@ -1726,13 +1817,16 @@ internal static class Program
     private static async Task VerifyMockDebuggerProviderAsync()
     {
         MockTargetPlugin plugin = new();
-        AssertEqual("1.0.0.rev10", plugin.Metadata.DisplayVersion, "Unexpected Mock debugger plugin revision.");
-        AssertEqual(new Version(2, 13, 0), plugin.Metadata.ApiVersion, "Mock debugger backend must target Plugin API 2.13.0.");
+        AssertEqual("1.0.0.rev16", plugin.Metadata.DisplayVersion, "Unexpected Mock debugger plugin revision.");
+        AssertEqual(new Version(2, 16, 0), plugin.Metadata.ApiVersion, "Mock debugger backend must target Plugin API 2.16.0.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.Debugger), "Mock debugger capability is missing.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.ThreadEnumeration), "Mock thread-enumeration capability is missing.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.ThreadControl), "Mock thread-control capability is missing.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.RegisterAccess), "Mock rev7 register-access capability is missing.");
-        AssertFalse(plugin.Capabilities.HasFlag(TargetCapabilities.Breakpoints), "Mock rev7 should not advertise breakpoints yet.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.Breakpoints), "Mock breakpoint capability is missing.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.Watchpoints), "Mock watchpoint capability is missing.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.CallStack), "Mock call-stack capability is missing.");
+        AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.StepExecution), "Mock step-execution capability is missing.");
 
         await using ITargetSession targetSession = await plugin
             .ConnectAsync(TargetConnectionOptions.Empty, CancellationToken.None)
@@ -1753,7 +1847,11 @@ internal static class Program
         AssertEqual(process.Name, debugger.Process.Name, "Mock debugger attached to an unexpected process name.");
         AssertTrue(debugger.GetService<IDebuggerThreadService>() is not null, "Mock did not expose its thread-enumeration service.");
         AssertTrue(debugger.GetService<IDebuggerThreadControlService>() is not null, "Mock did not expose its thread-control service.");
-        AssertTrue(debugger.GetService<IDebuggerRegisterService>() is not null, "Mock rev7 did not expose its register service.");
+        AssertTrue(debugger.GetService<IDebuggerRegisterService>() is not null, "Mock did not expose its register service.");
+        AssertTrue(debugger.GetService<IDebuggerBreakpointService>() is not null, "Mock did not expose its breakpoint service.");
+        AssertTrue(debugger.GetService<IDebuggerBreakpointStateService>() is not null, "Mock did not expose its breakpoint state service.");
+        AssertTrue(debugger.GetService<IDebuggerCallStackService>() is not null, "Mock did not expose its call-stack service.");
+        AssertTrue(debugger.GetService<IDebuggerStepService>() is not null, "Mock did not expose its step service.");
 
         await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
         AssertEqual(DebuggerExecutionState.Detached, debugger.State, "Mock debugger did not enter Detached state.");
@@ -1876,8 +1974,26 @@ internal static class Program
             "Mock register snapshot is missing the semantic stack-pointer role.");
         AssertTrue(registers.Any(item => item.Role == DebuggerRegisterRole.FramePointer),
             "Mock register snapshot is missing the semantic frame-pointer role.");
-        AssertTrue(registers.All(item => item.CanWrite),
-            "Mock register snapshot should remain fully writable for deterministic write-path testing.");
+        AssertEqual(22, registers.Count,
+            "Mock register snapshot did not include the expected extended register fixtures.");
+        AssertTrue(registers.Where(item => item.Group is "General" or "Control").All(item => item.CanWrite),
+            "Mock general/control register rows must remain writable for deterministic write-path testing.");
+
+        DebuggerRegister floatingPoint = registers.Single(item => item.Id == "fp0");
+        DebuggerRegister vector128 = registers.Single(item => item.Id == "vector0");
+        DebuggerRegister vector256 = registers.Single(item => item.Id == "vector1");
+        DebuggerRegister debug = registers.Single(item => item.Id == "debug0");
+        AssertEqual(80, floatingPoint.BitWidth, "Mock floating-point fixture has the wrong register width.");
+        AssertEqual("Floating Point", floatingPoint.Group, "Mock floating-point fixture has the wrong neutral group.");
+        AssertEqual(128, vector128.BitWidth, "Mock 128-bit SIMD fixture has the wrong register width.");
+        AssertEqual(256, vector256.BitWidth, "Mock 256-bit SIMD fixture has the wrong register width.");
+        AssertEqual("SIMD", vector256.Group, "Mock wide-vector fixture has the wrong neutral group.");
+        AssertEqual("Debug", debug.Group, "Mock debug-register fixture has the wrong neutral group.");
+        AssertTrue(new[] { floatingPoint, vector128, vector256, debug }.All(item => !item.CanWrite),
+            "Mock extended register fixtures should remain read-only while general-register write testing stays unchanged.");
+        AssertTrue(new[] { floatingPoint, vector128, vector256, debug }.All(
+                item => item.ValueEncoding == DebuggerRegisterValueEncoding.UnsignedLittleEndian),
+            "Mock extended register fixtures did not retain neutral little-endian unsigned encoding.");
 
         const ulong replacement = 0x1122334455667788UL;
         byte[] replacementBytes = new byte[sizeof(ulong)];
@@ -1894,6 +2010,379 @@ internal static class Program
         await AssertThrowsAsync<InvalidOperationException>(
             () => registerService.GetRegistersAsync(1, CancellationToken.None),
             "Mock debugger retained a usable register snapshot after the target resumed.").ConfigureAwait(false);
+    }
+
+    private static async Task VerifyMockDebuggerCallStackServicesAsync()
+    {
+        MockTargetPlugin plugin = new();
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(TargetConnectionOptions.Empty, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = (await targetSession
+                .GetRequiredService<IProcessProvider>()
+                .GetProcessesAsync(CancellationToken.None)
+                .ConfigureAwait(false))
+            .Single();
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        IDebuggerCallStackService callStack = debugger.GetRequiredService<IDebuggerCallStackService>();
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => callStack.GetCallStackAsync(1, CancellationToken.None),
+            "Mock debugger exposed a call stack while the target was running.").ConfigureAwait(false);
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        IReadOnlyList<DebuggerStackFrame> frames = await callStack
+            .GetCallStackAsync(1, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        AssertEqual(3, frames.Count, "Mock debugger did not return its deterministic three-frame call stack.");
+        AssertEqual(0, frames[0].Index, "Mock top call frame has the wrong index.");
+        AssertEqual(MockTargetLayout.CodeAddress, frames[0].InstructionAddress,
+            "Mock top call frame does not match the paused instruction pointer.");
+        AssertEqual<ulong?>(MockTargetLayout.CodeAddress + 0x4, frames[0].ReturnAddress,
+            "Mock top call frame lost its deterministic return address.");
+        AssertEqual(process.Name, frames[0].ModuleName,
+            "Mock top call frame lost its deterministic module name.");
+        AssertEqual("Main.Current", frames[0].SymbolName,
+            "Mock top call frame lost its deterministic symbol name.");
+        AssertEqual(MockTargetLayout.CodeAddress + 0x4, frames[1].InstructionAddress,
+            "Mock caller frame has the wrong instruction address.");
+        AssertEqual("Main.Caller", frames[1].SymbolName,
+            "Mock caller frame lost its deterministic symbol name.");
+        AssertEqual<ulong?>(null, frames[2].ReturnAddress,
+            "Mock root call frame should not advertise a return address.");
+        AssertEqual("MockEntry", frames[2].SymbolName,
+            "Mock root call frame lost its deterministic symbol name.");
+
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => callStack.GetCallStackAsync(1, CancellationToken.None),
+            "Mock debugger retained usable call frames after Continue.").ConfigureAwait(false);
+    }
+
+    private static async Task VerifyMockDebuggerStepServicesAsync()
+    {
+        MockTargetPlugin plugin = new();
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(TargetConnectionOptions.Empty, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = (await targetSession
+                .GetRequiredService<IProcessProvider>()
+                .GetProcessesAsync(CancellationToken.None)
+                .ConfigureAwait(false))
+            .Single();
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        IDebuggerStepService stepping = debugger.GetRequiredService<IDebuggerStepService>();
+        IDebuggerRegisterService registers = debugger.GetRequiredService<IDebuggerRegisterService>();
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => stepping.StepAsync(DebuggerStepKind.Into, 1, CancellationToken.None),
+            "Mock debugger accepted Step Into while the target was running.").ConfigureAwait(false);
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        TaskCompletionSource<DebuggerEvent> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.StepCompleted)
+            {
+                completed.TrySetResult(args.Event);
+            }
+        };
+
+        await stepping.StepAsync(DebuggerStepKind.Into, 1, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(DebuggerExecutionState.Running, debugger.State,
+            "Mock Step Into did not immediately transition the target to Running.");
+
+        DebuggerEvent stepEvent = await completed.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        AssertEqual(DebuggerEventKind.StepCompleted, stepEvent.Kind,
+            "Mock native stepping did not produce StepCompleted.");
+        AssertEqual(DebuggerStopReason.StepCompleted, stepEvent.StopReason,
+            "Mock native stepping did not preserve the StepCompleted stop reason.");
+        AssertEqual<ulong?>(1, stepEvent.ThreadId,
+            "Mock native stepping completed on the wrong thread.");
+        AssertEqual<ulong?>(MockTargetLayout.CodeAddress + 0x2, stepEvent.InstructionPointer,
+            "Mock native stepping stopped at the wrong deterministic instruction.");
+        AssertEqual(DebuggerExecutionState.Paused, debugger.State,
+            "Mock native stepping did not return the debugger to Paused.");
+
+        IReadOnlyList<DebuggerRegister> snapshot = await registers
+            .GetRegistersAsync(1, CancellationToken.None)
+            .ConfigureAwait(false);
+        DebuggerRegister ip = snapshot.Single(item => item.Role == DebuggerRegisterRole.InstructionPointer);
+        AssertEqual(MockTargetLayout.CodeAddress + 0x2, BinaryPrimitives.ReadUInt64LittleEndian(ip.Value.Span),
+            "Mock Step Into did not update the selected thread's instruction pointer.");
+
+        await AssertThrowsAsync<NotSupportedException>(
+            () => stepping.StepAsync(DebuggerStepKind.Over, 1, CancellationToken.None),
+            "Mock backend unexpectedly implemented native Step Over instead of leaving composition to the host.").ConfigureAwait(false);
+        await AssertThrowsAsync<NotSupportedException>(
+            () => stepping.StepAsync(DebuggerStepKind.Out, 1, CancellationToken.None),
+            "Mock backend unexpectedly implemented native Step Out instead of leaving composition to the host.").ConfigureAwait(false);
+    }
+
+    private static async Task VerifyMockDebuggerBreakpointServicesAsync()
+    {
+        MockTargetPlugin plugin = new();
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(TargetConnectionOptions.Empty, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = (await targetSession
+                .GetRequiredService<IProcessProvider>()
+                .GetProcessesAsync(CancellationToken.None)
+                .ConfigureAwait(false))
+            .Single();
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+        IDebuggerBreakpointStateService states = debugger.GetRequiredService<IDebuggerBreakpointStateService>();
+
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    MockTargetLayout.AmmoAddress,
+                    1,
+                    DebuggerBreakpointKind.Software,
+                    DebuggerBreakpointAccess.Execute),
+                CancellationToken.None),
+            "Mock debugger accepted a software execute breakpoint in the mapped data area.").ConfigureAwait(false);
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    0x80000104,
+                    1,
+                    DebuggerBreakpointKind.Software,
+                    DebuggerBreakpointAccess.Execute),
+                CancellationToken.None),
+            "Mock debugger accepted a software execute breakpoint outside the target memory map.").ConfigureAwait(false);
+
+        DebuggerBreakpoint persistent = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                MockTargetLayout.CodeAddress + 8,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute),
+            CancellationToken.None).ConfigureAwait(false);
+        AssertTrue(persistent.IsEnabled, "Mock software breakpoint did not begin enabled.");
+
+        await states.SetBreakpointEnabledAsync(persistent.Id, false, CancellationToken.None).ConfigureAwait(false);
+        AssertFalse((await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Single().IsEnabled,
+            "Mock breakpoint disable state was not retained.");
+        await states.SetBreakpointEnabledAsync(persistent.Id, true, CancellationToken.None).ConfigureAwait(false);
+
+        TaskCompletionSource<DebuggerEvent> firstHit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Breakpoint)
+            {
+                firstHit.TrySetResult(args.Event);
+            }
+        };
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        DebuggerEvent hit = await firstHit.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        AssertEqual(DebuggerStopReason.Breakpoint, hit.StopReason, "Mock breakpoint hit lost its stop reason.");
+        AssertEqual<ulong?>(persistent.Request.Address, hit.InstructionPointer, "Mock breakpoint hit reported the wrong instruction pointer.");
+        AssertEqual(DebuggerExecutionState.Paused, debugger.State, "Mock breakpoint hit did not pause the debugger session.");
+        AssertEqual(1, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "Persistent mock breakpoint was removed after a hit.");
+
+        await breakpoints.RemoveBreakpointAsync(persistent.Id, CancellationToken.None).ConfigureAwait(false);
+        DebuggerBreakpoint temporary = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                MockTargetLayout.CodeAddress + 4,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute,
+                isTemporary: true),
+            CancellationToken.None).ConfigureAwait(false);
+        TaskCompletionSource<DebuggerEvent> temporaryHit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Breakpoint &&
+                args.Event.InstructionPointer == temporary.Request.Address)
+            {
+                temporaryHit.TrySetResult(args.Event);
+            }
+        };
+
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        _ = await temporaryHit.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        AssertEqual(0, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "Temporary mock breakpoint remained after its first hit.");
+    }
+
+    private static async Task VerifyDebuggerBreakpointValidationServiceAsync()
+    {
+        MockTargetPlugin plugin = new();
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(new TargetConnectionOptions(new Dictionary<string, string>()), CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerProvider provider = targetSession.GetRequiredService<IDebuggerProvider>();
+        TargetProcess process = (await targetSession.GetRequiredService<IProcessProvider>()
+                .GetProcessesAsync(CancellationToken.None)
+                .ConfigureAwait(false))
+            .Single();
+        await using IDebuggerSession debugger = await provider
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        IDebuggerBreakpointValidationService validation =
+            debugger.GetRequiredService<IDebuggerBreakpointValidationService>();
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+
+        DebuggerBreakpointRequest codeBreakpoint = new(
+            MockTargetLayout.CodeAddress,
+            1,
+            DebuggerBreakpointKind.Software,
+            DebuggerBreakpointAccess.Execute);
+        AssertTrue(validation.ValidateBreakpointRequest(codeBreakpoint).IsValid,
+            "Mock validator rejected a legal software execute breakpoint.");
+
+        DebuggerBreakpointRequest dataBreakpoint = new(
+            MockTargetLayout.HealthAddress,
+            1,
+            DebuggerBreakpointKind.Software,
+            DebuggerBreakpointAccess.Execute);
+        AssertFalse(validation.ValidateBreakpointRequest(dataBreakpoint).IsValid,
+            "Mock validator accepted a software breakpoint outside executable code.");
+
+        DebuggerBreakpointRequest writeWatchpoint = new(
+            MockTargetLayout.HealthAddress,
+            4,
+            DebuggerBreakpointKind.Hardware,
+            DebuggerBreakpointAccess.Write);
+        AssertTrue(validation.ValidateBreakpointRequest(writeWatchpoint).IsValid,
+            "Mock validator rejected a legal aligned write watchpoint.");
+        AssertFalse(validation.ValidateBreakpointRequest(new DebuggerBreakpointRequest(
+                MockTargetLayout.HealthAddress + 1,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write)).IsValid,
+            "Mock validator accepted a misaligned hardware watchpoint.");
+
+        DebuggerBreakpoint added = await breakpoints
+            .AddBreakpointAsync(codeBreakpoint, CancellationToken.None)
+            .ConfigureAwait(false);
+        AssertFalse(validation.ValidateBreakpointRequest(codeBreakpoint).IsValid,
+            "Mock validator accepted a duplicate software breakpoint.");
+        await breakpoints.RemoveBreakpointAsync(added.Id, CancellationToken.None).ConfigureAwait(false);
+    }
+
+    private static async Task VerifyMockDebuggerWatchpointServicesAsync()
+    {
+        MockTargetPlugin plugin = new();
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(TargetConnectionOptions.Empty, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = (await targetSession
+                .GetRequiredService<IProcessProvider>()
+                .GetProcessesAsync(CancellationToken.None)
+                .ConfigureAwait(false))
+            .Single();
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+        IDebuggerBreakpointStateService states = debugger.GetRequiredService<IDebuggerBreakpointStateService>();
+
+        await AssertThrowsAsync<NotSupportedException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    MockTargetLayout.HealthAddress,
+                    4,
+                    DebuggerBreakpointKind.Hardware,
+                    DebuggerBreakpointAccess.Execute),
+                CancellationToken.None),
+            "Mock accepted an execute request through the hardware-watchpoint path.").ConfigureAwait(false);
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    MockTargetLayout.HealthAddress + 2,
+                    4,
+                    DebuggerBreakpointKind.Hardware,
+                    DebuggerBreakpointAccess.Write),
+                CancellationToken.None),
+            "Mock accepted a misaligned four-byte hardware watchpoint.").ConfigureAwait(false);
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    MockTargetLayout.BaseAddress + (ulong)MockTargetLayout.MemorySize,
+                    1,
+                    DebuggerBreakpointKind.Hardware,
+                    DebuggerBreakpointAccess.Read),
+                CancellationToken.None),
+            "Mock accepted a hardware watchpoint outside the target map.").ConfigureAwait(false);
+
+        DebuggerBreakpoint persistent = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                MockTargetLayout.HealthAddress,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write),
+            CancellationToken.None).ConfigureAwait(false);
+        AssertTrue(persistent.IsEnabled, "Mock hardware watchpoint did not begin enabled.");
+
+        await states.SetBreakpointEnabledAsync(persistent.Id, false, CancellationToken.None).ConfigureAwait(false);
+        AssertFalse((await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Single().IsEnabled,
+            "Mock hardware watchpoint disable state was not retained.");
+        await states.SetBreakpointEnabledAsync(persistent.Id, true, CancellationToken.None).ConfigureAwait(false);
+
+        TaskCompletionSource<DebuggerEvent> firstHit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Watchpoint)
+            {
+                firstHit.TrySetResult(args.Event);
+            }
+        };
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        DebuggerEvent hit = await firstHit.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        AssertEqual(DebuggerStopReason.Watchpoint, hit.StopReason, "Mock hardware watchpoint hit lost its stop reason.");
+        AssertEqual<ulong?>(MockTargetLayout.CodeAddress + 4, hit.InstructionPointer,
+            "Mock hardware watchpoint did not report the accessing instruction as its instruction pointer.");
+        AssertEqual(persistent.Id, hit.TriggeredBreakpoint?.Id,
+            "Mock hardware watchpoint event did not identify the triggered watchpoint.");
+        AssertEqual(MockTargetLayout.HealthAddress, hit.TriggeredBreakpoint!.Request.Address,
+            "Mock hardware watchpoint event lost the watched data address.");
+        AssertEqual(1, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "Persistent mock hardware watchpoint was removed after its first hit.");
+
+        await breakpoints.RemoveBreakpointAsync(persistent.Id, CancellationToken.None).ConfigureAwait(false);
+        DebuggerBreakpoint temporary = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                MockTargetLayout.AmmoAddress,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.ReadWrite,
+                isTemporary: true),
+            CancellationToken.None).ConfigureAwait(false);
+        TaskCompletionSource<DebuggerEvent> temporaryHit = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Watchpoint &&
+                args.Event.TriggeredBreakpoint?.Id == temporary.Id)
+            {
+                temporaryHit.TrySetResult(args.Event);
+            }
+        };
+
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        _ = await temporaryHit.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
+        AssertEqual(0, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "Temporary mock hardware watchpoint remained after its first hit.");
     }
 
     private static async Task VerifyMockDebuggerAttachmentIsolationAsync()
@@ -1970,8 +2459,11 @@ internal static class Program
             mainWindowXaml.Contains("OpenDebuggerButton_Click", StringComparison.Ordinal),
             "Main workspace does not expose a capability-driven Debugger entry point.");
         AssertTrue(
-            mainWindowSource.Contains("new DebuggerViewModel", StringComparison.Ordinal) &&
-            mainWindowSource.Contains("plugin.ConnectionGeneration", StringComparison.Ordinal),
+            mainWindowSource.Contains("long connectionGeneration = plugin.ConnectionGeneration;", StringComparison.Ordinal) &&
+            Regex.IsMatch(
+                mainWindowSource,
+                @"DebuggerViewModel\s+\w+\s*=\s*new(?:\s+DebuggerViewModel)?\s*\(\s*plugin\s*,\s*targetProcess\s*,\s*connectionGeneration\s*\)",
+                RegexOptions.CultureInvariant),
             "Debugger window is not bound to the current target connection generation.");
         AssertTrue(
             viewModelSource.Contains("DebuggerSessionCoordinator", StringComparison.Ordinal) &&
@@ -2090,6 +2582,35 @@ internal static class Program
         return Task.CompletedTask;
     }
 
+    private static Task VerifyDebuggerPaneSplitterSourceAsync()
+    {
+        string xaml = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+
+        AssertTrue(
+            xaml.Contains("controls:ProportionalGridSplitter", StringComparison.Ordinal) &&
+            xaml.Contains("Style=\"{StaticResource RowWorkspaceSplitterStyle}\"", StringComparison.Ordinal) &&
+            xaml.Contains("ResizeDirection=\"Rows\"", StringComparison.Ordinal) &&
+            xaml.Contains("ResizeBehavior=\"PreviousAndNext\"", StringComparison.Ordinal),
+            "Debugger Threads/Registers layout does not reuse the shared proportional row splitter.");
+        AssertTrue(
+            xaml.Contains("MinimumPreviousRatio=\"0.2\"", StringComparison.Ordinal) &&
+            xaml.Contains("MaximumPreviousRatio=\"0.8\"", StringComparison.Ordinal),
+            "Debugger Threads/Registers splitter does not retain relative 20/80 movement limits.");
+        AssertTrue(
+            xaml.Contains("<Setter Property=\"Height\" Value=\"*\" />", StringComparison.Ordinal) &&
+            xaml.Contains("<RowDefinition Height=\"*\" MinHeight=\"120\" />", StringComparison.Ordinal),
+            "Debugger Threads/Registers panes are not configured to share the available height from an equal star-sized baseline.");
+        AssertTrue(
+            xaml.Contains("<DataTrigger Binding=\"{Binding HasRegisterAccessCapability}\" Value=\"False\">", StringComparison.Ordinal) &&
+            xaml.Contains("<Setter Property=\"Height\" Value=\"0\" />", StringComparison.Ordinal),
+            "Debugger register row does not collapse when the backend lacks register access.");
+        AssertFalse(
+            xaml.Contains("Height=\"210\"", StringComparison.Ordinal),
+            "Debugger Registers pane still uses the former fixed 210-unit height.");
+
+        return Task.CompletedTask;
+    }
+
     private static Task VerifyDebuggerRegisterValueCodecSourceAsync()
     {
         string source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerRegisterValueCodec.cs"));
@@ -2167,6 +2688,531 @@ internal static class Program
         AssertTrue(
             viewModelSource.Contains("? address\n                : null;", StringComparison.Ordinal),
             "Debugger current-instruction state is not cleared when a refreshed register snapshot has no semantic instruction pointer.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerBreakpointManagerSourceAsync()
+    {
+        string xaml = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string viewModel = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+        string codeBehind = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerWindow.xaml.cs"));
+
+        AssertContains(xaml, "Content=\"Breakpoints / Watchpoints\"", "Debugger workspace is missing the Breakpoints / Watchpoints workspace selector.");
+        AssertContains(xaml, "ItemsSource=\"{Binding Breakpoints}\"", "Breakpoint manager does not bind its neutral collection.");
+        AssertContains(xaml, "Command=\"{Binding EnableBreakpointCommand}\"", "Breakpoint manager is missing Enable.");
+        AssertContains(xaml, "Command=\"{Binding DisableBreakpointCommand}\"", "Breakpoint manager is missing Disable.");
+        AssertContains(xaml, "Command=\"{Binding RemoveBreakpointCommand}\"", "Breakpoint manager is missing Remove.");
+        AssertContains(xaml, "RemoveAllBreakpointsButton_Click", "Breakpoint manager is missing destructive Remove All handling.");
+        AssertContains(xaml, "HasBreakpointManagementCapability", "Breakpoint/watchpoint manager is not capability gated.");
+        AssertContains(xaml, "<Setter Property=\"Height\" Value=\"13*\" />", "Breakpoint manager does not start at the requested upper-pane height ratio.");
+        AssertContains(xaml, "<RowDefinition Height=\"7*\" MinHeight=\"150\" />", "Debugger events pane does not start at the requested lower-pane height ratio.");
+        AssertContains(viewModel, "IDebuggerBreakpointService", "Debugger ViewModel does not use the neutral breakpoint service.");
+        AssertContains(viewModel, "IDebuggerBreakpointStateService", "Debugger ViewModel does not use the optional breakpoint-state service.");
+        AssertContains(viewModel, "DebuggerBreakpointKind.Software", "Debugger ViewModel does not create software breakpoints through the neutral model.");
+        AssertContains(viewModel, "DebuggerBreakpointAccess.Execute", "Debugger ViewModel does not constrain rev11 manager adds to execute breakpoints.");
+        AssertContains(viewModel, "_deferredStopContextEvent", "Debugger ViewModel is missing deferred stop-context state for immediate breakpoint re-hits.");
+        AssertContains(viewModel, "_continueInProgress", "Debugger ViewModel is missing Continue-specific stop-context deferral.");
+        AssertContains(viewModel, "else if (_continueInProgress || _pendingInterruptedComposedExecutionOperation is not null)", "Debugger ViewModel does not defer a paused breakpoint/interruption event that arrives while an execution command is still completing.");
+        AssertContains(viewModel, "RefreshDeferredStopContextIfNeeded();", "Debugger ViewModel does not replay deferred stop context after Continue completes.");
+        AssertContains(codeBehind, "BreakpointDialog", "Debugger window does not open the breakpoint-add dialog.");
+        AssertContains(codeBehind, "ConfirmationDialogTone.Danger", "Remove All breakpoints is not protected by the shared destructive confirmation dialog.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyBreakpointDialogSourceAsync()
+    {
+        string xaml = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "BreakpointDialog.xaml"));
+        string code = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "BreakpointDialog.xaml.cs"));
+        AssertContains(xaml, "Add Breakpoint / Watchpoint", "Breakpoint dialog does not describe the combined breakpoint/watchpoint scope.");
+        AssertContains(xaml, "Software Execute Breakpoint", "Breakpoint dialog is missing the existing software execute-breakpoint option.");
+        AssertContains(xaml, "Hardware Watchpoint", "Breakpoint dialog is missing hardware-watchpoint selection.");
+        AssertContains(xaml, "Temporary (remove after first hit)", "Breakpoint dialog is missing temporary lifetime selection.");
+        AssertContains(xaml, "DangerButtonStyle", "Breakpoint dialog Cancel action does not use the shared dismissive/danger styling.");
+        AssertContains(code, "NumberStyles.AllowHexSpecifier", "Breakpoint dialog does not validate hexadecimal addresses.");
+        AssertContains(code, "candidate.StartsWith(\"0x\"", "Breakpoint dialog does not accept the standard 0x address prefix.");
+        AssertContains(code, "DebuggerBreakpointRequest", "Breakpoint dialog does not return the neutral breakpoint/watchpoint request model.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerWatchpointManagerSourceAsync()
+    {
+        string xaml = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string viewModel = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+        string codeBehind = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerWindow.xaml.cs"));
+        string dialogXaml = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "BreakpointDialog.xaml"));
+        string dialogCode = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "BreakpointDialog.xaml.cs"));
+
+        AssertContains(xaml, "HasBreakpointManagementCapability", "Debugger manager does not remain visible for watchpoint-only backends.");
+        AssertContains(xaml, "Header=\"Size\" Binding=\"{Binding Size}\"", "Debugger manager does not display hardware-watchpoint size metadata.");
+        AssertContains(viewModel, "TargetCapabilities.Watchpoints", "Debugger ViewModel does not gate hardware-watchpoint creation by the neutral capability.");
+        AssertContains(viewModel, "public async Task<bool> AddBreakpointAsync(DebuggerBreakpointRequest request)",
+            "Debugger ViewModel does not route generic neutral breakpoint/watchpoint requests.");
+        AssertContains(viewModel, "SelectedBreakpoint?.Breakpoint.Request.Access == DebuggerBreakpointAccess.Execute",
+            "Debugger ViewModel can still navigate a data watchpoint address directly to the Disassembler.");
+        AssertContains(codeBehind, "viewModel.HasWatchpointCapability", "Debugger window does not pass watchpoint capability into the add dialog.");
+        AssertContains(codeBehind, "dialog.Request is DebuggerBreakpointRequest request", "Debugger window does not consume the dialog's neutral request.");
+        AssertContains(dialogXaml, "Access", "Hardware-watchpoint dialog is missing access selection.");
+        AssertContains(dialogXaml, "Size (bytes)", "Hardware-watchpoint dialog is missing generic byte-size input.");
+        AssertContains(dialogXaml, "input:TextBoxInputFilter.Mode=\"HexAddress\"",
+            "Breakpoint/watchpoint dialog address input does not reuse the host hexadecimal live filter.");
+        AssertContains(dialogXaml, "input:TextBoxInputFilter.Mode=\"UnsignedInteger\"",
+            "Hardware-watchpoint size input does not reuse the host unsigned-integer live filter.");
+        AssertContains(dialogCode, "DebuggerBreakpointKind.Hardware", "Breakpoint dialog does not construct a neutral hardware request.");
+        AssertFalse(dialogCode.Contains("ps5debug", StringComparison.OrdinalIgnoreCase),
+            "Generic WPF breakpoint dialog contains PS5-specific backend rules.");
+        AssertFalse(dialogCode.Contains("DR7", StringComparison.OrdinalIgnoreCase),
+            "Generic WPF breakpoint dialog contains architecture-specific debug-register encoding.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerBreakpointClassificationSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string viewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerBreakpointViewModel.cs"));
+
+        AssertContains(xaml, "Header=\"Type\" Binding=\"{Binding Type}\"",
+            "Debugger breakpoint table does not classify records as Breakpoint or Watchpoint.");
+        AssertContains(xaml, "Header=\"Mechanism\" Binding=\"{Binding Mechanism}\"",
+            "Debugger breakpoint table does not expose Software/Hardware as a separate mechanism column.");
+        AssertContains(viewModel, "Breakpoint.Request.Access == DebuggerBreakpointAccess.Execute",
+            "Debugger breakpoint classification is not based on execute-vs-data semantics.");
+        AssertContains(viewModel, "? \"Breakpoint\"",
+            "Debugger breakpoint classification is missing the Breakpoint label.");
+        AssertContains(viewModel, ": \"Watchpoint\";",
+            "Debugger breakpoint classification is missing the Watchpoint label.");
+        AssertContains(viewModel, "public string Mechanism => Breakpoint.Request.Kind.ToString();",
+            "Debugger breakpoint mechanism no longer exposes the neutral Software/Hardware kind.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyMainWorkspaceDebuggerAddressActionsSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "MainWindow.xaml"));
+        string source = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "MainWindow.xaml.cs"));
+        string debuggerViewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+        string toolManager = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "ToolWindowManager.cs"));
+
+        AssertTrue(Regex.Matches(xaml, "Header=\"Add Breakpoint\"").Count == 2,
+            "Scan Results and Saved Addresses do not both expose Add Breakpoint.");
+        AssertTrue(Regex.Matches(xaml, "Header=\"Add Watchpoint\"").Count == 2,
+            "Scan Results and Saved Addresses do not both expose Add Watchpoint.");
+        AssertContains(xaml, "Tag=\"AddBreakpoint\"",
+            "Debugger address-action menu lacks the AddBreakpoint enablement tag.");
+        AssertContains(xaml, "Tag=\"AddWatchpoint\"",
+            "Debugger address-action menu lacks the AddWatchpoint enablement tag.");
+        AssertContains(source, "FindAttachedDebugger(plugin, targetProcess)",
+            "Main workspace debugger shortcuts do not require an already-open attached Debugger for the same target.");
+        AssertContains(source, "ValidateAddressActionRequest",
+            "Main workspace debugger shortcuts bypass backend request validation.");
+        AssertContains(source, "DebuggerBreakpointKind.Software",
+            "Add Breakpoint does not construct a neutral software execute-breakpoint request.");
+        AssertContains(source, "DebuggerBreakpointKind.Hardware",
+            "Add Watchpoint does not construct a neutral hardware watchpoint request.");
+        AssertContains(source, "DebuggerBreakpointAccess.Write",
+            "Add Watchpoint does not default to Write access for the selected data address.");
+        AssertContains(source, "scanResult.Result.CurrentValue.Size",
+            "Scan Result watchpoint shortcuts do not preserve the selected value width.");
+        AssertContains(source, "savedAddress.ValueSize",
+            "Saved Address watchpoint shortcuts do not preserve the saved value width.");
+        AssertContains(debuggerViewModel, "IDebuggerBreakpointValidationService",
+            "Debugger address-action gating does not use the optional neutral validation service.");
+        AssertContains(toolManager, "FindDataContext<TDataContext>",
+            "Tool-window manager cannot resolve the already-open Debugger workspace used by address shortcuts.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerCallStackAndSteppingSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string viewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+        string codeBehind = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml.cs"));
+        string frameViewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerStackFrameViewModel.cs"));
+        string mainWindowSource = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "MainWindow.xaml.cs"));
+        string pluginViewModelSource = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "PluginViewModel.cs"));
+
+        AssertContains(xaml, "Content=\"Breakpoints / Watchpoints\"",
+            "Debugger upper-right workspace is missing the Breakpoints / Watchpoints selector button.");
+        AssertContains(xaml, "Content=\"Call Stack\"",
+            "Debugger upper-right workspace is missing the Call Stack selector button.");
+        AssertContains(xaml, "Command=\"{Binding ShowBreakpointsWorkspaceCommand}\"",
+            "Debugger upper-right workspace does not route the Breakpoints / Watchpoints selector through the ViewModel.");
+        AssertContains(xaml, "Command=\"{Binding ShowCallStackWorkspaceCommand}\"",
+            "Debugger upper-right workspace does not route the Call Stack selector through the ViewModel.");
+        AssertContains(xaml, "ItemsSource=\"{Binding CallFrames}\"",
+            "Call Stack grid is not bound to the neutral call-frame collection.");
+        AssertContains(xaml, "Header=\"Instruction Address\" Binding=\"{Binding InstructionAddressText}\"",
+            "Call Stack grid is missing its compact instruction-address column.");
+        AssertContains(xaml, "Header=\"Module\" Binding=\"{Binding ModuleName}\"",
+            "Call Stack grid is missing module context.");
+        AssertContains(xaml, "Header=\"Symbol\" Binding=\"{Binding SymbolName}\"",
+            "Call Stack grid is missing symbol context.");
+        AssertContains(xaml, "Text=\"{Binding SelectedStackFrame.StackPointerText}\"",
+            "Selected Call Stack details are missing SP.");
+        AssertContains(xaml, "Text=\"{Binding SelectedStackFrame.FramePointerText}\"",
+            "Selected Call Stack details are missing FP.");
+        AssertContains(xaml, "Text=\"{Binding SelectedStackFrame.ReturnAddressText}\"",
+            "Selected Call Stack details are missing the return address.");
+        AssertContains(xaml, "CallStackDataGrid_MouseDoubleClick",
+            "Call Stack does not support direct Disassembler navigation by double-click.");
+        AssertContains(xaml, "OpenSelectedCallFrameMemoryViewerButton_Click",
+            "Call Stack is missing Memory Viewer navigation.");
+        AssertContains(xaml, "Command=\"{Binding StepIntoCommand}\"",
+            "Debugger execution controls are missing Step Into.");
+        AssertContains(xaml, "Command=\"{Binding StepOverCommand}\"",
+            "Debugger execution controls are missing Step Over.");
+        AssertContains(xaml, "Command=\"{Binding StepOutCommand}\"",
+            "Debugger execution controls are missing Step Out.");
+        AssertContains(xaml, "Style=\"{StaticResource ColumnWorkspaceSplitterStyle}\"",
+            "Debugger does not reuse the shared vertical workspace splitter style.");
+        AssertContains(xaml, "Text=\"Events\"",
+            "Debugger Events header was lost during the rev17 workspace re-layout.");
+        AssertContains(xaml, "Content=\"Clear Events\"",
+            "Debugger Events header is missing its local Clear Events action.");
+
+        AssertContains(viewModel, "ObservableCollection<DebuggerStackFrameViewModel> CallFrames",
+            "Debugger ViewModel is missing its call-frame collection.");
+        AssertContains(viewModel, "IDebuggerCallStackService",
+            "Debugger ViewModel does not consume the neutral call-stack service.");
+        AssertContains(viewModel, "IDebuggerStepService",
+            "Debugger ViewModel does not consume the neutral step service.");
+        AssertContains(viewModel, "DebuggerStepKind.Into",
+            "Debugger ViewModel does not route native Step Into through the neutral step contract.");
+        AssertContains(viewModel, "instruction.FlowControl != DisassemblyFlowControl.Call",
+            "Step Over does not use existing disassembly flow-control information to distinguish calls.");
+        AssertContains(viewModel, "await RunToAddressAsync(returnAddress, \"Step Over\")",
+            "Step Over does not compose call handling from a temporary run-to target.");
+        AssertContains(viewModel, "await RunToAddressAsync(returnAddress, \"Step Out\")",
+            "Step Out does not compose execution from the selected frame's return address.");
+        AssertContains(viewModel, "isTemporary: true",
+            "Debugger stepping composition is missing temporary breakpoint semantics.");
+        AssertContains(viewModel, "_deferredStopContextEvent",
+            "Rev17 stepping does not reuse deferred stop-context handling.");
+        AssertContains(codeBehind, "OpenSelectedCallFrameDisassembler",
+            "Debugger window code-behind is missing Call Stack -> Disassembler navigation.");
+        AssertContains(codeBehind, "_openMemoryViewer(frame.InstructionAddress)",
+            "Debugger window code-behind is missing Call Stack -> Memory Viewer navigation.");
+        AssertContains(frameViewModel, "public string InstructionAddressText",
+            "Call Stack presentation model is missing a formatted instruction address.");
+        AssertContains(mainWindowSource, "CanOpenMemoryViewerFromDebugger",
+            "Main window does not bind debugger Call Stack navigation to the current target lifetime.");
+        AssertContains(pluginViewModelSource, "CanOpenMemoryViewerForTarget",
+            "PluginViewModel is missing the target-safe Memory Viewer navigation gate used by Call Stack.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerBreakpointAwareStepOverSourceAsync()
+    {
+        string viewModel = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+
+        AssertContains(viewModel, "Dictionary<ulong, DisassembledInstruction> _softwareBreakpointInstructionCache",
+            "Debugger ViewModel does not retain the original decoded instruction for software execute breakpoints.");
+        AssertContains(viewModel, "CaptureSoftwareBreakpointInstructionAsync(request)",
+            "Software breakpoint creation does not capture the original instruction before backend patching.");
+        AssertContains(viewModel, "_softwareBreakpointInstructionCache[request.Address] = originalInstruction",
+            "Successfully created software execute breakpoints do not retain their original decoded instruction.");
+        AssertContains(viewModel, "_softwareBreakpointInstructionCache.Remove(request.Address);",
+            "A fresh software execute breakpoint whose optional capture fails can retain stale instruction metadata from an earlier breakpoint at the same address.");
+        AssertContains(viewModel, "GetLogicalSoftwareBreakpointInstruction(instructionPointer)",
+            "Step Over does not consult breakpoint-aware original-instruction state.");
+        AssertContains(viewModel, "debugEvent.TriggeredBreakpoint",
+            "Breakpoint-aware Step Over is not tied to the neutral breakpoint that actually triggered the stop.");
+        AssertContains(viewModel, "breakpoint.Request.Kind == DebuggerBreakpointKind.Software",
+            "Breakpoint-aware Step Over does not restrict logical-stop reuse to software breakpoints.");
+        AssertContains(viewModel, "breakpoint.Request.Access == DebuggerBreakpointAccess.Execute",
+            "Breakpoint-aware Step Over does not restrict logical-stop reuse to execute breakpoints.");
+        AssertContains(viewModel, "SetLogicalSoftwareBreakpointStop(context.Event)",
+            "Debugger events do not establish the matching logical software-breakpoint stop context.");
+        AssertContains(viewModel, "ClearSoftwareBreakpointInstructionState();",
+            "Debugger lifecycle cleanup does not clear cached software-breakpoint instruction state.");
+        AssertContains(viewModel, "Breakpoint creation must remain available even when optional instruction capture fails.",
+            "Optional original-instruction capture is not explicitly isolated from breakpoint creation failure.");
+
+        int addMethodIndex = viewModel.IndexOf(
+            "public async Task<bool> AddBreakpointAsync(DebuggerBreakpointRequest request)",
+            StringComparison.Ordinal);
+        int addCaptureIndex = viewModel.IndexOf(
+            "CaptureSoftwareBreakpointInstructionAsync(request)",
+            addMethodIndex,
+            StringComparison.Ordinal);
+        int backendAddIndex = viewModel.IndexOf(
+            ".AddBreakpointAsync(request, _lifetimeCancellation.Token)",
+            addMethodIndex,
+            StringComparison.Ordinal);
+        int addCacheIndex = viewModel.IndexOf(
+            "_softwareBreakpointInstructionCache[request.Address] = originalInstruction",
+            backendAddIndex,
+            StringComparison.Ordinal);
+        AssertTrue(
+            addMethodIndex >= 0 && addCaptureIndex > addMethodIndex && backendAddIndex > addCaptureIndex && addCacheIndex > backendAddIndex,
+            "Original instruction capture must occur before software breakpoint installation and must be retained only after the backend add succeeds.");
+
+        int stepOverMethodIndex = viewModel.IndexOf("private async Task StepOverAsync()", StringComparison.Ordinal);
+        int cachedLookupIndex = viewModel.IndexOf(
+            "GetLogicalSoftwareBreakpointInstruction(instructionPointer)",
+            stepOverMethodIndex,
+            StringComparison.Ordinal);
+        int liveDisassemblyIndex = viewModel.IndexOf(
+            ".ReadDisassemblyContextAsync(",
+            cachedLookupIndex,
+            StringComparison.Ordinal);
+        AssertTrue(stepOverMethodIndex >= 0 && cachedLookupIndex > stepOverMethodIndex && liveDisassemblyIndex > cachedLookupIndex,
+            "Step Over must prefer the original cached call instruction before falling back to breakpoint-patched live disassembly.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerWorkspaceModeSwitcherSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string viewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+
+        AssertFalse(xaml.Contains("<TabControl", StringComparison.Ordinal),
+            "Debugger upper-right workspace must not reintroduce the WPF TabControl that repeatedly clipped its header edge at runtime.");
+        AssertFalse(xaml.Contains("<TabItem", StringComparison.Ordinal),
+            "Debugger upper-right workspace must not reintroduce WPF TabItems.");
+        AssertContains(xaml, "Command=\"{Binding ShowBreakpointsWorkspaceCommand}\"",
+            "Breakpoints / Watchpoints selector button is not bound to its workspace-switch command.");
+        AssertContains(xaml, "Command=\"{Binding ShowCallStackWorkspaceCommand}\"",
+            "Call Stack selector button is not bound to its workspace-switch command.");
+        AssertContains(xaml, "Visibility=\"{Binding IsBreakpointsWorkspaceSelected, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            "Breakpoints / Watchpoints content is not controlled by the selected workspace state.");
+        AssertContains(xaml, "Visibility=\"{Binding IsCallStackWorkspaceSelected, Converter={StaticResource BooleanToVisibilityConverter}}\"",
+            "Call Stack content is not controlled by the selected workspace state.");
+
+        AssertContains(viewModel, "public bool IsBreakpointsWorkspaceSelected",
+            "Debugger ViewModel does not expose Breakpoints / Watchpoints workspace selection state.");
+        AssertContains(viewModel, "public bool IsCallStackWorkspaceSelected",
+            "Debugger ViewModel does not expose Call Stack workspace selection state.");
+        AssertContains(viewModel, "public ICommand ShowBreakpointsWorkspaceCommand",
+            "Debugger ViewModel is missing the Breakpoints / Watchpoints workspace-switch command.");
+        AssertContains(viewModel, "public ICommand ShowCallStackWorkspaceCommand",
+            "Debugger ViewModel is missing the Call Stack workspace-switch command.");
+        AssertContains(viewModel, "_isCallStackWorkspaceSelected = !HasBreakpointManagementCapability && HasCallStackCapability;",
+            "Debugger workspace does not default to Breakpoints / Watchpoints when both views are available or fall back to Call Stack when it is the only view.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerWorkspaceSwitchButtonThemeSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string buttonStyles = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "ButtonStyles.xaml"));
+        string controlStyles = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "ControlStyles.xaml"));
+
+        AssertContains(buttonStyles, "x:Key=\"DebuggerWorkspaceSwitchButtonStyle\"",
+            "Shared button styles are missing the compact Debugger workspace selector base style.");
+        AssertContains(buttonStyles, "BasedOn=\"{StaticResource SecondaryButtonStyle}\"",
+            "Debugger workspace selector does not reuse the normal application button template.");
+        AssertContains(buttonStyles, "<Setter Property=\"Height\" Value=\"28\" />",
+            "Debugger workspace selector does not use the requested compact height.");
+        AssertContains(buttonStyles, "<Setter Property=\"FontSize\" Value=\"12\" />",
+            "Debugger workspace selector does not use the requested smaller text size.");
+        AssertContains(buttonStyles, "Binding=\"{Binding IsBreakpointsWorkspaceSelected}\" Value=\"True\"",
+            "Breakpoints / Watchpoints selector has no persistent selected-state trigger.");
+        AssertContains(buttonStyles, "Binding=\"{Binding IsCallStackWorkspaceSelected}\" Value=\"True\"",
+            "Call Stack selector has no persistent selected-state trigger.");
+        AssertTrue(Regex.Matches(buttonStyles, Regex.Escape("<Setter Property=\"BorderBrush\" Value=\"{DynamicResource AccentBrush}\" />")).Count >= 2,
+            "Both workspace selector buttons must use the theme accent outline when selected.");
+        AssertTrue(Regex.Matches(buttonStyles, Regex.Escape("<Setter Property=\"BorderThickness\" Value=\"2\" />")).Count >= 2,
+            "Both workspace selector buttons must make their selected outline clearly visible.");
+        AssertContains(xaml, "Style=\"{StaticResource DebuggerBreakpointsSwitchButtonStyle}\"",
+            "Breakpoints / Watchpoints selector does not use its shared selected-state button style.");
+        AssertContains(xaml, "Style=\"{StaticResource DebuggerCallStackSwitchButtonStyle}\"",
+            "Call Stack selector does not use its shared selected-state button style.");
+        AssertFalse(controlStyles.Contains("WorkspaceTabControlStyle", StringComparison.Ordinal),
+            "Unused workspace TabControl styling remains in active shared resources after the button-switcher replacement.");
+        AssertFalse(controlStyles.Contains("WorkspaceTabItemStyle", StringComparison.Ordinal),
+            "Unused workspace TabItem styling remains in active shared resources after the button-switcher replacement.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerWorkspacePanelLayoutSourceAsync()
+    {
+        string xaml = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory,
+            "Fixtures",
+            "DebuggerWindow.xaml"));
+
+        AssertContains(xaml, "Width=\"1240\"",
+            "Debugger default width was not increased for the expanded workspace.");
+        AssertContains(xaml, "Height=\"780\"",
+            "Debugger default height was not increased for the expanded workspace.");
+        AssertFalse(xaml.Contains("Text=\"{Binding Breakpoints.Count}\"", StringComparison.Ordinal),
+            "Breakpoints / Watchpoints count remains in the removed inner title row.");
+        AssertFalse(xaml.Contains("Text=\"{Binding CallFrames.Count}\"", StringComparison.Ordinal),
+            "Call Stack count remains in the removed inner title row.");
+        AssertFalse(xaml.Contains("Text=\"Breakpoints / Watchpoints\" Style=\"{StaticResource SectionTitleTextStyle}\"", StringComparison.Ordinal),
+            "Breakpoints / Watchpoints still duplicates its selector label as an inner title.");
+        AssertFalse(xaml.Contains("Text=\"Call Stack\" Style=\"{StaticResource SectionTitleTextStyle}\"", StringComparison.Ordinal),
+            "Call Stack still duplicates its selector label as an inner title.");
+        AssertContains(xaml, "Grid.Column=\"2\" HorizontalAlignment=\"Right\"",
+            "Breakpoints / Watchpoints footer is missing its right-aligned action group.");
+        AssertContains(xaml, "Content=\"Add...\"",
+            "Breakpoints / Watchpoints footer is missing Add.");
+        AssertContains(xaml, "Command=\"{Binding RefreshBreakpointsCommand}\"",
+            "Breakpoints / Watchpoints footer is missing Refresh.");
+        AssertContains(xaml, "Command=\"{Binding RefreshCallStackCommand}\"",
+            "Call Stack footer is missing its moved Refresh action.");
+        AssertContains(xaml, "OpenSelectedCallFrameDisassemblerButton_Click",
+            "Call Stack footer lost Disassembler navigation during the layout refresh.");
+        AssertContains(xaml, "OpenSelectedCallFrameMemoryViewerButton_Click",
+            "Call Stack footer lost Memory Viewer navigation during the layout refresh.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyToolWindowIndependentZOrderSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string mainWindowSource = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "MainWindow.xaml.cs"));
+        string managerSource = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "ToolWindowManager.cs"));
+
+        AssertEqual(3, Regex.Matches(mainWindowSource, Regex.Escape("_toolWindowManager.Show(window, this);")).Count,
+            "Debugger, Disassembler, and Memory Viewer must all use the shared modeless tool-window launcher.");
+        AssertContains(managerSource, "window.Owner = placementOwner;",
+            "Tool-window launch no longer preserves CenterOwner placement during initial Show.");
+        AssertContains(managerSource, "window.Show();",
+            "Tool-window manager no longer opens tools modelessly.");
+        AssertContains(managerSource, "window.Owner = null;",
+            "Tool-window manager does not release WPF ownership after modeless launch, so the main window would remain below its tools.");
+        AssertFalse(managerSource.Contains("Topmost", StringComparison.Ordinal),
+            "Tool-window z-order must not be implemented with Topmost.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyMainWindowToolCleanupSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string mainWindowSource = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "MainWindow.xaml.cs"));
+        string managerSource = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "ToolWindowManager.cs"));
+
+        AssertContains(mainWindowSource, "protected override void OnClosing(CancelEventArgs e)",
+            "Main window does not coordinate modeless tool cleanup before application shutdown.");
+        AssertContains(mainWindowSource, "e.Cancel = true;",
+            "Main-window shutdown is not held while asynchronous tool cleanup completes.");
+        AssertContains(mainWindowSource, "_ = CompleteToolWindowShutdownAsync();",
+            "Main-window closing does not hand asynchronous tool cleanup to the dedicated shutdown coordinator.");
+        AssertContains(mainWindowSource, "await _toolWindowManager.CloseAllAsync().ConfigureAwait(true);",
+            "Main window does not await tool-window cleanup before completing its close.");
+        AssertContains(managerSource, "window.IsEnabled = false;",
+            "Tool-window manager does not disable tracked tools before asynchronous shutdown cleanup, allowing new tool actions to race application exit.");
+        AssertContains(managerSource, "dataContext is IAsyncDisposable",
+            "Tool-window manager does not await asynchronous DataContext cleanup such as the Debugger detach path.");
+        AssertContains(managerSource, "dataContext is IDisposable",
+            "Tool-window manager does not run synchronous DataContext cleanup for existing tool workspaces.");
+        AssertContains(managerSource, "window.Close();",
+            "Tool-window manager does not close the tracked window after its cleanup attempt.");
+        AssertContains(managerSource, "window.Closed += ToolWindow_Closed;",
+            "Tool-window manager does not untrack windows that users close normally.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyMainWindowShutdownReentrySourceAsync()
+    {
+        string mainWindowSource = File.ReadAllText(Path.Combine(
+            AppContext.BaseDirectory,
+            "Fixtures",
+            "MainWindow.xaml.cs"));
+
+        AssertContains(mainWindowSource, "private async Task CompleteToolWindowShutdownAsync()",
+            "Main-window tool cleanup is not isolated from the synchronous WPF OnClosing stack.");
+        AssertContains(mainWindowSource, "_ = Dispatcher.BeginInvoke(new Action(Close));",
+            "Main-window final Close is not queued through the dispatcher with the awaitable DispatcherOperation explicitly discarded.");
+
+        int helperStart = mainWindowSource.IndexOf("private async Task CompleteToolWindowShutdownAsync()", StringComparison.Ordinal);
+        int onClosedStart = mainWindowSource.IndexOf("protected override void OnClosed", helperStart, StringComparison.Ordinal);
+        AssertTrue(helperStart >= 0 && onClosedStart > helperStart,
+            "Main-window shutdown helper could not be isolated for close re-entry verification.");
+
+        string helper = mainWindowSource[helperStart..onClosedStart];
+        AssertFalse(Regex.IsMatch(helper, @"(?m)^\s*Close\(\);\s*$"),
+            "Main-window shutdown helper still calls Close directly and can re-enter WPF while the original close request is active.");
+        AssertContains(helper, "_toolWindowShutdownCompleted = true;",
+            "Main-window shutdown helper no longer arms the completed guard before queuing final close.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerRunToAddressSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string viewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+        string codeBehind = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml.cs"));
+        string dialogXaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "RunToAddressDialog.xaml"));
+        string dialogCode = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "RunToAddressDialog.xaml.cs"));
+
+        AssertContains(xaml, "Click=\"RunToAddressButton_Click\"",
+            "Debugger execution controls are missing Run to Address.");
+        AssertContains(xaml, "IsEnabled=\"{Binding CanRunToAddress}\"",
+            "Run to Address is not gated by current debugger state/capabilities.");
+        AssertContains(codeBehind, "RunToAddressDialog",
+            "Debugger window does not use the dedicated Run to Address dialog.");
+        AssertContains(codeBehind, "await viewModel.RunToAddressAsync(address)",
+            "Run to Address dialog result is not routed into the debugger ViewModel.");
+        AssertContains(viewModel, "public Task RunToAddressAsync(ulong address)",
+            "Debugger ViewModel is missing its Run to Address operation.");
+        AssertContains(viewModel, "DebuggerBreakpointKind.Software",
+            "Run to Address does not compose execution from the existing software-breakpoint service.");
+        AssertContains(viewModel, "DebuggerBreakpointAccess.Execute",
+            "Run to Address does not require an execute breakpoint.");
+        AssertContains(viewModel, "isTemporary: true",
+            "Run to Address does not create a temporary breakpoint.");
+        AssertContains(viewModel, "ApplyPostExecutionCommandState(",
+            "Debugger execution commands do not reconcile status text against the coordinator's final state after asynchronous stop events.");
+        AssertContains(viewModel, "finalState == DebuggerSessionState.Paused && _deferredStopContextEvent is null",
+            "Debugger execution status reconciliation can overwrite a deferred paused breakpoint/step event message.");
+        AssertContains(dialogXaml, "input:TextBoxInputFilter.Mode=\"HexAddress\"",
+            "Run to Address does not reuse the application's hexadecimal address input filter.");
+        AssertContains(dialogXaml, "Style=\"{StaticResource DangerButtonStyle}\"",
+            "Run to Address Cancel does not use the shared dismissive/danger styling.");
+        AssertContains(dialogCode, "NumberStyles.AllowHexSpecifier",
+            "Run to Address does not parse hexadecimal addresses explicitly.");
+        AssertContains(dialogCode, "candidate.StartsWith(\"0x\"",
+            "Run to Address does not accept the standard 0x address prefix.");
+        AssertFalse(dialogCode.Contains("ps5debug", StringComparison.OrdinalIgnoreCase),
+            "Generic Run to Address UI contains PS5-specific backend logic.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerInterruptedComposedOperationCleanupSourceAsync()
+    {
+        string viewModel = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+
+        AssertContains(viewModel, "ComposedExecutionOperation? _activeComposedExecutionOperation",
+            "Debugger ViewModel does not track the currently active composed execution operation.");
+        AssertContains(viewModel, "ComposedExecutionOperation? _pendingInterruptedComposedExecutionOperation",
+            "Debugger ViewModel does not retain an interrupted composed operation until cleanup can run safely.");
+        AssertContains(viewModel, "existing.Id,",
+            "Composed execution does not retain the exact breakpoint id used as its stop target.");
+        AssertContains(viewModel, "ownsTemporaryBreakpoint);",
+            "Composed execution does not distinguish an operation-owned temporary breakpoint from a reused persistent breakpoint.");
+        AssertContains(viewModel, "IsComposedExecutionTargetEvent(operation, context.Event)",
+            "Debugger stop events are not matched against the active composed-operation target.");
+        AssertContains(viewModel, "operation.OwnsTemporaryBreakpoint",
+            "Interrupted-stop handling can remove a breakpoint that was not created by the composed operation.");
+        AssertContains(viewModel, "CleanupComposedExecutionOperationAsync(interruptedOperation, debugEvent)",
+            "Deferred stop-context processing does not clean an interrupted composed operation before refreshing the paused context.");
+        AssertContains(viewModel, "_continueInProgress || _pendingInterruptedComposedExecutionOperation is not null",
+            "A paused interruption can be lost while the execution command is still completing.");
+        AssertContains(viewModel, "RefreshDeferredStopContextIfNeeded();",
+            "Manual Pause completion does not release deferred composed-operation cleanup.");
+        AssertContains(viewModel, ".RemoveBreakpointAsync(operation.BreakpointId, _lifetimeCancellation.Token)",
+            "Interrupted composed operations do not remove their owned temporary breakpoint through the neutral breakpoint service.");
+        AssertContains(viewModel, "ClearComposedExecutionState();",
+            "Debugger lifecycle cleanup does not clear active/deferred composed-operation state.");
 
         return Task.CompletedTask;
     }
@@ -2462,6 +3508,133 @@ internal static class Program
                 "Core disassembly snapshot returned instructions out of address order.");
             previousEnd = checked(instruction.Address + (ulong)instruction.Length);
         }
+    }
+
+    private static async Task VerifyDisassemblyDebuggerByteOverlayAsync()
+    {
+        MockTargetPlugin plugin = new();
+        await using ITargetSession session = await plugin
+            .ConnectAsync(TargetConnectionOptions.Empty, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        TargetProcess process = (await session.GetRequiredService<IProcessProvider>()
+            .GetProcessesAsync(CancellationToken.None).ConfigureAwait(false)).Single();
+        IReadOnlyList<MemoryRegion> regions = await session.GetRequiredService<IMemoryMapProvider>()
+            .GetMemoryRegionsAsync(process, CancellationToken.None).ConfigureAwait(false);
+        IMemoryReader memoryReader = session.GetRequiredService<IMemoryReader>();
+        IMemoryWriter memoryWriter = session.GetRequiredService<IMemoryWriter>();
+
+        await memoryWriter
+            .WriteAsync(process, MockTargetLayout.CodeAddress, new byte[] { 0xCC }, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        DisassemblyOverlay overlay = new(
+            new[]
+            {
+                new DisassemblyByteOverlay(
+                    MockTargetLayout.CodeAddress,
+                    MockTargetLayout.CodeBytes.Span.Slice(0, 2))
+            },
+            new[]
+            {
+                new DisassemblyMarker(MockTargetLayout.CodeAddress, "Breakpoint"),
+                new DisassemblyMarker(MockTargetLayout.CodeAddress + 2UL, "Watchpoint hit")
+            });
+
+        DisassemblySnapshot snapshot = await new DisassemblyReader()
+            .ReadAsync(
+                memoryReader,
+                session.GetRequiredService<IDisassemblerProvider>(),
+                process,
+                regions,
+                session.Architecture,
+                MockTargetLayout.CodeAddress,
+                requestedByteCount: 4,
+                overlay: overlay,
+                cancellationToken: CancellationToken.None)
+            .ConfigureAwait(false);
+
+        AssertEqual((byte)0x10, snapshot.Bytes.Span[0],
+            "The logical disassembly view did not restore the original first byte over debugger INT3 instrumentation.");
+        AssertEqual((byte)0x2A, snapshot.Bytes.Span[1],
+            "The logical disassembly view did not preserve the rest of the original instruction bytes.");
+        AssertEqual("load", snapshot.Instructions[0].Mnemonic,
+            "The disassembler decoded debugger INT3 instrumentation instead of the restored logical instruction.");
+        AssertTrue(snapshot.Markers.Any(marker =>
+                marker.Address == MockTargetLayout.CodeAddress && marker.Text == "Breakpoint"),
+            "The logical disassembly snapshot lost its breakpoint marker.");
+        AssertTrue(snapshot.Markers.Any(marker =>
+                marker.Address == MockTargetLayout.CodeAddress + 2UL && marker.Text == "Watchpoint hit"),
+            "The logical disassembly snapshot lost its watchpoint-hit marker.");
+
+        byte[] rawTargetBytes = new byte[2];
+        int bytesRead = await memoryReader
+            .ReadAsync(process, MockTargetLayout.CodeAddress, rawTargetBytes, CancellationToken.None)
+            .ConfigureAwait(false);
+        AssertEqual(2, bytesRead, "The target-memory verification read returned an unexpected byte count.");
+        AssertEqual((byte)0xCC, rawTargetBytes[0],
+            "The presentation overlay wrote its logical bytes back into target memory.");
+        AssertEqual((byte)0x2A, rawTargetBytes[1],
+            "The presentation overlay unexpectedly changed adjacent target memory.");
+    }
+
+    private static Task VerifyDebuggerDisassemblyOverlayLifecycleAsync()
+    {
+        DebuggerDisassemblyOverlayState state = new();
+        ulong address = 0x401000;
+        DisassembledInstruction originalInstruction = new(
+            address,
+            new byte[] { 0xE8, 0x10, 0x00, 0x00, 0x00 },
+            "call",
+            "0x401015",
+            DisassemblyFlowControl.Call,
+            0x401015);
+        DebuggerBreakpoint breakpoint = new(
+            "sw-1",
+            new DebuggerBreakpointRequest(
+                address,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute),
+            isEnabled: true);
+
+        state.RememberSoftwareBreakpointInstruction(originalInstruction);
+        state.SynchronizeBreakpoints(new[] { breakpoint }, DebuggerSessionState.Paused);
+        DisassemblyOverlay activeOverlay = state.CreateOverlay();
+        AssertEqual(1, activeOverlay.ByteOverlays.Count,
+            "An enabled software breakpoint did not expose its original instruction bytes to Disassembler.");
+        AssertTrue(activeOverlay.Markers.Any(marker => marker.Address == address && marker.Text == "Breakpoint"),
+            "An enabled software breakpoint did not expose a Disassembler marker.");
+
+        state.SynchronizeBreakpoints(Array.Empty<DebuggerBreakpoint>(), DebuggerSessionState.Paused);
+        DisassemblyOverlay stagedOverlay = state.CreateOverlay();
+        AssertEqual(1, stagedOverlay.ByteOverlays.Count,
+            "Removing a software breakpoint while paused stopped masking backend INT3 before staged cleanup could finish.");
+        AssertFalse(stagedOverlay.Markers.Any(marker => marker.Text.StartsWith("Breakpoint", StringComparison.Ordinal)),
+            "A removed breakpoint remained visible as an active Disassembler marker during staged backend cleanup.");
+
+        state.CompleteStagedSoftwareBreakpointRetirements();
+        AssertTrue(state.CreateOverlay().IsEmpty,
+            "Completed software-breakpoint retirement left stale logical bytes or markers in the Disassembler overlay.");
+
+        state.ObserveEvent(new DebuggerEvent(
+            DebuggerEventKind.Watchpoint,
+            DebuggerExecutionState.Paused,
+            DebuggerStopReason.Breakpoint,
+            threadId: 7,
+            instructionPointer: 0x402000));
+        DisassemblyOverlay watchpointOverlay = state.CreateOverlay();
+        AssertTrue(watchpointOverlay.Markers.Any(marker =>
+                marker.Address == 0x402000 && marker.Text == "Watchpoint hit"),
+            "A paused hardware-watchpoint event did not produce a Disassembler marker at its reported instruction pointer.");
+
+        state.ObserveEvent(new DebuggerEvent(
+            DebuggerEventKind.Resumed,
+            DebuggerExecutionState.Running));
+        AssertTrue(state.CreateOverlay().IsEmpty,
+            "A stale watchpoint-hit marker survived target resume.");
+
+        return Task.CompletedTask;
     }
 
     private static async Task VerifyDisassemblyBidirectionalContextAsync()
@@ -3049,6 +4222,8 @@ internal static class Program
             "Disassembler list is not wired for double-click target following.");
         AssertTrue(xaml.Contains("PreviewKeyDown=\"DisassemblyDataGrid_PreviewKeyDown\"", StringComparison.Ordinal),
             "Disassembler list is not wired for Enter-key target following.");
+        AssertFalse(xaml.Contains("The visible range is decoded as one continuous stream.", StringComparison.Ordinal),
+            "Disassembler still contains the removed visible-range explanatory text.");
 
         string rowSource = File.ReadAllText(rowViewModelSourcePath);
         AssertTrue(rowSource.Contains("public bool CanFollowTarget", StringComparison.Ordinal),
@@ -3078,6 +4253,70 @@ internal static class Program
             "Disassembler Follow Target host logic must remain platform-neutral.");
         AssertFalse(combinedSource.Contains("Iced", StringComparison.OrdinalIgnoreCase),
             "Disassembler Follow Target host logic must not depend on the PS5 x86-64 decoder implementation.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDisassemblerDebuggerMarkersSourceAsync()
+    {
+        string xamlPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DisassemblerWindow.xaml");
+        string debuggerViewModelPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerViewModel.cs");
+        string pluginViewModelPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "PluginViewModel.cs");
+        string disassemblerViewModelPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DisassemblerViewModel.cs");
+        string rowViewModelPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DisassemblyInstructionViewModel.cs");
+
+        foreach (string path in new[]
+                 {
+                     xamlPath,
+                     debuggerViewModelPath,
+                     pluginViewModelPath,
+                     disassemblerViewModelPath,
+                     rowViewModelPath
+                 })
+        {
+            AssertTrue(File.Exists(path),
+                $"Disassembler debugger-marker fixture is missing: {Path.GetFileName(path)}");
+        }
+
+        string xaml = File.ReadAllText(xamlPath);
+        int addressColumn = xaml.IndexOf("Header=\"Address\"", StringComparison.Ordinal);
+        int bytesColumn = xaml.IndexOf("Header=\"Bytes\"", StringComparison.Ordinal);
+        int markersColumn = xaml.IndexOf("Header=\"Markers\"", StringComparison.Ordinal);
+        int instructionColumn = xaml.IndexOf("Header=\"Instruction\"", StringComparison.Ordinal);
+        AssertTrue(
+            addressColumn >= 0 && bytesColumn > addressColumn && markersColumn > bytesColumn && instructionColumn > markersColumn,
+            "Disassembler columns must remain ordered Address, Bytes, Markers, Instruction.");
+        AssertTrue(xaml.Contains("Binding=\"{Binding Markers}\"", StringComparison.Ordinal),
+            "Disassembler Markers column is not bound to row marker metadata.");
+
+        string rowSource = File.ReadAllText(rowViewModelPath);
+        AssertTrue(rowSource.Contains("public string Markers { get; }", StringComparison.Ordinal),
+            "Disassembly rows do not expose debugger marker text.");
+
+        string disassemblerSource = File.ReadAllText(disassemblerViewModelPath);
+        AssertTrue(disassemblerSource.Contains("snapshot.Markers", StringComparison.Ordinal),
+            "Disassembler does not map snapshot marker metadata onto displayed rows.");
+        AssertTrue(disassemblerSource.Contains("_currentSnapshot.Markers", StringComparison.Ordinal),
+            "Disassembler export scopes do not preserve marker metadata.");
+
+        string debuggerSource = File.ReadAllText(debuggerViewModelPath);
+        AssertTrue(debuggerSource.Contains("RememberSoftwareBreakpointInstruction", StringComparison.Ordinal),
+            "Debugger does not publish original software-breakpoint instructions for logical disassembly.");
+        AssertTrue(debuggerSource.Contains("SynchronizeBreakpoints", StringComparison.Ordinal),
+            "Debugger breakpoint refresh does not synchronize Disassembler marker state.");
+        AssertTrue(debuggerSource.Contains("ObserveEvent", StringComparison.Ordinal),
+            "Debugger events do not publish watchpoint-hit marker state.");
+        AssertTrue(debuggerSource.Contains("StageSoftwareBreakpointRetirement", StringComparison.Ordinal),
+            "Debugger does not preserve original instruction presentation while paused breakpoint cleanup is staged.");
+
+        string pluginSource = File.ReadAllText(pluginViewModelPath);
+        AssertTrue(pluginSource.Contains("GetDebuggerDisassemblyOverlay", StringComparison.Ordinal) &&
+                   pluginSource.Contains("disassemblyOverlay", StringComparison.Ordinal),
+            "Host disassembly reads are not connected to the matching debugger session's logical overlay.");
+
+        string combinedHostSource = debuggerSource + pluginSource + disassemblerSource + rowSource;
+        AssertFalse(combinedHostSource.Contains("Ps5DebuggerSession", StringComparison.Ordinal),
+            "Logical Disassembler presentation must remain host-neutral rather than depending on the PS5 debugger implementation.");
 
         return Task.CompletedTask;
     }
@@ -3114,15 +4353,23 @@ internal static class Program
                 ["scope"] = ExportCellValue.FromString("displayed"),
                 ["requestedAddress"] = ExportCellValue.FromString("0x401000")
             };
+            DisassemblyMarker[] markers =
+            {
+                new(0x401000, "Breakpoint"),
+                new(0x401005, "Watchpoint hit")
+            };
             DisassemblyExportSource source = new(
                 instructions,
                 region,
                 moduleBaseAddress: 0x400000,
-                metadata);
+                metadata,
+                markers);
 
             AssertEqual("disassembly", source.Type, "Disassembly export type changed unexpectedly.");
             AssertEqual(1, source.SchemaVersion, "Disassembly export schema version changed unexpectedly.");
             AssertEqual(2L, source.Count, "Disassembly export row count is incorrect.");
+            AssertTrue(source.Columns.Any(column => column.Id == DisassemblyExportColumnIds.Markers),
+                "Disassembly export is missing the Markers column.");
             AssertTrue(source.Columns.Any(column => column.Id == DisassemblyExportColumnIds.Mnemonic),
                 "Disassembly export is missing the structured mnemonic column.");
             AssertTrue(source.Columns.Any(column => column.Id == DisassemblyExportColumnIds.BranchTarget),
@@ -3151,6 +4398,8 @@ internal static class Program
                 "Disassembly JSON address did not preserve hexadecimal presentation.");
             AssertEqual("E8 10 00 00 00", firstRow.GetProperty("bytes").GetString(),
                 "Disassembly JSON raw bytes are incorrect.");
+            AssertEqual("Breakpoint", firstRow.GetProperty("markers").GetString(),
+                "Disassembly JSON marker metadata is incorrect.");
             AssertEqual("call", firstRow.GetProperty("mnemonic").GetString(),
                 "Disassembly JSON mnemonic is incorrect.");
             AssertEqual("Call", firstRow.GetProperty("flowControl").GetString(),
@@ -3850,11 +5099,15 @@ internal static class Program
             TargetCapabilities.NativeValueScanning |
             TargetCapabilities.Disassembly |
             TargetCapabilities.Debugger |
+            TargetCapabilities.Breakpoints |
+            TargetCapabilities.Watchpoints |
             TargetCapabilities.ThreadEnumeration |
             TargetCapabilities.ThreadControl |
-            TargetCapabilities.RegisterAccess,
+            TargetCapabilities.RegisterAccess |
+            TargetCapabilities.CallStack |
+            TargetCapabilities.StepExecution,
             plugin.Capabilities,
-            "PS5 plugin should advertise its implemented connection, memory access, native scan, process-control, disassembly, debugger, thread-control, and register-read support.");
+            "PS5 plugin should advertise its implemented connection, memory access, native scan, process-control, disassembly, debugger, breakpoint/watchpoint, thread/register, call-stack, and stepping support.");
         AssertEqual(2, plugin.ConnectionSettings.Count, "PS5 plugin should define host and port settings.");
         AssertTrue(plugin.ConnectionSettings.Any(setting => setting.Key == "host" && setting.IsRequired), "PS5 host setting is missing.");
         AssertTrue(
@@ -4138,9 +5391,9 @@ internal static class Program
             .GetRegistersAsync(0x102, CancellationToken.None)
             .ConfigureAwait(false);
 
-        AssertEqual(26, registers.Count, "PS5 general-register mapper returned an unexpected register count.");
+        AssertEqual(76, registers.Count, "PS5 register mapper returned an unexpected general/FPU-SIMD/FS-GS register count.");
         AssertTrue(registers.All(register => !register.CanWrite),
-            "PS5 register snapshots must remain read-only while the upstream SETREGS path is unverified.");
+            "PS5 register snapshots must remain read-only while upstream register-write paths are unverified.");
         AssertTrue(registers.All(register => register.ValueEncoding == DebuggerRegisterValueEncoding.UnsignedLittleEndian),
             "PS5 register snapshot did not declare the expected neutral little-endian numeric encoding.");
 
@@ -4153,10 +5406,49 @@ internal static class Program
             "PS5 RSP offset was mapped incorrectly into the semantic stack-pointer register.");
         AssertEqual(0x7000000000000202UL, BinaryPrimitives.ReadUInt64LittleEndian(framePointer.Value.Span),
             "PS5 RBP offset was mapped incorrectly into the semantic frame-pointer register.");
+
+        DebuggerRegister fcw = registers.Single(register => register.Id == "fcw");
+        DebuggerRegister st0 = registers.Single(register => register.Id == "st0");
+        DebuggerRegister xmm0 = registers.Single(register => register.Id == "xmm0");
+        DebuggerRegister ymm0 = registers.Single(register => register.Id == "ymm0");
+        DebuggerRegister fsBase = registers.Single(register => register.Id == "fsbase");
+        DebuggerRegister gsBase = registers.Single(register => register.Id == "gsbase");
+
+        AssertEqual(16, fcw.BitWidth, "PS5 FPU control-word width was mapped incorrectly.");
+        AssertEqual((ushort)0x037F, BinaryPrimitives.ReadUInt16LittleEndian(fcw.Value.Span),
+            "PS5 FPU control word was mapped from the wrong offset.");
+        AssertEqual(80, st0.BitWidth, "PS5 x87 register width was mapped incorrectly.");
+        AssertEqual("FPU", st0.Group, "PS5 x87 register did not retain its neutral FPU group.");
+        AssertEqual(128, xmm0.BitWidth, "PS5 XMM register width was mapped incorrectly.");
+        AssertEqual(256, ymm0.BitWidth, "PS5 YMM register width was mapped incorrectly.");
+        AssertEqual("SIMD", ymm0.Group, "PS5 YMM register did not retain its neutral SIMD group.");
+        AssertTrue(xmm0.Value.Span.SequenceEqual(Enumerable.Range(0, 16).Select(index => (byte)(0x20 + index)).ToArray()),
+            "PS5 XMM0 lower 128-bit payload was mapped from the wrong FPU-state offset.");
+        AssertTrue(ymm0.Value.Span[..16].SequenceEqual(xmm0.Value.Span),
+            "PS5 YMM0 lower half does not match the corresponding XMM0 state.");
+        AssertTrue(ymm0.Value.Span[16..].SequenceEqual(Enumerable.Range(0, 16).Select(index => (byte)(0x80 + index)).ToArray()),
+            "PS5 YMM0 upper 128-bit payload was mapped from the wrong xstate offset.");
+        AssertFalse(registers.Any(register => register.Id.StartsWith("dr", StringComparison.Ordinal)),
+            "PS5 paused register refresh exposed debug-register rows even though GETDBREGS is backend-blocked for an already stopped target.");
+        AssertEqual(0x7200000000000102UL, BinaryPrimitives.ReadUInt64LittleEndian(fsBase.Value.Span),
+            "PS5 FS base was mapped incorrectly.");
+        AssertEqual(0x7300000000000102UL, BinaryPrimitives.ReadUInt64LittleEndian(gsBase.Value.Span),
+            "PS5 GS base was mapped incorrectly.");
+
         AssertEqual(1, server.DebuggerRegisterReadThreadIds.Count,
             "PS5 register service sent an unexpected number of GETREGS requests.");
         AssertEqual((uint)0x102, server.DebuggerRegisterReadThreadIds[0],
             "PS5 register service sent GETREGS for the wrong LWP id.");
+        AssertEqual(1, server.DebuggerFloatingPointRegisterReadThreadIds.Count,
+            "PS5 register service sent an unexpected number of GETFPREGS requests.");
+        AssertEqual((uint)0x102, server.DebuggerFloatingPointRegisterReadThreadIds[0],
+            "PS5 register service sent GETFPREGS for the wrong LWP id.");
+        AssertEqual(0, server.DebuggerDebugRegisterReadThreadIds.Count,
+            "PS5 paused register service must not send GETDBREGS because the current ps5debug-NG handler can block when the target is already stopped.");
+        AssertEqual(1, server.DebuggerFsGsBaseReadThreadIds.Count,
+            "PS5 register service sent an unexpected number of GETFSGSBASE requests.");
+        AssertEqual((uint)0x102, server.DebuggerFsGsBaseReadThreadIds[0],
+            "PS5 register service sent GETFSGSBASE for the wrong LWP id.");
 
         await AssertThrowsAsync<NotSupportedException>(
             () => registerService.WriteRegisterAsync(
@@ -4165,9 +5457,843 @@ internal static class Program
                 CancellationToken.None),
             "PS5 register service exposed the currently unverified upstream register-write path.").ConfigureAwait(false);
         AssertEqual(1, server.DebuggerRegisterReadThreadIds.Count,
-            "Rejected PS5 register editing unexpectedly generated extra backend traffic.");
+            "Rejected PS5 register editing unexpectedly generated extra general-register backend traffic.");
+        AssertEqual(1, server.DebuggerFloatingPointRegisterReadThreadIds.Count,
+            "Rejected PS5 register editing unexpectedly generated extra floating-point backend traffic.");
+        AssertEqual(0, server.DebuggerDebugRegisterReadThreadIds.Count,
+            "Rejected PS5 register editing unexpectedly generated GETDBREGS traffic.");
+        AssertEqual(1, server.DebuggerFsGsBaseReadThreadIds.Count,
+            "Rejected PS5 register editing unexpectedly generated extra FS/GS backend traffic.");
 
         await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerCallStackServicesAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(serveDebugger: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(new TargetProcess(2222, "eboot.bin"), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        IDebuggerCallStackService callStack = debugger.GetRequiredService<IDebuggerCallStackService>();
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => callStack.GetCallStackAsync(0x102, CancellationToken.None),
+            "PS5 debugger exposed call frames while the target was running.").ConfigureAwait(false);
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        IReadOnlyList<DebuggerStackFrame> frames = await callStack
+            .GetCallStackAsync(0x102, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        AssertEqual(2, frames.Count,
+            "PS5 server-side call-stack response was parsed with the wrong frame count.");
+        AssertEqual(0x0000000000420102UL, frames[0].InstructionAddress,
+            "PS5 top call frame did not use the selected thread's paused RIP.");
+        AssertEqual<ulong?>(0x7000000000000102UL, frames[0].StackPointer,
+            "PS5 top call frame parsed the wrong stack pointer.");
+        AssertEqual<ulong?>(0x7000000000000202UL, frames[0].FramePointer,
+            "PS5 top call frame parsed the wrong frame pointer.");
+        AssertEqual<ulong?>(0x420202UL, frames[0].ReturnAddress,
+            "PS5 top call frame parsed the wrong return address.");
+        AssertEqual(0x420202UL, frames[1].InstructionAddress,
+            "PS5 caller frame did not use the preceding frame's return address.");
+        AssertEqual<ulong?>(0x420302UL, frames[1].ReturnAddress,
+            "PS5 caller frame parsed the wrong return address.");
+
+        AssertEqual(1, server.DebuggerStackRequests.Count,
+            "PS5 call-stack service sent an unexpected number of CMD_PROC_READ_STACK requests.");
+        (uint ProcessId, ulong FramePointer, ulong StackPointer, uint Depth) request = server.DebuggerStackRequests[0];
+        AssertEqual((uint)2222, request.ProcessId,
+            "PS5 call-stack request used the wrong process id.");
+        AssertEqual(0x7000000000000202UL, request.FramePointer,
+            "PS5 call-stack request sent the wrong RBP value.");
+        AssertEqual(0x7000000000000102UL, request.StackPointer,
+            "PS5 call-stack request sent the wrong RSP value.");
+        AssertEqual((uint)64, request.Depth,
+            "PS5 call-stack request did not use the backend's bounded maximum depth.");
+
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerStepServicesAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(serveDebugger: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(new TargetProcess(2222, "eboot.bin"), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        IDebuggerStepService stepping = debugger.GetRequiredService<IDebuggerStepService>();
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => stepping.StepAsync(DebuggerStepKind.Into, 0x102, CancellationToken.None),
+            "PS5 debugger accepted Step Into while the target was running.").ConfigureAwait(false);
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        TaskCompletionSource<DebuggerEvent> completed = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.StepCompleted)
+            {
+                completed.TrySetResult(args.Event);
+            }
+        };
+
+        await stepping.StepAsync(DebuggerStepKind.Into, 0x102, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(DebuggerExecutionState.Running, debugger.State,
+            "PS5 Step Into did not immediately transition the neutral debugger state to Running.");
+        AssertTrue(server.DebuggerThreadActions.Contains("step:0x102", StringComparer.Ordinal),
+            "PS5 Step Into did not send CMD_DEBUG_STEP_THREAD for the selected thread.");
+
+        const ulong steppedInstructionPointer = 0x0000000000420103UL;
+        await server.SendDebuggerInterruptAsync(
+            0x102,
+            5u << 8,
+            steppedInstructionPointer,
+            "Worker").ConfigureAwait(false);
+
+        DebuggerEvent stepEvent = await completed.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertEqual(DebuggerExecutionState.Paused, debugger.State,
+            "PS5 Step Into completion did not return the neutral debugger state to Paused.");
+        AssertEqual(DebuggerStopReason.StepCompleted, stepEvent.StopReason,
+            "PS5 native step interrupt was not classified as StepCompleted.");
+        AssertEqual<ulong?>(0x102, stepEvent.ThreadId,
+            "PS5 native step completion was attributed to the wrong thread.");
+        AssertEqual<ulong?>(steppedInstructionPointer, stepEvent.InstructionPointer,
+            "PS5 native step completion reported the wrong RIP.");
+
+        await AssertThrowsAsync<NotSupportedException>(
+            () => stepping.StepAsync(DebuggerStepKind.Over, 0x102, CancellationToken.None),
+            "PS5 backend unexpectedly implemented native Step Over instead of host composition.").ConfigureAwait(false);
+        await AssertThrowsAsync<NotSupportedException>(
+            () => stepping.StepAsync(DebuggerStepKind.Out, 0x102, CancellationToken.None),
+            "PS5 backend unexpectedly implemented native Step Out instead of host composition.").ConfigureAwait(false);
+
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerExtendedRegisterCapabilityGatingAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(
+            serveDebugger: true,
+            debuggerCapabilityLevel: null);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(new TargetProcess(2222, "eboot.bin"), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        IDebuggerRegisterService registerService = debugger.GetRequiredService<IDebuggerRegisterService>();
+        IReadOnlyList<DebuggerRegister> registers = await registerService
+            .GetRegistersAsync(0x102, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        AssertEqual(26, registers.Count,
+            "PS5 debugger did not fall back to the verified general-register snapshot when the backend omitted the extended-register capability level.");
+        AssertTrue(registers.Any(register => register.Role == DebuggerRegisterRole.InstructionPointer),
+            "PS5 capability gating removed the verified semantic instruction-pointer register.");
+        AssertFalse(registers.Any(register => register.Id is "fcw" or "xmm0" or "ymm0" or "dr7" or "fsbase"),
+            "PS5 capability gating exposed extended rows without backend capability advertisement.");
+        AssertEqual(0, server.DebuggerFloatingPointRegisterReadThreadIds.Count,
+            "PS5 capability gating still sent GETFPREGS without backend capability advertisement.");
+        AssertEqual(0, server.DebuggerDebugRegisterReadThreadIds.Count,
+            "PS5 capability gating still sent GETDBREGS without backend capability advertisement.");
+        AssertEqual(0, server.DebuggerFsGsBaseReadThreadIds.Count,
+            "PS5 capability gating still sent GETFSGSBASE without backend capability advertisement.");
+
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerOptionalRegisterTimeoutIsolationAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(
+            serveDebugger: true,
+            silenceDebuggerFloatingPointRegisterRead: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(new TargetProcess(2222, "eboot.bin"), CancellationToken.None)
+            .ConfigureAwait(false);
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        IDebuggerRegisterService registerService = debugger.GetRequiredService<IDebuggerRegisterService>();
+        IReadOnlyList<DebuggerRegister> registers = await registerService
+            .GetRegistersAsync(0x102, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(6))
+            .ConfigureAwait(false);
+
+        AssertEqual(28, registers.Count,
+            "PS5 debugger did not return general plus the surviving FS/GS register group after a silent GETFPREGS probe timeout.");
+        AssertTrue(registers.Any(register => register.Role == DebuggerRegisterRole.InstructionPointer),
+            "PS5 optional-register timeout fallback lost the verified general-register stop context.");
+        AssertFalse(registers.Any(register => register.Id is "fcw" or "st0" or "xmm0" or "ymm0"),
+            "PS5 optional-register timeout fallback retained the unavailable FPU/SIMD block.");
+        AssertFalse(registers.Any(register => register.Id.StartsWith("dr", StringComparison.Ordinal)),
+            "PS5 optional-register timeout fallback exposed debug registers even though paused GETDBREGS is intentionally suppressed.");
+        AssertTrue(registers.Any(register => register.Id == "fsbase"),
+            "PS5 optional-register timeout fallback lost a succeeding FS/GS-base probe.");
+        AssertEqual(1, server.DebuggerFloatingPointRegisterReadThreadIds.Count,
+            "PS5 optional-register timeout test did not observe exactly one GETFPREGS probe.");
+        AssertEqual(0, server.DebuggerDebugRegisterReadThreadIds.Count,
+            "PS5 optional-register timeout path sent GETDBREGS even though the target was already paused.");
+        AssertEqual(1, server.DebuggerFsGsBaseReadThreadIds.Count,
+            "PS5 optional-register timeout test did not observe the independent GETFSGSBASE probe.");
+
+        registers = await registerService
+            .GetRegistersAsync(0x102, CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(6))
+            .ConfigureAwait(false);
+        AssertEqual(28, registers.Count,
+            "PS5 cached optional-register fallback changed shape on the second paused refresh.");
+        AssertEqual(1, server.DebuggerFloatingPointRegisterReadThreadIds.Count,
+            "PS5 debugger retried a timed-out optional register command in the same attached session.");
+        AssertEqual(0, server.DebuggerDebugRegisterReadThreadIds.Count,
+            "PS5 debugger sent GETDBREGS on a later paused refresh after the backend-safety suppression should have remained in effect.");
+        AssertEqual(2, server.DebuggerFsGsBaseReadThreadIds.Count,
+            "PS5 debugger stopped refreshing a healthy FS/GS-base group after another group timed out.");
+
+        await debugger.ContinueAsync(CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        AssertEqual(DebuggerExecutionState.Running, debugger.State,
+            "PS5 debugger owner transport did not remain usable after an isolated optional-register timeout.");
+        await debugger.DetachAsync(CancellationToken.None)
+            .WaitAsync(TimeSpan.FromSeconds(5))
+            .ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerBreakpointServicesAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(serveMemoryMap: true, serveDebugger: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = new(2222, "eboot.bin");
+        _ = await targetSession
+            .GetRequiredService<IMemoryMapProvider>()
+            .GetMemoryRegionsAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+        IDebuggerBreakpointValidationService validation =
+            debugger.GetRequiredService<IDebuggerBreakpointValidationService>();
+        IDebuggerBreakpointStateService states = debugger.GetRequiredService<IDebuggerBreakpointStateService>();
+
+        AssertFalse(validation.ValidateBreakpointRequest(new DebuggerBreakpointRequest(
+                0x0000000200000100,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute)).IsValid,
+            "PS5 validator accepted a software execute breakpoint in a mapped non-executable region.");
+        AssertTrue(validation.ValidateBreakpointRequest(new DebuggerBreakpointRequest(
+                0x0000000100001000,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute)).IsValid,
+            "PS5 validator rejected a legal software execute breakpoint.");
+
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(0x0000000200000100, 1, DebuggerBreakpointKind.Software, DebuggerBreakpointAccess.Execute),
+                CancellationToken.None),
+            "PS5 debugger accepted a software execute breakpoint in a mapped non-executable region.").ConfigureAwait(false);
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(0x80000104, 1, DebuggerBreakpointKind.Software, DebuggerBreakpointAccess.Execute),
+                CancellationToken.None),
+            "PS5 debugger accepted a software execute breakpoint outside the current target memory map.").ConfigureAwait(false);
+        AssertEqual(0, server.DebuggerBreakpointActions.Count,
+            "PS5 rejected breakpoint validation mutated backend breakpoint state.");
+
+        DebuggerBreakpoint persistent = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(0x0000000100001000, 1, DebuggerBreakpointKind.Software, DebuggerBreakpointAccess.Execute),
+            CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(1, server.DebuggerBreakpointActions.Count, "PS5 breakpoint add did not issue exactly one backend request.");
+        AssertTrue(server.DebuggerBreakpointActions[0].Enabled, "PS5 breakpoint add did not enable the backend slot.");
+        AssertEqual(0x0000000100001000UL, server.DebuggerBreakpointActions[0].Address, "PS5 breakpoint add sent the wrong address.");
+        AssertFalse(validation.ValidateBreakpointRequest(persistent.Request).IsValid,
+            "PS5 validator accepted a duplicate active software breakpoint.");
+
+        await states.SetBreakpointEnabledAsync(persistent.Id, false, CancellationToken.None).ConfigureAwait(false);
+        await states.SetBreakpointEnabledAsync(persistent.Id, true, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(3, server.DebuggerBreakpointActions.Count, "PS5 running breakpoint state changes did not reach the backend.");
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        await states.SetBreakpointEnabledAsync(persistent.Id, false, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(3, server.DebuggerBreakpointActions.Count,
+            "PS5 paused breakpoint disable reached the backend immediately and could resume the target unexpectedly.");
+        await states.SetBreakpointEnabledAsync(persistent.Id, true, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(3, server.DebuggerBreakpointActions.Count,
+            "PS5 paused breakpoint re-enable did not cancel the staged disable locally.");
+
+        DebuggerBreakpoint removedWhilePaused = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(0x0000000100003000, 1, DebuggerBreakpointKind.Software, DebuggerBreakpointAccess.Execute),
+            CancellationToken.None).ConfigureAwait(false);
+        int actionsBeforePausedRemove = server.DebuggerBreakpointActions.Count;
+        await breakpoints.RemoveBreakpointAsync(removedWhilePaused.Id, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(actionsBeforePausedRemove, server.DebuggerBreakpointActions.Count,
+            "PS5 paused breakpoint removal reached the backend immediately and could resume the target unexpectedly.");
+
+        DebuggerBreakpoint temporary = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(0x0000000100002000, 1, DebuggerBreakpointKind.Software, DebuggerBreakpointAccess.Execute, isTemporary: true),
+            CancellationToken.None).ConfigureAwait(false);
+        TaskCompletionSource<DebuggerEvent> hitSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Breakpoint)
+            {
+                hitSource.TrySetResult(args.Event);
+            }
+        };
+
+        await server.SendDebuggerInterruptAsync(0x101, 0x0000057F, temporary.Request.Address, "MainThread").ConfigureAwait(false);
+        DebuggerEvent hit = await hitSource.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertEqual(DebuggerStopReason.Breakpoint, hit.StopReason, "PS5 interrupt at a managed software breakpoint was not classified as a breakpoint hit.");
+        AssertEqual<ulong?>(temporary.Request.Address, hit.InstructionPointer, "PS5 breakpoint event lost the corrected breakpoint address.");
+        AssertEqual(1, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "PS5 temporary breakpoint remained visible after its first hit.");
+
+        int actionsBeforeContinue = server.DebuggerBreakpointActions.Count;
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(actionsBeforeContinue + 2, server.DebuggerBreakpointActions.Count,
+            "PS5 continue did not flush both staged paused-removal and temporary-breakpoint cleanups.");
+        (uint Slot, bool Enabled, ulong Address)[] flushed = server.DebuggerBreakpointActions
+            .Skip(actionsBeforeContinue)
+            .ToArray();
+        AssertTrue(flushed.All(action => !action.Enabled),
+            "PS5 staged breakpoint cleanup unexpectedly enabled a backend slot.");
+        AssertTrue(flushed.Any(action => action.Address == removedWhilePaused.Request.Address),
+            "PS5 continue did not flush the breakpoint removed while paused.");
+        AssertTrue(flushed.Any(action => action.Address == temporary.Request.Address),
+            "PS5 continue did not flush temporary-breakpoint cleanup.");
+
+        await breakpoints.RemoveBreakpointAsync(persistent.Id, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(0, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "PS5 persistent breakpoint remained after removal.");
+
+        await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerLogicalSoftwareBreakpointStopContextAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(serveMemoryMap: true, serveDebugger: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = new(2222, "eboot.bin");
+        _ = await targetSession
+            .GetRequiredService<IMemoryMapProvider>()
+            .GetMemoryRegionsAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+        IDebuggerRegisterService registers = debugger.GetRequiredService<IDebuggerRegisterService>();
+        IDebuggerCallStackService callStack = debugger.GetRequiredService<IDebuggerCallStackService>();
+        IDebuggerStepService stepping = debugger.GetRequiredService<IDebuggerStepService>();
+
+        const uint threadId = 0x101;
+        const ulong breakpointAddress = 0x0000000100002000UL;
+        DebuggerBreakpoint breakpoint = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                breakpointAddress,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute),
+            CancellationToken.None).ConfigureAwait(false);
+
+        TaskCompletionSource<DebuggerEvent> hitSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Breakpoint)
+            {
+                hitSource.TrySetResult(args.Event);
+            }
+        };
+
+        await server.SendDebuggerInterruptAsync(
+            threadId,
+            0x0000057F,
+            breakpointAddress,
+            "MainThread").ConfigureAwait(false);
+        DebuggerEvent hit = await hitSource.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertEqual<ulong?>(breakpointAddress, hit.InstructionPointer,
+            "PS5 logical software-breakpoint event did not retain the backend interrupt snapshot address.");
+
+        int generalReadsBeforeSnapshot = server.DebuggerRegisterReadThreadIds.Count;
+        IReadOnlyList<DebuggerRegister> stopRegisters = await registers
+            .GetRegistersAsync(threadId, CancellationToken.None)
+            .ConfigureAwait(false);
+        DebuggerRegister stopRip = stopRegisters.Single(item => item.Id == "rip");
+        ulong stopInstructionPointer = BinaryPrimitives.ReadUInt64LittleEndian(stopRip.Value.Span);
+        AssertEqual(breakpointAddress, stopInstructionPointer,
+            "PS5 register inspection did not use the software-breakpoint interrupt snapshot as the logical stop context.");
+        AssertEqual(generalReadsBeforeSnapshot, server.DebuggerRegisterReadThreadIds.Count,
+            "PS5 logical software-breakpoint register inspection unexpectedly replaced the interrupt snapshot with live post-step registers.");
+
+        IReadOnlyList<DebuggerStackFrame> stopFrames = await callStack
+            .GetCallStackAsync(threadId, CancellationToken.None)
+            .ConfigureAwait(false);
+        AssertEqual(breakpointAddress, stopFrames[0].InstructionAddress,
+            "PS5 call-stack frame zero did not use the logical software-breakpoint stop address.");
+
+        int nativeStepActionsBefore = server.DebuggerThreadActions.Count(action =>
+            string.Equals(action, $"step:0x{threadId:X}", StringComparison.Ordinal));
+        TaskCompletionSource<DebuggerEvent> stepCompletedSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.StepCompleted)
+            {
+                stepCompletedSource.TrySetResult(args.Event);
+            }
+        };
+
+        await stepping.StepAsync(DebuggerStepKind.Into, threadId, CancellationToken.None).ConfigureAwait(false);
+        DebuggerEvent stepCompleted = await stepCompletedSource.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertEqual(DebuggerExecutionState.Paused, debugger.State,
+            "PS5 logical software-breakpoint Step Into did not finish in Paused state.");
+        AssertEqual(nativeStepActionsBefore, server.DebuggerThreadActions.Count(action =>
+                string.Equals(action, $"step:0x{threadId:X}", StringComparison.Ordinal)),
+            "PS5 logical software-breakpoint Step Into issued a second native step after the backend had already transparently stepped the breakpointed instruction.");
+        AssertEqual<ulong?>(0x0000000000420101UL, stepCompleted.InstructionPointer,
+            "PS5 logical software-breakpoint Step Into did not report the backend's live post-step RIP.");
+
+        IReadOnlyList<DebuggerRegister> postStepRegisters = await registers
+            .GetRegistersAsync(threadId, CancellationToken.None)
+            .ConfigureAwait(false);
+        ulong postStepInstructionPointer = BinaryPrimitives.ReadUInt64LittleEndian(
+            postStepRegisters.Single(item => item.Id == "rip").Value.Span);
+        AssertEqual(0x0000000000420101UL, postStepInstructionPointer,
+            "PS5 software-breakpoint snapshot was not consumed after the logical Step Into completed.");
+
+        await breakpoints.RemoveBreakpointAsync(breakpoint.Id, CancellationToken.None).ConfigureAwait(false);
+        await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerSafeDetachBreakpointCleanupAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(serveMemoryMap: true, serveDebugger: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = new(2222, "eboot.bin");
+        _ = await targetSession
+            .GetRequiredService<IMemoryMapProvider>()
+            .GetMemoryRegionsAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+
+        DebuggerBreakpoint active = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                0x0000000100001000,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute),
+            CancellationToken.None).ConfigureAwait(false);
+        DebuggerBreakpoint pending = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                0x0000000100002000,
+                1,
+                DebuggerBreakpointKind.Software,
+                DebuggerBreakpointAccess.Execute,
+                isTemporary: true),
+            CancellationToken.None).ConfigureAwait(false);
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        await breakpoints.RemoveBreakpointAsync(pending.Id, CancellationToken.None).ConfigureAwait(false);
+        int actionCountBeforeDetach = server.DebuggerBreakpointActions.Count;
+        AssertEqual(2, actionCountBeforeDetach,
+            "PS5 paused temporary-breakpoint removal reached the backend before safe detach.");
+
+        await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(DebuggerExecutionState.Detached, debugger.State,
+            "PS5 safe detach did not finish in Detached state.");
+
+        (uint Slot, bool Enabled, ulong Address)[] detachCleanup = server.DebuggerBreakpointActions
+            .Skip(actionCountBeforeDetach)
+            .ToArray();
+        AssertEqual(2, detachCleanup.Length,
+            "PS5 safe detach did not explicitly restore every active or staged software-breakpoint slot before backend teardown.");
+        AssertTrue(detachCleanup.All(action => !action.Enabled),
+            "PS5 safe detach sent an enabling breakpoint action during teardown cleanup.");
+        AssertTrue(detachCleanup.Any(action => action.Address == active.Request.Address),
+            "PS5 safe detach did not restore the still-active software breakpoint before backend teardown.");
+        AssertTrue(detachCleanup.Any(action => action.Address == pending.Request.Address),
+            "PS5 safe detach did not flush the staged paused-removal breakpoint before backend teardown.");
+
+        await debugger.DisposeAsync().ConfigureAwait(false);
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerSafeDetachWatchpointCleanupAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(serveMemoryMap: true, serveDebugger: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = new(2222, "eboot.bin");
+        _ = await targetSession
+            .GetRequiredService<IMemoryMapProvider>()
+            .GetMemoryRegionsAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+
+        DebuggerBreakpoint active = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                0x0000000200000100,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write),
+            CancellationToken.None).ConfigureAwait(false);
+        DebuggerBreakpoint temporary = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                0x0000000200000108,
+                8,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.ReadWrite,
+                isTemporary: true),
+            CancellationToken.None).ConfigureAwait(false);
+
+        (uint Slot, bool Enabled, uint Length, uint BreakType, ulong Address) temporaryAction =
+            server.DebuggerWatchpointActions[^1];
+        TaskCompletionSource<DebuggerEvent> hitSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Watchpoint &&
+                args.Event.TriggeredBreakpoint?.Id == temporary.Id)
+            {
+                hitSource.TrySetResult(args.Event);
+            }
+        };
+
+        await server.SendDebuggerInterruptAsync(
+            0x101,
+            0x0000057F,
+            0x0000000100001820,
+            "MainThread",
+            debugStatus: 1UL << checked((int)temporaryAction.Slot)).ConfigureAwait(false);
+        _ = await hitSource.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertTrue((await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false))
+                .Any(item => item.Id == active.Id),
+            "PS5 active persistent hardware watchpoint disappeared before disposal cleanup.");
+        AssertFalse((await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false))
+                .Any(item => item.Id == temporary.Id),
+            "PS5 temporary hardware watchpoint remained visible after its triggering hit.");
+
+        int actionCountBeforeDispose = server.DebuggerWatchpointActions.Count;
+        AssertEqual(2, actionCountBeforeDispose,
+            "PS5 watchpoint setup emitted an unexpected number of backend actions before disposal cleanup.");
+
+        await debugger.DisposeAsync().ConfigureAwait(false);
+        AssertEqual(DebuggerExecutionState.Detached, debugger.State,
+            "PS5 debugger disposal did not finish in Detached state.");
+
+        (uint Slot, bool Enabled, uint Length, uint BreakType, ulong Address)[] disposeCleanup =
+            server.DebuggerWatchpointActions
+                .Skip(actionCountBeforeDispose)
+                .ToArray();
+        AssertEqual(2, disposeCleanup.Length,
+            "PS5 debugger disposal did not explicitly clear every active or staged hardware-watchpoint slot before backend teardown.");
+        AssertTrue(disposeCleanup.All(action => !action.Enabled),
+            "PS5 debugger disposal sent an enabling hardware-watchpoint action during teardown cleanup.");
+        AssertTrue(disposeCleanup.Any(action => action.Address == active.Request.Address),
+            "PS5 debugger disposal did not clear the still-active hardware watchpoint before backend teardown.");
+        AssertTrue(disposeCleanup.Any(action => action.Address == temporary.Request.Address),
+            "PS5 debugger disposal did not flush the staged temporary hardware-watchpoint cleanup before backend teardown.");
+
+        await server.Completion.ConfigureAwait(false);
+    }
+
+    private static async Task VerifyPs5DebuggerWatchpointServicesAsync()
+    {
+        await using Ps5ProtocolTestServer server = new(serveMemoryMap: true, serveDebugger: true);
+        Ps5TargetPlugin plugin = new();
+        TargetConnectionOptions options = new(new[]
+        {
+            new KeyValuePair<string, string>("host", "127.0.0.1"),
+            new KeyValuePair<string, string>("port", server.Port.ToString(CultureInfo.InvariantCulture))
+        });
+
+        await using ITargetSession targetSession = await plugin
+            .ConnectAsync(options, CancellationToken.None)
+            .ConfigureAwait(false);
+        TargetProcess process = new(2222, "eboot.bin");
+        _ = await targetSession
+            .GetRequiredService<IMemoryMapProvider>()
+            .GetMemoryRegionsAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        await using IDebuggerSession debugger = await targetSession
+            .GetRequiredService<IDebuggerProvider>()
+            .AttachAsync(process, CancellationToken.None)
+            .ConfigureAwait(false);
+        IDebuggerBreakpointService breakpoints = debugger.GetRequiredService<IDebuggerBreakpointService>();
+        IDebuggerBreakpointStateService states = debugger.GetRequiredService<IDebuggerBreakpointStateService>();
+
+        await AssertThrowsAsync<NotSupportedException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    0x0000000200000100,
+                    4,
+                    DebuggerBreakpointKind.Hardware,
+                    DebuggerBreakpointAccess.Read),
+                CancellationToken.None),
+            "PS5 debugger accepted a read-only hardware watchpoint even though the backend cannot encode it distinctly.").ConfigureAwait(false);
+        await AssertThrowsAsync<NotSupportedException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    0x0000000200000100,
+                    3,
+                    DebuggerBreakpointKind.Hardware,
+                    DebuggerBreakpointAccess.Write),
+                CancellationToken.None),
+            "PS5 debugger accepted an unsupported three-byte hardware watchpoint.").ConfigureAwait(false);
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    0x0000000200000102,
+                    4,
+                    DebuggerBreakpointKind.Hardware,
+                    DebuggerBreakpointAccess.Write),
+                CancellationToken.None),
+            "PS5 debugger accepted a misaligned four-byte hardware watchpoint.").ConfigureAwait(false);
+        await AssertThrowsAsync<InvalidOperationException>(
+            () => breakpoints.AddBreakpointAsync(
+                new DebuggerBreakpointRequest(
+                    0x80000100,
+                    4,
+                    DebuggerBreakpointKind.Hardware,
+                    DebuggerBreakpointAccess.Write),
+                CancellationToken.None),
+            "PS5 debugger accepted a hardware watchpoint outside the current target memory map.").ConfigureAwait(false);
+        AssertEqual(0, server.DebuggerWatchpointActions.Count,
+            "Rejected PS5 hardware-watchpoint validation mutated backend debug-register state.");
+
+        DebuggerBreakpoint persistent = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                0x0000000200000100,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write),
+            CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(1, server.DebuggerWatchpointActions.Count, "PS5 hardware watchpoint add did not issue exactly one backend request.");
+        (uint Slot, bool Enabled, uint Length, uint BreakType, ulong Address) first = server.DebuggerWatchpointActions[0];
+        AssertEqual(0u, first.Slot, "PS5 first hardware watchpoint did not use the first DR slot.");
+        AssertTrue(first.Enabled, "PS5 hardware watchpoint add did not enable the backend slot.");
+        AssertEqual(3u, first.Length, "PS5 four-byte hardware watchpoint used the wrong DR7 length encoding.");
+        AssertEqual(1u, first.BreakType, "PS5 write hardware watchpoint used the wrong DR7 access encoding.");
+        AssertEqual(persistent.Request.Address, first.Address, "PS5 hardware watchpoint add sent the wrong address.");
+
+        await debugger.PauseAsync(CancellationToken.None).ConfigureAwait(false);
+        await states.SetBreakpointEnabledAsync(persistent.Id, false, CancellationToken.None).ConfigureAwait(false);
+        await states.SetBreakpointEnabledAsync(persistent.Id, true, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(3, server.DebuggerWatchpointActions.Count,
+            "PS5 paused hardware-watchpoint Disable/Enable did not update the backend directly.");
+        AssertEqual(DebuggerExecutionState.Paused, debugger.State,
+            "PS5 hardware-watchpoint state changes unexpectedly changed the debugger execution state.");
+
+        DebuggerBreakpoint temporary = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                0x0000000200000108,
+                8,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.ReadWrite,
+                isTemporary: true),
+            CancellationToken.None).ConfigureAwait(false);
+        (uint Slot, bool Enabled, uint Length, uint BreakType, ulong Address) temporaryAction = server.DebuggerWatchpointActions[^1];
+        AssertEqual(2u, temporaryAction.Length, "PS5 eight-byte hardware watchpoint used the wrong DR7 length encoding.");
+        AssertEqual(3u, temporaryAction.BreakType, "PS5 read/write hardware watchpoint used the wrong DR7 access encoding.");
+
+        TaskCompletionSource<DebuggerEvent> hitSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Watchpoint &&
+                args.Event.TriggeredBreakpoint?.Id == temporary.Id)
+            {
+                hitSource.TrySetResult(args.Event);
+            }
+        };
+
+        const ulong accessingInstruction = 0x0000000100001800;
+        await server.SendDebuggerInterruptAsync(
+            0x101,
+            0x0000057F,
+            accessingInstruction,
+            "MainThread",
+            debugStatus: 1UL << checked((int)temporaryAction.Slot)).ConfigureAwait(false);
+        DebuggerEvent hit = await hitSource.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertEqual(DebuggerStopReason.Watchpoint, hit.StopReason, "PS5 DR6 watchpoint hit was not classified as a watchpoint stop.");
+        AssertEqual<ulong?>(accessingInstruction, hit.InstructionPointer,
+            "PS5 watchpoint event replaced the accessing instruction pointer with the watched data address.");
+        AssertEqual(temporary.Request.Address, hit.TriggeredBreakpoint!.Request.Address,
+            "PS5 watchpoint event lost the watched data address.");
+        AssertEqual(DebuggerBreakpointAccess.ReadWrite, hit.TriggeredBreakpoint.Request.Access,
+            "PS5 watchpoint event lost the triggered access metadata.");
+        AssertEqual(1, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "PS5 temporary hardware watchpoint remained visible after its first hit.");
+
+        int actionsBeforeContinue = server.DebuggerWatchpointActions.Count;
+        await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(actionsBeforeContinue + 1, server.DebuggerWatchpointActions.Count,
+            "PS5 Continue did not flush temporary hardware-watchpoint cleanup before resume.");
+        (uint Slot, bool Enabled, uint Length, uint BreakType, ulong Address) flushed = server.DebuggerWatchpointActions[^1];
+        AssertFalse(flushed.Enabled, "PS5 temporary hardware-watchpoint cleanup unexpectedly enabled its backend slot.");
+        AssertEqual(temporaryAction.Slot, flushed.Slot, "PS5 temporary hardware-watchpoint cleanup targeted the wrong backend slot.");
+
+        TaskCompletionSource<DebuggerEvent> inferredHitSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Watchpoint &&
+                args.Event.TriggeredBreakpoint?.Id == persistent.Id &&
+                args.Event.Message?.Contains("did not preserve DR6", StringComparison.Ordinal) == true)
+            {
+                inferredHitSource.TrySetResult(args.Event);
+            }
+        };
+
+        const ulong inferredInstruction = 0x0000000100001810;
+        await server.SendDebuggerInterruptAsync(
+            0x101,
+            0x0000057F,
+            inferredInstruction,
+            "MainThread",
+            debugStatus: 0).ConfigureAwait(false);
+        DebuggerEvent inferredHit = await inferredHitSource.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertEqual(DebuggerStopReason.Watchpoint, inferredHit.StopReason,
+            "PS5 single-watchpoint DR6 fallback did not retain the neutral watchpoint stop reason.");
+        AssertEqual<ulong?>(inferredInstruction, inferredHit.InstructionPointer,
+            "PS5 single-watchpoint DR6 fallback lost the accessing instruction pointer.");
+
+        DebuggerBreakpoint ambiguousTemporary = await breakpoints.AddBreakpointAsync(
+            new DebuggerBreakpointRequest(
+                0x0000000200000110,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write,
+                isTemporary: true),
+            CancellationToken.None).ConfigureAwait(false);
+        TaskCompletionSource<DebuggerEvent> ambiguousStopSource = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        debugger.EventReceived += (_, args) =>
+        {
+            if (args.Event.Kind == DebuggerEventKind.Other &&
+                args.Event.StopReason == DebuggerStopReason.Signal &&
+                args.Event.Message?.Contains("exact watchpoint cannot be attributed safely", StringComparison.Ordinal) == true)
+            {
+                ambiguousStopSource.TrySetResult(args.Event);
+            }
+        };
+
+        await server.SendDebuggerInterruptAsync(
+            0x101,
+            0x0000057F,
+            0x0000000100001820,
+            "MainThread",
+            debugStatus: 0).ConfigureAwait(false);
+        DebuggerEvent ambiguousStop = await ambiguousStopSource.Task.WaitAsync(TimeSpan.FromSeconds(5)).ConfigureAwait(false);
+        AssertTrue(ambiguousStop.TriggeredBreakpoint is null,
+            "PS5 zero-DR6 multi-watchpoint stop guessed a triggered watchpoint without backend slot status.");
+        AssertTrue((await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false))
+                .Any(item => item.Id == ambiguousTemporary.Id),
+            "PS5 zero-DR6 multi-watchpoint stop removed a temporary watchpoint without knowing which slot triggered.");
+
+        await breakpoints.RemoveBreakpointAsync(ambiguousTemporary.Id, CancellationToken.None).ConfigureAwait(false);
+        await breakpoints.RemoveBreakpointAsync(persistent.Id, CancellationToken.None).ConfigureAwait(false);
+        AssertEqual(0, (await breakpoints.GetBreakpointsAsync(CancellationToken.None).ConfigureAwait(false)).Count,
+            "PS5 persistent hardware watchpoint remained after removal.");
+        AssertEqual(0, server.DebuggerDebugRegisterReadThreadIds.Count,
+            "PS5 hardware-watchpoint hit mapping reintroduced the unsafe paused GETDBREGS command path.");
+
         await debugger.DetachAsync(CancellationToken.None).ConfigureAwait(false);
         await server.Completion.ConfigureAwait(false);
     }
@@ -4225,6 +6351,29 @@ internal static class Program
                    statusBar.Contains("SuccessTextBrush", StringComparison.Ordinal) &&
                    statusBar.Contains("DangerButtonBorderBrush", StringComparison.Ordinal),
             "Bottom status bar does not contain the binary red/green connection-status box at its left edge.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyMainStatusBarContentAlignmentAsync()
+    {
+        string xaml = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "MainWindow.xaml"));
+        int statusBarStart = xaml.IndexOf("<Border Grid.Row=\"3\"", StringComparison.Ordinal);
+        AssertTrue(statusBarStart >= 0, "Main-window status bar could not be located.");
+        string statusBar = xaml[statusBarStart..];
+
+        AssertContains(statusBar, "<Border Grid.Column=\"0\"\n                        Padding=\"8,2\"\n                        VerticalAlignment=\"Center\"",
+            "Connection state is not centered on the status-bar row.");
+        AssertContains(statusBar, "Text=\"{Binding StatusText}\"\n                           VerticalAlignment=\"Center\"",
+            "Main status text is not centered on the status-bar row.");
+        AssertContains(statusBar, "Text=\"{Binding ErrorText}\"\n                           VerticalAlignment=\"Center\"",
+            "Main error text is not centered on the status-bar row.");
+        AssertContains(statusBar, "Text=\"{Binding SelectedPlugin.ScanStatusBarText}\"\n                           VerticalAlignment=\"Center\"",
+            "Scan status text is not centered on the status-bar row.");
+        AssertContains(statusBar, "Grid.Column=\"8\"\n                            Orientation=\"Horizontal\"\n                            VerticalAlignment=\"Center\"",
+            "Scan progress group is not centered on the status-bar row.");
+        AssertContains(statusBar, "Text=\"{Binding DisplayVersion}\"\n                           VerticalAlignment=\"Center\"",
+            "Application version is not centered on the status-bar row.");
 
         return Task.CompletedTask;
     }
@@ -6384,6 +8533,13 @@ internal static class Program
         {
             Messages.Add(exception is null ? message : $"{message}: {exception.Message}");
         }
+    }
+
+    private static void AssertContains(string source, string expected, string message)
+    {
+        ArgumentNullException.ThrowIfNull(source);
+        ArgumentNullException.ThrowIfNull(expected);
+        AssertTrue(source.Contains(expected, StringComparison.Ordinal), message);
     }
 
     private static void AssertTrue(bool condition, string message)

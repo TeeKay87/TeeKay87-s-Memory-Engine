@@ -258,7 +258,7 @@ The Scan Type metadata is intentionally named **selectedScanType**, not “last 
 
 ## Current Non-Goals
 
-The current application (`0.1.7.rev5`) retains the verified `0.1.4` export foundation and the verified `0.1.6` Disassembler export integration unchanged. It still does not implement:
+The current application (`0.1.7.rev31`) retains the verified `0.1.4` export foundation and extends the verified `0.1.6` Disassembler export integration only with additive debugger `Markers` metadata and logical/original instruction bytes. It still does not implement:
 
 - automatic export integration for every future list/table;
 - a generic “currently filtered rows” scope where a view has a real filter model;
@@ -272,3 +272,7 @@ Those can be added when their owning subsystems exist and their semantics are kn
 
 
 > Host `0.1.7.rev6` builds on the fully verified rev5 baseline. Its Threads/Thread Control and passive header-status cleanup do not redesign the subsystem documented here.
+
+### Disassembler marker metadata
+
+Host `0.1.7.rev29` adds `Markers` immediately after `Bytes` in the Disassembler export column catalog. The value is the same address-scoped debugger presentation text shown in the workspace, such as `Breakpoint` or `Watchpoint hit`. Export still uses already materialized logical instructions and causes no additional target traffic. When a Software/Execute breakpoint backend has patched target memory with `INT3`, exported `Bytes` and `Instruction` describe the locally restored original/logical instruction, while `Markers` records the debugger state separately. The disassembly export schema version remains `1` because the structured format already supports additive selectable columns.

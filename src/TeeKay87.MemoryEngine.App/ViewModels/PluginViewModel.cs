@@ -305,6 +305,21 @@ public sealed partial class PluginViewModel : ObservableObject, IDisposable
                AreSameProcess(activeProcess.Process, targetProcess);
     }
 
+    internal bool CanOpenMemoryViewerForTarget(TargetProcess targetProcess)
+    {
+        ArgumentNullException.ThrowIfNull(targetProcess);
+
+        return SupportsMemoryRead &&
+               SupportsMemoryRegionEnumeration &&
+               ActiveMemoryRegions.Any(region =>
+                   region.Size > 0 &&
+                   region.Protection.HasFlag(MemoryProtection.Read) &&
+                   !region.Protection.HasFlag(MemoryProtection.Guard)) &&
+               CanReadMemory() &&
+               ActiveProcess is TargetProcessViewModel activeProcess &&
+               AreSameProcess(activeProcess.Process, targetProcess);
+    }
+
     internal bool IsCurrentDebuggerTarget(TargetProcess targetProcess, long connectionGeneration)
     {
         ArgumentNullException.ThrowIfNull(targetProcess);
@@ -1467,6 +1482,23 @@ public sealed partial class PluginViewModel : ObservableObject, IDisposable
         }
     }
 
+    private DisassemblyOverlay? GetDebuggerDisassemblyOverlay(
+        TargetProcess targetProcess,
+        long connectionGeneration)
+    {
+        DebuggerSessionCoordinator? coordinator = _debuggerSessions
+            .FirstOrDefault(session =>
+                session.IsAttached &&
+                session.Identity.Matches(Metadata.Id, targetProcess, connectionGeneration));
+        if (coordinator is null)
+        {
+            return null;
+        }
+
+        DisassemblyOverlay overlay = coordinator.DisassemblyOverlayState.CreateOverlay();
+        return overlay.IsEmpty ? null : overlay;
+    }
+
     internal async Task<DisassemblySnapshot> ReadDisassemblyContextAsync(
         TargetProcess targetProcess,
         long connectionGeneration,
@@ -1583,6 +1615,9 @@ public sealed partial class PluginViewModel : ObservableObject, IDisposable
                 cancellationToken,
                 _lifetimeCancellation.Token);
             MemoryRegion[] memoryMapSnapshot = ActiveMemoryRegions.ToArray();
+            DisassemblyOverlay? disassemblyOverlay = GetDebuggerDisassemblyOverlay(
+                targetProcess,
+                connectionGeneration);
 
             if (useContextWindow)
             {
@@ -1596,6 +1631,7 @@ public sealed partial class PluginViewModel : ObservableObject, IDisposable
                         address,
                         beforeByteCount,
                         afterByteCount,
+                        disassemblyOverlay,
                         linkedCancellation.Token)
                     .ConfigureAwait(true);
             }
@@ -1609,6 +1645,7 @@ public sealed partial class PluginViewModel : ObservableObject, IDisposable
                     session.Architecture,
                     address,
                     afterByteCount,
+                    disassemblyOverlay,
                     linkedCancellation.Token)
                 .ConfigureAwait(true);
         }

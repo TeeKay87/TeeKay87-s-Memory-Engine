@@ -13,11 +13,18 @@ internal sealed class MockDebuggerSession :
     IDebuggerSession,
     IDebuggerThreadService,
     IDebuggerThreadControlService,
-    IDebuggerRegisterService
+    IDebuggerRegisterService,
+    IDebuggerBreakpointService,
+    IDebuggerBreakpointValidationService,
+    IDebuggerBreakpointStateService,
+    IDebuggerCallStackService,
+    IDebuggerStepService
 {
     private const ulong MainThreadId = 1;
     private const ulong WorkerThreadId = 2;
     private const ulong RenderThreadId = 3;
+    private const int MaximumSoftwareBreakpointCount = 30;
+    private const int MaximumHardwareWatchpointCount = 4;
 
     private static readonly IReadOnlyDictionary<ulong, string> ThreadNames =
         new Dictionary<ulong, string>
@@ -31,6 +38,8 @@ internal sealed class MockDebuggerSession :
     private readonly Action<MockDebuggerSession> _onDisposed;
     private readonly Dictionary<ulong, Dictionary<string, ulong>> _registerValues = CreateRegisterValues();
     private readonly HashSet<ulong> _suspendedThreadIds = new();
+    private readonly Dictionary<string, DebuggerBreakpoint> _breakpoints = new(StringComparer.Ordinal);
+    private int _nextBreakpointId = 1;
     private DebuggerExecutionState _state = DebuggerExecutionState.Running;
     private bool _disposed;
 
@@ -104,6 +113,8 @@ internal sealed class MockDebuggerSession :
             MainThreadId,
             MockTargetLayout.CodeAddress,
             "Mock target resumed."));
+
+        QueueDeterministicBreakpointHit();
         return Task.CompletedTask;
     }
 
@@ -115,6 +126,8 @@ internal sealed class MockDebuggerSession :
         lock (_gate)
         {
             _state = DebuggerExecutionState.Detached;
+            _suspendedThreadIds.Clear();
+            _breakpoints.Clear();
         }
 
         return Task.CompletedTask;
@@ -227,6 +240,259 @@ internal sealed class MockDebuggerSession :
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<DebuggerStackFrame>> GetCallStackAsync(
+        ulong threadId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureNotDisposed();
+
+        lock (_gate)
+        {
+            EnsurePausedForRegisterAccess();
+            ValidateThreadId(threadId);
+
+            Dictionary<string, ulong> values = _registerValues[threadId];
+            ulong instructionPointer = values["rip"];
+            ulong stackPointer = values["rsp"];
+            ulong framePointer = values["rbp"];
+            string threadName = ThreadNames[threadId];
+
+            IReadOnlyList<DebuggerStackFrame> frames = new[]
+            {
+                new DebuggerStackFrame(
+                    0,
+                    instructionPointer,
+                    stackPointer,
+                    framePointer,
+                    MockTargetLayout.CodeAddress + 0x4,
+                    Process.Name,
+                    $"{threadName}.Current"),
+                new DebuggerStackFrame(
+                    1,
+                    MockTargetLayout.CodeAddress + 0x4,
+                    stackPointer + 0x40,
+                    framePointer + 0x40,
+                    MockTargetLayout.CodeAddress + 0x9,
+                    Process.Name,
+                    $"{threadName}.Caller"),
+                new DebuggerStackFrame(
+                    2,
+                    MockTargetLayout.CodeAddress + 0x9,
+                    stackPointer + 0x80,
+                    framePointer + 0x80,
+                    null,
+                    Process.Name,
+                    "MockEntry")
+            };
+
+            return Task.FromResult(frames);
+        }
+    }
+
+    public Task StepAsync(
+        DebuggerStepKind stepKind,
+        ulong? threadId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureNotDisposed();
+
+        if (stepKind != DebuggerStepKind.Into)
+        {
+            throw new NotSupportedException(
+                "The mock debugger exposes native Step Into. Step Over and Step Out are composed by the host from disassembly, call frames, temporary breakpoints, and Continue.");
+        }
+
+        ulong selectedThreadId = threadId ?? MainThreadId;
+        ulong currentInstructionPointer;
+        ulong nextInstructionPointer;
+        lock (_gate)
+        {
+            EnsurePausedForRegisterAccess();
+            ValidateThreadId(selectedThreadId);
+            currentInstructionPointer = _registerValues[selectedThreadId]["rip"];
+            nextInstructionPointer = ResolveStepIntoAddress(currentInstructionPointer);
+            _state = DebuggerExecutionState.Running;
+        }
+
+        RaiseEvent(new DebuggerEvent(
+            DebuggerEventKind.Resumed,
+            DebuggerExecutionState.Running,
+            DebuggerStopReason.None,
+            selectedThreadId,
+            currentInstructionPointer,
+            "Mock target resumed for Step Into."));
+
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(25).ConfigureAwait(false);
+
+            lock (_gate)
+            {
+                if (_disposed || _state != DebuggerExecutionState.Running)
+                {
+                    return;
+                }
+
+                _registerValues[selectedThreadId]["rip"] = nextInstructionPointer;
+                _state = DebuggerExecutionState.Paused;
+            }
+
+            RaiseEvent(new DebuggerEvent(
+                DebuggerEventKind.StepCompleted,
+                DebuggerExecutionState.Paused,
+                DebuggerStopReason.StepCompleted,
+                selectedThreadId,
+                nextInstructionPointer,
+                "Mock Step Into completed."));
+        });
+
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyList<DebuggerBreakpoint>> GetBreakpointsAsync(CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureNotDisposed();
+
+        lock (_gate)
+        {
+            IReadOnlyList<DebuggerBreakpoint> snapshot = _breakpoints.Values
+                .OrderBy(breakpoint => breakpoint.Request.Address)
+                .ThenBy(breakpoint => breakpoint.Id, StringComparer.Ordinal)
+                .ToArray();
+            return Task.FromResult(snapshot);
+        }
+    }
+
+    public DebuggerBreakpointValidationResult ValidateBreakpointRequest(DebuggerBreakpointRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        EnsureNotDisposed();
+
+        try
+        {
+            ValidateBreakpointRequestOrThrow(request);
+
+            lock (_gate)
+            {
+                if (_state == DebuggerExecutionState.Detached)
+                {
+                    return DebuggerBreakpointValidationResult.Invalid(
+                        "The mock debugger session is detached.");
+                }
+
+                int matchingKindCount = _breakpoints.Values.Count(existing => existing.Request.Kind == request.Kind);
+                int maximumCount = request.Kind == DebuggerBreakpointKind.Software
+                    ? MaximumSoftwareBreakpointCount
+                    : MaximumHardwareWatchpointCount;
+                if (matchingKindCount >= maximumCount)
+                {
+                    string resource = request.Kind == DebuggerBreakpointKind.Software
+                        ? "software-breakpoint"
+                        : "hardware-watchpoint";
+                    return DebuggerBreakpointValidationResult.Invalid(
+                        $"The mock debugger has no free {resource} slots ({maximumCount} maximum).");
+                }
+
+                if (_breakpoints.Values.Any(existing => IsDuplicateRequest(existing.Request, request)))
+                {
+                    return DebuggerBreakpointValidationResult.Invalid(
+                        $"An equivalent {GetRequestDescription(request)} already exists at 0x{request.Address:X}.");
+                }
+            }
+
+            return DebuggerBreakpointValidationResult.Valid();
+        }
+        catch (Exception exception) when (exception is InvalidOperationException or NotSupportedException)
+        {
+            return DebuggerBreakpointValidationResult.Invalid(exception.Message);
+        }
+    }
+
+    public Task<DebuggerBreakpoint> AddBreakpointAsync(
+        DebuggerBreakpointRequest request,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureNotDisposed();
+        ValidateBreakpointRequestOrThrow(request);
+
+        lock (_gate)
+        {
+            int matchingKindCount = _breakpoints.Values.Count(existing => existing.Request.Kind == request.Kind);
+            int maximumCount = request.Kind == DebuggerBreakpointKind.Software
+                ? MaximumSoftwareBreakpointCount
+                : MaximumHardwareWatchpointCount;
+            if (matchingKindCount >= maximumCount)
+            {
+                string resource = request.Kind == DebuggerBreakpointKind.Software
+                    ? "software-breakpoint"
+                    : "hardware-watchpoint";
+                throw new InvalidOperationException($"The mock debugger has no free {resource} slots ({maximumCount} maximum).");
+            }
+
+            if (_breakpoints.Values.Any(existing => IsDuplicateRequest(existing.Request, request)))
+            {
+                throw new InvalidOperationException(
+                    $"An equivalent {GetRequestDescription(request)} already exists at 0x{request.Address:X}.");
+            }
+
+            string prefix = request.Kind == DebuggerBreakpointKind.Software ? "mock-sw" : "mock-hw";
+            string id = $"{prefix}-{_nextBreakpointId++:D2}";
+            DebuggerBreakpoint breakpoint = new(id, request, isEnabled: true);
+            _breakpoints.Add(id, breakpoint);
+            return Task.FromResult(breakpoint);
+        }
+    }
+
+    public Task RemoveBreakpointAsync(string breakpointId, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(breakpointId);
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureNotDisposed();
+
+        lock (_gate)
+        {
+            if (!_breakpoints.Remove(breakpointId))
+            {
+                throw new KeyNotFoundException($"Unknown mock breakpoint '{breakpointId}'.");
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
+    public Task SetBreakpointEnabledAsync(
+        string breakpointId,
+        bool isEnabled,
+        CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(breakpointId);
+        cancellationToken.ThrowIfCancellationRequested();
+        EnsureNotDisposed();
+
+        lock (_gate)
+        {
+            if (!_breakpoints.TryGetValue(breakpointId, out DebuggerBreakpoint? breakpoint))
+            {
+                throw new KeyNotFoundException($"Unknown mock breakpoint '{breakpointId}'.");
+            }
+
+            if (breakpoint.IsEnabled != isEnabled)
+            {
+                _breakpoints[breakpointId] = new DebuggerBreakpoint(
+                    breakpoint.Id,
+                    breakpoint.Request,
+                    isEnabled);
+            }
+        }
+
+        return Task.CompletedTask;
+    }
+
     public ValueTask DisposeAsync()
     {
         bool notifyProvider;
@@ -236,6 +502,7 @@ internal sealed class MockDebuggerSession :
             _disposed = true;
             _state = DebuggerExecutionState.Detached;
             _suspendedThreadIds.Clear();
+            _breakpoints.Clear();
         }
 
         if (notifyProvider)
@@ -244,6 +511,161 @@ internal sealed class MockDebuggerSession :
         }
 
         return ValueTask.CompletedTask;
+    }
+
+    private void QueueDeterministicBreakpointHit()
+    {
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(25).ConfigureAwait(false);
+
+            DebuggerBreakpoint? hit = null;
+            lock (_gate)
+            {
+                if (_disposed || _state != DebuggerExecutionState.Running)
+                {
+                    return;
+                }
+
+                hit = _breakpoints.Values
+                    .Where(breakpoint => breakpoint.IsEnabled)
+                    .OrderBy(breakpoint => breakpoint.Request.Address)
+                    .ThenBy(breakpoint => breakpoint.Id, StringComparer.Ordinal)
+                    .FirstOrDefault();
+                if (hit is null)
+                {
+                    return;
+                }
+
+                _state = DebuggerExecutionState.Paused;
+                ulong instructionPointer = hit.Request.Kind == DebuggerBreakpointKind.Software
+                    ? hit.Request.Address
+                    : MockTargetLayout.CodeAddress + 4;
+                _registerValues[MainThreadId]["rip"] = instructionPointer;
+                if (hit.Request.IsTemporary)
+                {
+                    _breakpoints.Remove(hit.Id);
+                }
+            }
+
+            ulong eventInstructionPointer = hit.Request.Kind == DebuggerBreakpointKind.Software
+                ? hit.Request.Address
+                : MockTargetLayout.CodeAddress + 4;
+            bool isWatchpoint = hit.Request.Kind == DebuggerBreakpointKind.Hardware;
+            string message = isWatchpoint
+                ? $"Mock {FormatAccess(hit.Request.Access)} watchpoint hit at 0x{hit.Request.Address:X} from instruction 0x{eventInstructionPointer:X}."
+                : $"Mock software breakpoint hit at 0x{hit.Request.Address:X}.";
+            RaiseEvent(new DebuggerEvent(
+                isWatchpoint ? DebuggerEventKind.Watchpoint : DebuggerEventKind.Breakpoint,
+                DebuggerExecutionState.Paused,
+                isWatchpoint ? DebuggerStopReason.Watchpoint : DebuggerStopReason.Breakpoint,
+                MainThreadId,
+                eventInstructionPointer,
+                hit,
+                message));
+        });
+    }
+
+    private static void ValidateBreakpointRequestOrThrow(DebuggerBreakpointRequest request)
+    {
+        if (request.Kind == DebuggerBreakpointKind.Software)
+        {
+            ValidateSoftwareExecuteBreakpoint(request);
+            return;
+        }
+
+        if (request.Kind == DebuggerBreakpointKind.Hardware)
+        {
+            ValidateHardwareWatchpoint(request);
+            return;
+        }
+
+        throw new NotSupportedException($"Unsupported mock breakpoint kind '{request.Kind}'.");
+    }
+
+    private static void ValidateSoftwareExecuteBreakpoint(DebuggerBreakpointRequest request)
+    {
+        if (request.Access != DebuggerBreakpointAccess.Execute || request.Size != 1)
+        {
+            throw new NotSupportedException(
+                "Mock software breakpoints are one-byte execute breakpoints.");
+        }
+
+        ulong mappedEnd = checked(MockTargetLayout.BaseAddress + (ulong)MockTargetLayout.MemorySize);
+        if (request.Address < MockTargetLayout.BaseAddress || request.Address >= mappedEnd)
+        {
+            throw new InvalidOperationException(
+                $"Software execute breakpoint address 0x{request.Address:X} is outside the mock target memory map.");
+        }
+
+        ulong executableEnd = checked(MockTargetLayout.CodeAddress + (ulong)MockTargetLayout.CodeBytes.Length);
+        if (request.Address < MockTargetLayout.CodeAddress || request.Address >= executableEnd)
+        {
+            throw new InvalidOperationException(
+                $"Software execute breakpoint address 0x{request.Address:X} is not inside the mock target's executable code range.");
+        }
+    }
+
+    private static void ValidateHardwareWatchpoint(DebuggerBreakpointRequest request)
+    {
+        if (request.Access is DebuggerBreakpointAccess.Execute)
+        {
+            throw new NotSupportedException("Mock hardware watchpoints require Read, Write, or ReadWrite access.");
+        }
+
+        if (request.Size is not (1 or 2 or 4 or 8))
+        {
+            throw new NotSupportedException("Mock hardware watchpoints support sizes of 1, 2, 4, or 8 bytes.");
+        }
+
+        if (request.Address % (ulong)request.Size != 0)
+        {
+            throw new InvalidOperationException(
+                $"Hardware watchpoint address 0x{request.Address:X} must be aligned to its {request.Size}-byte size.");
+        }
+
+        ulong mappedEnd = checked(MockTargetLayout.BaseAddress + (ulong)MockTargetLayout.MemorySize);
+        ulong requestEnd;
+        try
+        {
+            requestEnd = checked(request.Address + (ulong)request.Size);
+        }
+        catch (OverflowException exception)
+        {
+            throw new InvalidOperationException("Hardware watchpoint range overflows the address space.", exception);
+        }
+
+        if (request.Address < MockTargetLayout.BaseAddress || requestEnd > mappedEnd)
+        {
+            throw new InvalidOperationException(
+                $"Hardware watchpoint range 0x{request.Address:X}-0x{requestEnd - 1:X} is outside the mock target memory map.");
+        }
+    }
+
+    private static bool IsDuplicateRequest(DebuggerBreakpointRequest existing, DebuggerBreakpointRequest request)
+    {
+        return existing.Kind == request.Kind &&
+               existing.Address == request.Address &&
+               existing.Size == request.Size &&
+               existing.Access == request.Access;
+    }
+
+    private static string GetRequestDescription(DebuggerBreakpointRequest request)
+    {
+        return request.Kind == DebuggerBreakpointKind.Software
+            ? "software execute breakpoint"
+            : $"{FormatAccess(request.Access).ToLowerInvariant()} hardware watchpoint";
+    }
+
+    private static string FormatAccess(DebuggerBreakpointAccess access)
+    {
+        return access switch
+        {
+            DebuggerBreakpointAccess.Read => "Read",
+            DebuggerBreakpointAccess.Write => "Write",
+            DebuggerBreakpointAccess.ReadWrite => "Read/Write",
+            _ => access.ToString()
+        };
     }
 
     private DebuggerThreadState GetThreadState(ulong threadId)
@@ -283,6 +705,21 @@ internal sealed class MockDebuggerSession :
         {
             throw new ArgumentOutOfRangeException(nameof(threadId), $"Unknown mock thread 0x{threadId:X}.");
         }
+    }
+
+    private static ulong ResolveStepIntoAddress(ulong instructionPointer)
+    {
+        ulong code = MockTargetLayout.CodeAddress;
+        return instructionPointer switch
+        {
+            var address when address == code => code + 0x2,
+            var address when address == code + 0x2 => code + 0x8,
+            var address when address == code + 0x4 => code + 0x6,
+            var address when address == code + 0x6 => code + 0x8,
+            var address when address == code + 0x8 => code + 0x4,
+            var address when address == code + 0x9 => code + 0xA,
+            _ => code + 0xA
+        };
     }
 
     private static Dictionary<ulong, Dictionary<string, ulong>> CreateRegisterValues()
@@ -339,7 +776,7 @@ internal sealed class MockDebuggerSession :
     private static IReadOnlyList<DebuggerRegister> CreateRegisterSnapshot(
         IReadOnlyDictionary<string, ulong> values)
     {
-        return new[]
+        List<DebuggerRegister> registers = new()
         {
             CreateRegister("rax", "RAX", values["rax"]),
             CreateRegister("rbx", "RBX", values["rbx"]),
@@ -360,6 +797,13 @@ internal sealed class MockDebuggerSession :
             CreateRegister("rip", "RIP", values["rip"], DebuggerRegisterRole.InstructionPointer, "Control"),
             CreateRegister("rflags", "RFLAGS", values["rflags"], group: "Control")
         };
+
+        ulong extendedSeed = values["rax"] ^ values["rsp"];
+        registers.Add(CreateWideRegister("fp0", "FP0", 80, CreatePatternBytes(extendedSeed, 10), "Floating Point"));
+        registers.Add(CreateWideRegister("vector0", "V0", 128, CreatePatternBytes(extendedSeed + 0x10, 16), "SIMD"));
+        registers.Add(CreateWideRegister("vector1", "V1", 256, CreatePatternBytes(extendedSeed + 0x20, 32), "SIMD"));
+        registers.Add(CreateWideRegister("debug0", "D0", 64, CreatePatternBytes(extendedSeed + 0x30, 8), "Debug"));
+        return registers;
     }
 
     private static DebuggerRegister CreateRegister(
@@ -380,6 +824,35 @@ internal sealed class MockDebuggerSession :
             role,
             canWrite: true,
             valueEncoding: DebuggerRegisterValueEncoding.UnsignedLittleEndian);
+    }
+
+    private static DebuggerRegister CreateWideRegister(
+        string id,
+        string displayName,
+        int bitWidth,
+        ReadOnlyMemory<byte> value,
+        string group)
+    {
+        return new DebuggerRegister(
+            id,
+            displayName,
+            bitWidth,
+            value,
+            group,
+            DebuggerRegisterRole.None,
+            canWrite: false,
+            valueEncoding: DebuggerRegisterValueEncoding.UnsignedLittleEndian);
+    }
+
+    private static byte[] CreatePatternBytes(ulong seed, int byteCount)
+    {
+        byte[] value = new byte[byteCount];
+        for (int index = 0; index < value.Length; index++)
+        {
+            value[index] = (byte)((seed + checked((ulong)(index * 0x11))) & 0xFF);
+        }
+
+        return value;
     }
 
     private void RaiseEvent(DebuggerEvent debugEvent)

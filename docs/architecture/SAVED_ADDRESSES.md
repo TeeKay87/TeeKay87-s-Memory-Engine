@@ -336,3 +336,10 @@ These should extend the shared Saved Addresses model rather than replacing it wi
 Application `0.1.3.rev30` reuses the Saved Addresses value-refresh scheduler for visible Scan Results. This does not merge the data models: Saved Addresses remain persistent workspace rows with edit/freeze behavior, while Scan Results remain temporary candidates owned by the active scan session.
 
 The shared timer now runs when either Saved Addresses exist or the Scan Results DataGrid has realized visible rows. It continues to serialize ordinary target reads, pauses during active scanning/foreground target operations, and uses the Settings-controlled **Live value refresh** interval. DataGrid virtualization defines the Scan Results refresh set, so off-screen rows are not periodically reread. Live Scan Result refresh changes only the displayed current Value; it does not modify Previous, candidate membership, or the scan baseline used by Next Scan.
+
+
+## Rev30 Debugger Address Actions
+
+Saved Address row context menus now include **Add Breakpoint** and **Add Watchpoint**. These actions do not open or attach the Debugger automatically. They are enabled only when an already-open Debugger is attached to the same saved target identity on the current connection generation and its backend exposes Plugin API `2.16.0` request validation.
+
+**Add Breakpoint** requests a persistent Software/Execute breakpoint of size 1 at the saved address. **Add Watchpoint** requests a persistent Hardware/Write watchpoint using the row's current `ValueSize`. Each item is disabled independently if that exact request is illegal or unavailable. This includes stale target identity, non-executable breakpoint addresses, unsupported watchpoint width/access, natural-alignment failure, unmapped/guarded ranges, exhausted backend slots, duplicates, or pending cleanup. The existing Debugger Add dialog remains the explicit path for choosing other access modes, sizes, or temporary lifetime.

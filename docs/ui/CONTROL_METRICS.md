@@ -95,7 +95,8 @@ Not every interactive element should be forced to 34 units. A different size is 
 - menu items or popup list items;
 - large icon/tile actions;
 - splitters;
-- specialized memory/disassembly editors that require their own density rules.
+- specialized memory/disassembly editors that require their own density rules;
+- the rev24 Debugger workspace selector buttons, which intentionally use a compact 28-unit height and 12-point text while inheriting the normal shared button template.
 
 Such exceptions should be intentional and documented in the relevant shared style rather than introduced accidentally in an individual view.
 

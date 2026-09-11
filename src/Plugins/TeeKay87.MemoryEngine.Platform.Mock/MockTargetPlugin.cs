@@ -18,7 +18,7 @@ public sealed class MockTargetPlugin : ITargetPlugin
         Version: MockPluginInfo.SemanticVersion,
         Revision: MockPluginInfo.Revision,
         ApiVersion: MockPluginInfo.TargetApiVersion,
-        Description: "Deterministic target used to validate shared plugin, memory-access, scanning, disassembly, debugger, thread-control, and register-access architecture.",
+        Description: "Deterministic target used to validate shared plugin, memory-access, scanning, disassembly, debugger, breakpoint/watchpoint, thread-control, register-access, call-stack, and stepping architecture.",
         Architecture: new TargetArchitecture(
             CpuArchitecture.Unknown,
             pointerWidthBits: 64,
@@ -34,9 +34,13 @@ public sealed class MockTargetPlugin : ITargetPlugin
         TargetCapabilities.MemoryWrite |
         TargetCapabilities.Disassembly |
         TargetCapabilities.Debugger |
+        TargetCapabilities.Breakpoints |
+        TargetCapabilities.Watchpoints |
         TargetCapabilities.ThreadEnumeration |
         TargetCapabilities.ThreadControl |
-        TargetCapabilities.RegisterAccess;
+        TargetCapabilities.RegisterAccess |
+        TargetCapabilities.CallStack |
+        TargetCapabilities.StepExecution;
 
     public IReadOnlyList<TargetConnectionSettingDefinition> ConnectionSettings { get; } =
         Array.Empty<TargetConnectionSettingDefinition>();

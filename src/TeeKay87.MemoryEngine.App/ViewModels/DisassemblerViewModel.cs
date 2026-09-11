@@ -464,12 +464,18 @@ public sealed class DisassemblerViewModel : ObservableObject, IDisposable
         _currentRegion = snapshot.Region;
         _currentModuleBaseAddress = ResolveModuleBaseAddress(snapshot.Region);
 
+        IReadOnlyDictionary<ulong, DisassemblyMarker[]> markersByAddress = snapshot.Markers
+            .GroupBy(marker => marker.Address)
+            .ToDictionary(group => group.Key, group => group.ToArray());
+
         Instructions.Clear();
         foreach (DisassembledInstruction instruction in snapshot.Instructions)
         {
+            markersByAddress.TryGetValue(instruction.Address, out DisassemblyMarker[]? instructionMarkers);
             Instructions.Add(new DisassemblyInstructionViewModel(
                 instruction,
-                snapshot.RequestedAddress));
+                snapshot.RequestedAddress,
+                instructionMarkers));
         }
 
         SelectedInstruction = Instructions.FirstOrDefault(row => row.IsOriginRow)
@@ -527,7 +533,8 @@ public sealed class DisassemblerViewModel : ObservableObject, IDisposable
                     displayed,
                     _currentSnapshot.Region,
                     _currentModuleBaseAddress,
-                    CreateExportMetadata("displayed", displayed.LongLength)))
+                    CreateExportMetadata("displayed", displayed.LongLength),
+                    _currentSnapshot.Markers))
         };
 
         HashSet<DisassemblyInstructionViewModel> selectedSet = selectedRows
@@ -547,7 +554,8 @@ public sealed class DisassemblerViewModel : ObservableObject, IDisposable
                     selected,
                     _currentSnapshot.Region,
                     _currentModuleBaseAddress,
-                    CreateExportMetadata("selected", selected.LongLength))));
+                    CreateExportMetadata("selected", selected.LongLength),
+                    _currentSnapshot.Markers)));
         }
 
         return scopes;

@@ -7,8 +7,8 @@ public static class Ps5PluginInfo
     public const string Id = "platform.ps5.ps5debug-ng";
     public const string Name = "PlayStation 5";
     public const string Version = "0.1.0";
-    public const int Revision = 27;
-    public const string ApiVersion = "2.13.0";
+    public const int Revision = 38;
+    public const string ApiVersion = "2.16.0";
 
     public static string DisplayVersion => $"{Version}.rev{Revision}";
 

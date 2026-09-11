@@ -9,6 +9,7 @@ public sealed class DisassemblySnapshot
 {
     private readonly byte[] _bytes;
     private readonly IReadOnlyList<DisassembledInstruction> _instructions;
+    private readonly IReadOnlyList<DisassemblyMarker> _markers;
 
     public DisassemblySnapshot(
         ulong requestedAddress,
@@ -17,6 +18,25 @@ public sealed class DisassemblySnapshot
         MemoryRegion region,
         TargetArchitecture architecture,
         IEnumerable<DisassembledInstruction> instructions)
+        : this(
+            requestedAddress,
+            startAddress,
+            bytes,
+            region,
+            architecture,
+            instructions,
+            markers: null)
+    {
+    }
+
+    public DisassemblySnapshot(
+        ulong requestedAddress,
+        ulong startAddress,
+        ReadOnlySpan<byte> bytes,
+        MemoryRegion region,
+        TargetArchitecture architecture,
+        IEnumerable<DisassembledInstruction> instructions,
+        IEnumerable<DisassemblyMarker>? markers)
     {
         if (bytes.IsEmpty)
         {
@@ -35,12 +55,21 @@ public sealed class DisassemblySnapshot
                 "The requested disassembly origin must be contained by the snapshot byte range.");
         }
 
+        DisassemblyMarker[] markerArray = (markers ?? Enumerable.Empty<DisassemblyMarker>()).ToArray();
+        if (markerArray.Any(marker => marker.Address < startAddress || marker.Address >= endAddressExclusive))
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(markers),
+                "Disassembly markers must be contained by the snapshot byte range.");
+        }
+
         RequestedAddress = requestedAddress;
         StartAddress = startAddress;
         _bytes = bytes.ToArray();
         Region = region;
         Architecture = architecture;
         _instructions = Array.AsReadOnly(instructions.ToArray());
+        _markers = Array.AsReadOnly(markerArray);
     }
 
     public ulong RequestedAddress { get; }
@@ -56,4 +85,6 @@ public sealed class DisassemblySnapshot
     public TargetArchitecture Architecture { get; }
 
     public IReadOnlyList<DisassembledInstruction> Instructions => _instructions;
+
+    public IReadOnlyList<DisassemblyMarker> Markers => _markers;
 }

@@ -14,7 +14,7 @@ public sealed class DisassemblyReader
     public const int DefaultContextByteCount = 512;
     public const int MaximumWindowByteCount = 65_536;
 
-    public async Task<DisassemblySnapshot> ReadAsync(
+    public Task<DisassemblySnapshot> ReadAsync(
         IMemoryReader reader,
         IDisassemblerProvider disassembler,
         TargetProcess process,
@@ -22,6 +22,29 @@ public sealed class DisassemblyReader
         TargetArchitecture architecture,
         ulong address,
         int requestedByteCount = DefaultWindowByteCount,
+        CancellationToken cancellationToken = default)
+    {
+        return ReadAsync(
+            reader,
+            disassembler,
+            process,
+            memoryRegions,
+            architecture,
+            address,
+            requestedByteCount,
+            overlay: null,
+            cancellationToken);
+    }
+
+    public async Task<DisassemblySnapshot> ReadAsync(
+        IMemoryReader reader,
+        IDisassemblerProvider disassembler,
+        TargetProcess process,
+        IReadOnlyList<MemoryRegion> memoryRegions,
+        TargetArchitecture architecture,
+        ulong address,
+        int requestedByteCount,
+        DisassemblyOverlay? overlay,
         CancellationToken cancellationToken = default)
     {
         ValidateCommonArguments(
@@ -56,8 +79,33 @@ public sealed class DisassemblyReader
                 startAddress: address,
                 readLength,
                 region,
+                overlay,
                 cancellationToken)
             .ConfigureAwait(false);
+    }
+
+    public Task<DisassemblySnapshot> ReadAroundAsync(
+        IMemoryReader reader,
+        IDisassemblerProvider disassembler,
+        TargetProcess process,
+        IReadOnlyList<MemoryRegion> memoryRegions,
+        TargetArchitecture architecture,
+        ulong address,
+        int beforeByteCount = DefaultContextByteCount,
+        int afterByteCount = DefaultContextByteCount,
+        CancellationToken cancellationToken = default)
+    {
+        return ReadAroundAsync(
+            reader,
+            disassembler,
+            process,
+            memoryRegions,
+            architecture,
+            address,
+            beforeByteCount,
+            afterByteCount,
+            overlay: null,
+            cancellationToken);
     }
 
     public async Task<DisassemblySnapshot> ReadAroundAsync(
@@ -67,8 +115,9 @@ public sealed class DisassemblyReader
         IReadOnlyList<MemoryRegion> memoryRegions,
         TargetArchitecture architecture,
         ulong address,
-        int beforeByteCount = DefaultContextByteCount,
-        int afterByteCount = DefaultContextByteCount,
+        int beforeByteCount,
+        int afterByteCount,
+        DisassemblyOverlay? overlay,
         CancellationToken cancellationToken = default)
     {
         ValidateCommonArguments(
@@ -125,23 +174,25 @@ public sealed class DisassemblyReader
                 cancellationToken)
             .ConfigureAwait(false);
 
+        byte[] logicalBytes = ApplyByteOverlays(startAddress, bytes, overlay);
         IReadOnlyList<DisassembledInstruction> instructions = await DecodeAsync(
                 disassembler,
                 startAddress,
-                bytes,
+                logicalBytes,
                 architecture,
                 cancellationToken)
             .ConfigureAwait(false);
 
-        ValidateInstructions(startAddress, bytes, instructions);
+        ValidateInstructions(startAddress, logicalBytes, instructions);
 
         return new DisassemblySnapshot(
             address,
             startAddress,
-            bytes,
+            logicalBytes,
             region,
             architecture,
-            instructions);
+            instructions,
+            GetMarkersForRange(startAddress, logicalBytes.Length, overlay));
     }
 
     private static void ValidateCommonArguments(
@@ -190,6 +241,7 @@ public sealed class DisassemblyReader
         ulong startAddress,
         int readLength,
         MemoryRegion region,
+        DisassemblyOverlay? overlay,
         CancellationToken cancellationToken)
     {
         byte[] bytes = await ReadBytesAsync(
@@ -201,23 +253,76 @@ public sealed class DisassemblyReader
                 cancellationToken)
             .ConfigureAwait(false);
 
+        byte[] logicalBytes = ApplyByteOverlays(startAddress, bytes, overlay);
         IReadOnlyList<DisassembledInstruction> instructions = await DecodeAsync(
                 disassembler,
                 startAddress,
-                bytes,
+                logicalBytes,
                 architecture,
                 cancellationToken)
             .ConfigureAwait(false);
 
-        ValidateInstructions(startAddress, bytes, instructions);
+        ValidateInstructions(startAddress, logicalBytes, instructions);
 
         return new DisassemblySnapshot(
             requestedAddress,
             startAddress,
-            bytes,
+            logicalBytes,
             region,
             architecture,
-            instructions);
+            instructions,
+            GetMarkersForRange(startAddress, logicalBytes.Length, overlay));
+    }
+
+    private static byte[] ApplyByteOverlays(
+        ulong startAddress,
+        byte[] targetBytes,
+        DisassemblyOverlay? overlay)
+    {
+        ArgumentNullException.ThrowIfNull(targetBytes);
+        if (overlay is null || overlay.ByteOverlays.Count == 0)
+        {
+            return targetBytes;
+        }
+
+        ulong endAddressExclusive = checked(startAddress + (ulong)targetBytes.Length);
+        byte[]? logicalBytes = null;
+        foreach (DisassemblyByteOverlay byteOverlay in overlay.ByteOverlays)
+        {
+            ulong overlapStart = Math.Max(startAddress, byteOverlay.Address);
+            ulong overlapEnd = Math.Min(endAddressExclusive, byteOverlay.EndAddressExclusive);
+            if (overlapStart >= overlapEnd)
+            {
+                continue;
+            }
+
+            logicalBytes ??= targetBytes.ToArray();
+            int sourceOffset = checked((int)(overlapStart - byteOverlay.Address));
+            int destinationOffset = checked((int)(overlapStart - startAddress));
+            int length = checked((int)(overlapEnd - overlapStart));
+            byteOverlay.Bytes.Span.Slice(sourceOffset, length)
+                .CopyTo(logicalBytes.AsSpan(destinationOffset, length));
+        }
+
+        return logicalBytes ?? targetBytes;
+    }
+
+    private static IReadOnlyList<DisassemblyMarker> GetMarkersForRange(
+        ulong startAddress,
+        int byteCount,
+        DisassemblyOverlay? overlay)
+    {
+        if (overlay is null || overlay.Markers.Count == 0)
+        {
+            return Array.Empty<DisassemblyMarker>();
+        }
+
+        ulong endAddressExclusive = checked(startAddress + (ulong)byteCount);
+        return overlay.Markers
+            .Where(marker => marker.Address >= startAddress && marker.Address < endAddressExclusive)
+            .OrderBy(marker => marker.Address)
+            .ThenBy(marker => marker.Text, StringComparer.Ordinal)
+            .ToArray();
     }
 
     private static async Task<byte[]> ReadBytesAsync(
@@ -314,7 +419,7 @@ public sealed class DisassemblyReader
             if (!bytes.Slice(byteOffset, instruction.Length).SequenceEqual(instruction.RawBytes.Span))
             {
                 throw new InvalidOperationException(
-                    $"The raw bytes reported for instruction 0x{instruction.Address:X} do not match the bytes read from target memory.");
+                    $"The raw bytes reported for instruction 0x{instruction.Address:X} do not match the logical disassembly bytes.");
             }
 
             previousEndAddress = instructionEndAddress;

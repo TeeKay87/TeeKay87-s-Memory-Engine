@@ -349,6 +349,13 @@
                                                   Tag="OpenDisassembler"
                                                   Click="ScanResultOpenDisassemblerMenuItem_Click" />
                                         <Separator />
+                                        <MenuItem Header="Add Breakpoint"
+                                                  Tag="AddBreakpoint"
+                                                  Click="ScanResultAddBreakpointMenuItem_Click" />
+                                        <MenuItem Header="Add Watchpoint"
+                                                  Tag="AddWatchpoint"
+                                                  Click="ScanResultAddWatchpointMenuItem_Click" />
+                                        <Separator />
                                         <MenuItem Header="Copy address" Command="{Binding CopyAddressCommand}" />
                                         <MenuItem Header="Copy value" Command="{Binding CopyValueCommand}" />
                                     </ContextMenu>
@@ -470,6 +477,13 @@
                                         <MenuItem Header="Open in Disassembler"
                                                   Tag="OpenDisassembler"
                                                   Click="SavedAddressOpenDisassemblerMenuItem_Click" />
+                                        <Separator />
+                                        <MenuItem Header="Add Breakpoint"
+                                                  Tag="AddBreakpoint"
+                                                  Click="SavedAddressAddBreakpointMenuItem_Click" />
+                                        <MenuItem Header="Add Watchpoint"
+                                                  Tag="AddWatchpoint"
+                                                  Click="SavedAddressAddWatchpointMenuItem_Click" />
                                         <Separator />
                                         <MenuItem Header="Copy address" Command="{Binding CopyAddressCommand}" />
                                         <MenuItem Header="Copy value" Command="{Binding CopyValueCommand}" />
@@ -821,6 +835,7 @@
 
                 <Border Grid.Column="0"
                         Padding="8,2"
+                        VerticalAlignment="Center"
                         Background="Transparent"
                         BorderThickness="1"
                         CornerRadius="4">
@@ -836,6 +851,7 @@
                         </Style>
                     </Border.Style>
                     <TextBlock Foreground="{DynamicResource PrimaryTextBrush}"
+                               VerticalAlignment="Center"
                                FontWeight="SemiBold">
                         <TextBlock.Style>
                             <Style TargetType="{x:Type TextBlock}">
@@ -852,16 +868,19 @@
 
                 <TextBlock Grid.Column="2"
                            Text="{Binding StatusText}"
+                           VerticalAlignment="Center"
                            Style="{StaticResource MutedTextStyle}" />
 
                 <TextBlock Grid.Column="4"
                            MaxWidth="320"
                            Text="{Binding ErrorText}"
+                           VerticalAlignment="Center"
                            Foreground="{DynamicResource ErrorTextBrush}"
                            TextTrimming="CharacterEllipsis" />
 
                 <TextBlock Grid.Column="6"
                            Text="{Binding SelectedPlugin.ScanStatusBarText}"
+                           VerticalAlignment="Center"
                            ToolTip="{Binding SelectedPlugin.ScanStatusBarText}"
                            TextTrimming="CharacterEllipsis">
                     <TextBlock.Style>
@@ -899,6 +918,7 @@
 
                 <TextBlock Grid.Column="10"
                            Text="{Binding DisplayVersion}"
+                           VerticalAlignment="Center"
                            Style="{StaticResource MutedTextStyle}" />
             </Grid>
         </Border>

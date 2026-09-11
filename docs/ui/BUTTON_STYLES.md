@@ -44,6 +44,14 @@ From `0.1.7.rev4`, retained unchanged by `0.1.7.rev5`, the **outer button height
 
 Semantic styles should be chosen by the meaning of the action, not by the desired color.
 
+## Compact Debugger Workspace Selectors
+
+Application `0.1.7.rev24` adds a deliberate specialized button form factor for the Debugger's upper-right workspace selector. `DebuggerWorkspaceSwitchButtonStyle` derives from `SecondaryButtonStyle`, so it reuses the normal application button template and all standard interaction/theme behavior, but sets `Height=28`, `FontSize=12`, and compact padding. This is narrower than the ordinary 34-unit action button because it behaves as persistent workspace navigation rather than a primary workflow action.
+
+`DebuggerBreakpointsSwitchButtonStyle` and `DebuggerCallStackSwitchButtonStyle` derive from that compact base and bind only their persistent selected state. When selected, the button keeps its normal theme surface and gains a two-unit `AccentBrush` border outline. The selection does not use `Topmost`, operating-system tab chrome, a hardcoded color, or a copied button template. The underlying ViewModel guarantees that exactly one available upper workspace is selected at a time.
+
+This specialized 28-unit height must not be copied to ordinary buttons. New action buttons continue to use `UiMetrics.StandardControlHeight=34` unless another genuinely distinct control role is documented.
+
 ## Interaction States
 
 The common control template handles the states used by standard buttons throughout the application:

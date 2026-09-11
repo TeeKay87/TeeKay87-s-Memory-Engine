@@ -1,6 +1,6 @@
 # PS5 x86-64 Disassembly Implementation
 
-The complete host `0.1.6.rev14` Disassembler block is hardware-verified. Current PS5 plugin `0.1.0.rev25` retains the same verified rev24 Iced decoder; rev25 changes only the separate debugger integration and Plugin API target.
+The complete host `0.1.6.rev14` Disassembler block is hardware-verified. Current PS5 plugin `0.1.0.rev36` retains the same verified rev24 Iced decoder; later PS5 plugin revisions changed debugger/scanner integration while leaving the disassembly decoder and memory-read boundary unchanged.
 
 ## Purpose
 
@@ -257,3 +257,9 @@ Those later features must continue to reuse the neutral provider/Core foundation
 
 
 > Host `0.1.7.rev6` builds on the fully verified rev5 baseline. Its Threads/Thread Control and passive header-status cleanup do not redesign the subsystem documented here.
+
+## Host Logical Breakpoint Presentation (`0.1.7.rev29`)
+
+PS5 plugin `0.1.0.rev36` and its Iced x86-64 decoder are unchanged in rev29. ps5debug-NG may implement a Software/Execute breakpoint by writing `0xCC` to the first byte of the instruction. The host now prevents that debugger-owned trap byte from changing the user-visible disassembly: Core applies the original instruction bytes captured before breakpoint installation to a local copy of the bounded read buffer before calling the PS5 decoder. The decoder still receives ordinary caller-supplied bytes and contains no breakpoint-specific branch.
+
+This does not restore or patch PS5 target memory. The backend breakpoint remains armed exactly as before. `Breakpoint`, `Breakpoint (disabled)`, and `Watchpoint hit` are neutral host markers and do not become PS5-specific instruction metadata. Future intentional assembly/NOP patching must remain distinguishable from this debugger-only logical view.

@@ -62,7 +62,7 @@ The underlying connection and process commands are the same generic commands ver
 
 ### Bottom connection-state indicator
 
-From `0.1.7.rev3`, connection state is the leftmost item in the permanent bottom status bar instead of being repeated in the upper target area. The indicator uses only the generic `SelectedPlugin.IsConnected` state; no platform-name branch is involved. Its presentation text is deliberately binary: **Connected** or **Not connected**. Transient connection-operation prose is not used as the permanent status indicator.
+From `0.1.7.rev3`, connection state is the leftmost item in the permanent bottom status bar instead of being repeated in the upper target area. The indicator uses only the generic `SelectedPlugin.IsConnected` state; no platform-name branch is involved. Its presentation text is deliberately binary: **Connected** or **Not connected**. Transient connection-operation prose is not used as the permanent status indicator. From `0.1.7.rev25`, every visible item in that bottom horizontal status row uses the same centered vertical alignment: the connection badge, general status text, error text, scan status text, progress/elapsed group, and the right-side `AppInfo.DisplayVersion`. The existing column order, spacing, bindings, and status meanings are unchanged.
 
 The text remains theme-readable inside a compact rounded status box. Connected state uses the theme's success border/surface, while disconnected state uses the existing danger border. General host status, error text, scan status/progress, and the right-aligned application `version.revN` remain separate status-bar fields.
 
@@ -77,7 +77,13 @@ This distinction is important once memory reads/writes, scans, debugger operatio
 
 ### Raw-memory diagnostics
 
-The capability-driven Raw Memory Read and Raw Memory Write diagnostic implementations remain in the host for development and regression work, but rev18 does not expose their panels in the main workspace. Saved Addresses now provides the normal user-facing read/write workflow.
+The capability-driven Raw Memory Read and Raw Memory Write diagnostic implementations remain in the host for development and regression work, but the current application does not expose their panels in the main workspace. Saved Addresses now provides the normal user-facing read/write workflow.
+
+### Modeless tool-window lifecycle
+
+Debugger, Disassembler, and Memory Viewer are modeless host tool windows. MainWindow uses one shared tool-window manager for all three launch paths. A tool uses MainWindow briefly as its placement owner while WPF evaluates `CenterOwner` during `Show()`, then the owner relationship is cleared. This prevents WPF's owned-window z-order rule from forcing every tool permanently above MainWindow; either MainWindow or a tool can be brought to the front through ordinary activation. No tool uses `Topmost` for this behavior.
+
+Releasing WPF ownership also means application shutdown cannot rely on automatic owner closure. MainWindow therefore tracks the modeless tools it opens. If MainWindow is closed while tools remain open, the first close request is cancelled and the host disables the tracked tool windows, awaits asynchronous DataContext cleanup such as Debugger detach/session release, runs synchronous DataContext disposal for Memory Viewer and Disassembler, and closes each tracked window through its normal close path. In `0.1.7.rev20`, that asynchronous sequence was deliberately separated from the synchronous `OnClosing` callback. After cleanup completes, MainWindow sets its completed guard and posts the final `Close()` through the WPF dispatcher. `0.1.7.rev21` keeps that ordering and explicitly discards the awaitable `DispatcherOperation` returned by `BeginInvoke`, which preserves the intentionally fire-and-forget post while satisfying the repository-wide warnings-as-errors build policy. Its subsequent runtime check confirmed that closing MainWindow closes the open tool windows as intended without the previous close re-entry exception. Rev23 does not modify this lifecycle path. Owned modal dialogs keep their existing owner/modal behavior and are not managed as modeless tools.
 
 ### Plugin details
 
@@ -210,7 +216,7 @@ The current workspace presents:
 - Previous Region, Region Start, Region End, and Next Region;
 - Region / Module plus module-relative origin when a real module base is known;
 - Visible range, Protection, and Architecture;
-- virtualized Address / Bytes / Instruction rows with theme-aware syntax highlighting;
+- virtualized Address / Bytes / Markers / Instruction rows with theme-aware syntax highlighting;
 - Extended Ctrl/Shift multi-selection with right-click preservation for any row already in the selected set;
 - direct Follow Target for valid provider-supplied Call/Jump/ConditionalJump targets;
 - Copy Address, Copy Bytes, Copy Instruction, Copy Address + Instruction, Copy Selected, and Ctrl+C;
@@ -221,7 +227,7 @@ The default context remains up to 512 bytes before and 512 bytes from the reques
 
 Previous/Next Region reuse Core `MemoryViewerRegionNavigator`; Region Start uses the region base and Region End uses the final byte. All successful region moves share Go To/Follow Target Back/Forward history. Refresh remains history-neutral and failed reads retain the prior successful view.
 
-Right-clicking a row already inside the current multi-selection keeps the full selection intact; right-clicking an unselected row intentionally replaces the old selection with that row. Follow Target remains context-row-specific, but all clipboard commands use the complete current selected set in displayed order: Copy Address, Copy Bytes, Copy Instruction, Copy Address + Instruction, Copy Selected, and Ctrl+C. When a right-click first selected an unselected row, the current set naturally contains only that row. Selected Instructions export likewise uses the complete selected set. Context-menu opening evaluates Follow Target capability without rewriting the TwoWay-bound primary selection. Copy/export uses only already materialized rows and causes no target traffic. Disassembler export uses the existing generic export dialog/writer/progress/cancellation pipeline. Structured columns include Address, Bytes, Instruction, Mnemonic, Operands, Length, Flow Control, Branch Target, Valid, Region / Module, Protection, and Module Relative.
+Right-clicking a row already inside the current multi-selection keeps the full selection intact; right-clicking an unselected row intentionally replaces the old selection with that row. Follow Target remains context-row-specific, but all clipboard commands use the complete current selected set in displayed order: Copy Address, Copy Bytes, Copy Instruction, Copy Address + Instruction, Copy Selected, and Ctrl+C. When a right-click first selected an unselected row, the current set naturally contains only that row. Selected Instructions export likewise uses the complete selected set. Context-menu opening evaluates Follow Target capability without rewriting the TwoWay-bound primary selection. Copy/export uses only already materialized rows and causes no target traffic. Disassembler export uses the existing generic export dialog/writer/progress/cancellation pipeline. Structured columns include Address, Bytes, Markers, Instruction, Mnemonic, Operands, Length, Flow Control, Branch Target, Valid, Region / Module, Protection, and Module Relative. Host `0.1.7.rev29` keeps debugger-owned runtime instrumentation out of the visible code stream: known Software/Execute `INT3` trap bytes are replaced only in a local disassembly buffer with captured original bytes before decode, while `Markers` reports debugger state separately. Watchpoint hits add marker metadata only and never modify the displayed instruction bytes.
 
 Mock Target now displays **Custom / Unknown** rather than X64 because its deterministic disassembler uses a synthetic instruction set. PS5 continues to display X64 and decode with the plugin-owned Iced provider.
 
@@ -316,3 +322,10 @@ Rev26 does not expose plugin-native compare names in this UI. The user always se
 
 
 > Host `0.1.7.rev7` keeps the verified two-row target header and responsive row-1 sizing unchanged. Registers and stop context live inside the modeless Debugger workspace; no register/status field is added to the permanent main header.
+
+
+## Rev30 Scan Results and Saved Addresses Debugger Shortcuts
+
+Both Scan Results and Saved Addresses row context menus now expose **Add Breakpoint** and **Add Watchpoint**. The actions are intentionally passive until a modeless Debugger window is already attached to the same current target/session; right-clicking a memory row never performs an implicit debugger attach.
+
+The host asks the attached debugger's optional neutral request-validation service before enabling either menu item. Add Breakpoint defaults to persistent Software/Execute at the row address. Add Watchpoint defaults to persistent Hardware/Write and uses the row value width. Invalid requests remain visibly disabled. This keeps platform-specific executable-region, watchpoint-size/alignment, slot, and cleanup rules out of the MainWindow while still giving Scan Results/Saved Addresses a direct path into the active Debugger workspace.

@@ -1,5 +1,7 @@
 # Application 0.1.7.rev7 Source Review — Registers and Stop Context
 
+
+> **Status:** Superseded by `0.1.7.rev8` after the packaged rev7 Windows verification repeatedly produced **106/107**. The only failure was `Debugger workspace command and event source contract`; investigation showed the production connection-generation binding was intact and the source-contract check was falsely requiring the old explicit `new DebuggerViewModel(...)` spelling instead of accepting the rev7 target-typed `new(...)` constructor expression.
 ## Status
 
 **Static/source review is the package-lock gate. Windows compilation and runtime verification remain external gates.**

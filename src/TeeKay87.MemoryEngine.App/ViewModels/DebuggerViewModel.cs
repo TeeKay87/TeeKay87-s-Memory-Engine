@@ -11,6 +11,7 @@ using System.Windows.Threading;
 using TeeKay87.MemoryEngine.App.Debugging;
 using TeeKay87.MemoryEngine.App.Infrastructure;
 using TeeKay87.MemoryEngine.Core.Debugging;
+using TeeKay87.MemoryEngine.Core.Disassembly;
 using TeeKay87.MemoryEngine.PluginSdk.Capabilities;
 using TeeKay87.MemoryEngine.PluginSdk.Contracts;
 using TeeKay87.MemoryEngine.PluginSdk.Models;
@@ -35,6 +36,17 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
     private readonly AsyncRelayCommand _suspendThreadCommand;
     private readonly AsyncRelayCommand _resumeThreadCommand;
     private readonly AsyncRelayCommand _refreshRegistersCommand;
+    private readonly AsyncRelayCommand _refreshBreakpointsCommand;
+    private readonly AsyncRelayCommand _refreshCallStackCommand;
+    private readonly AsyncRelayCommand _stepIntoCommand;
+    private readonly AsyncRelayCommand _stepOverCommand;
+    private readonly AsyncRelayCommand _stepOutCommand;
+    private readonly AsyncRelayCommand _removeBreakpointCommand;
+    private readonly AsyncRelayCommand _enableBreakpointCommand;
+    private readonly AsyncRelayCommand _disableBreakpointCommand;
+    private readonly RelayCommand _showBreakpointsWorkspaceCommand;
+    private readonly RelayCommand _showCallStackWorkspaceCommand;
+    private readonly Dictionary<ulong, DisassembledInstruction> _softwareBreakpointInstructionCache = new();
     private DebuggerSessionCoordinator? _coordinator;
     private DebuggerSessionState _sessionState = DebuggerSessionState.Detached;
     private string _stateText = "Detached";
@@ -43,8 +55,17 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
     private bool _isBusy;
     private DebuggerThreadViewModel? _selectedThread;
     private DebuggerRegisterViewModel? _selectedRegister;
+    private DebuggerBreakpointViewModel? _selectedBreakpoint;
+    private DebuggerStackFrameViewModel? _selectedStackFrame;
     private ulong? _currentInstructionPointer;
+    private DebuggerEvent? _deferredStopContextEvent;
+    private ComposedExecutionOperation? _activeComposedExecutionOperation;
+    private ComposedExecutionOperation? _pendingInterruptedComposedExecutionOperation;
+    private ulong? _logicalSoftwareBreakpointStopAddress;
+    private ulong? _logicalSoftwareBreakpointStopThreadId;
     private bool _suppressAutomaticRegisterRefresh;
+    private bool _continueInProgress;
+    private bool _isCallStackWorkspaceSelected;
     private bool _disposed;
 
     internal DebuggerViewModel(
@@ -66,6 +87,17 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         _suspendThreadCommand = new AsyncRelayCommand(SuspendThreadAsync, CanSuspendThread);
         _resumeThreadCommand = new AsyncRelayCommand(ResumeThreadAsync, CanResumeThread);
         _refreshRegistersCommand = new AsyncRelayCommand(RefreshRegistersAsync, CanRefreshRegisters);
+        _refreshBreakpointsCommand = new AsyncRelayCommand(RefreshBreakpointsAsync, CanRefreshBreakpoints);
+        _refreshCallStackCommand = new AsyncRelayCommand(RefreshCallStackAsync, CanRefreshCallStack);
+        _stepIntoCommand = new AsyncRelayCommand(StepIntoAsync, CanStepInto);
+        _stepOverCommand = new AsyncRelayCommand(StepOverAsync, CanStepOver);
+        _stepOutCommand = new AsyncRelayCommand(StepOutAsync, CanStepOut);
+        _removeBreakpointCommand = new AsyncRelayCommand(RemoveSelectedBreakpointAsync, CanRemoveSelectedBreakpoint);
+        _enableBreakpointCommand = new AsyncRelayCommand(EnableSelectedBreakpointAsync, CanEnableSelectedBreakpoint);
+        _disableBreakpointCommand = new AsyncRelayCommand(DisableSelectedBreakpointAsync, CanDisableSelectedBreakpoint);
+        _showBreakpointsWorkspaceCommand = new RelayCommand(ShowBreakpointsWorkspace, () => HasBreakpointManagementCapability);
+        _showCallStackWorkspaceCommand = new RelayCommand(ShowCallStackWorkspace, () => HasCallStackCapability);
+        _isCallStackWorkspaceSelected = !HasBreakpointManagementCapability && HasCallStackCapability;
 
         _plugin.PropertyChanged += OnPluginPropertyChanged;
     }
@@ -116,6 +148,10 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
 
     public ObservableCollection<DebuggerRegisterViewModel> Registers { get; } = new();
 
+    public ObservableCollection<DebuggerBreakpointViewModel> Breakpoints { get; } = new();
+
+    public ObservableCollection<DebuggerStackFrameViewModel> CallFrames { get; } = new();
+
     public DebuggerThreadViewModel? SelectedThread
     {
         get => _selectedThread;
@@ -124,17 +160,19 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             if (SetProperty(ref _selectedThread, value))
             {
                 ClearRegisters();
+                ClearCallStack();
                 RaiseThreadCommandStates();
                 RaiseRegisterCommandStates();
+                RaiseCallStackCommandStates();
+                RaiseStepCommandStates();
 
                 if (!_suppressAutomaticRegisterRefresh &&
                     !IsBusy &&
                     value is not null &&
                     _sessionState == DebuggerSessionState.Paused &&
-                    HasRegisterAccessCapability &&
                     IsTargetCurrent())
                 {
-                    _ = RefreshRegistersAfterThreadSelectionAsync(value.Id);
+                    _ = RefreshStopContextAfterThreadSelectionAsync(value.Id);
                 }
             }
         }
@@ -151,6 +189,90 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             }
         }
     }
+
+    public DebuggerBreakpointViewModel? SelectedBreakpoint
+    {
+        get => _selectedBreakpoint;
+        set
+        {
+            if (SetProperty(ref _selectedBreakpoint, value))
+            {
+                RaiseBreakpointCommandStates();
+                OnPropertyChanged(nameof(CanNavigateToSelectedBreakpoint));
+            }
+        }
+    }
+
+    public DebuggerStackFrameViewModel? SelectedStackFrame
+    {
+        get => _selectedStackFrame;
+        set
+        {
+            if (SetProperty(ref _selectedStackFrame, value))
+            {
+                RaiseCallStackCommandStates();
+                RaiseStepCommandStates();
+            }
+        }
+    }
+
+    public bool HasBreakpointCapability =>
+        _plugin.Instance.Capabilities.HasFlag(TargetCapabilities.Breakpoints);
+
+    public bool HasWatchpointCapability =>
+        _plugin.Instance.Capabilities.HasFlag(TargetCapabilities.Watchpoints);
+
+    public bool HasBreakpointManagementCapability =>
+        HasBreakpointCapability || HasWatchpointCapability;
+
+    public bool HasCallStackCapability =>
+        _plugin.Instance.Capabilities.HasFlag(TargetCapabilities.CallStack);
+
+    public bool HasStepExecutionCapability =>
+        _plugin.Instance.Capabilities.HasFlag(TargetCapabilities.StepExecution);
+
+    public bool HasUpperDebuggerWorkspaceCapability =>
+        HasBreakpointManagementCapability || HasCallStackCapability;
+
+    public bool IsBreakpointsWorkspaceSelected =>
+        HasBreakpointManagementCapability && !_isCallStackWorkspaceSelected;
+
+    public bool IsCallStackWorkspaceSelected =>
+        HasCallStackCapability && _isCallStackWorkspaceSelected;
+
+    public bool CanNavigateToSelectedFrameDisassembler =>
+        SelectedStackFrame is not null &&
+        _sessionState == DebuggerSessionState.Paused &&
+        IsTargetCurrent() &&
+        _plugin.CanOpenDisassemblerForTarget(_targetProcess);
+
+    public bool CanNavigateToSelectedFrameMemoryViewer =>
+        SelectedStackFrame is not null &&
+        _sessionState == DebuggerSessionState.Paused &&
+        IsTargetCurrent() &&
+        _plugin.CanOpenMemoryViewerForTarget(_targetProcess);
+
+    public bool CanRunToAddress =>
+        !_disposed &&
+        !IsBusy &&
+        HasStepExecutionCapability &&
+        HasBreakpointCapability &&
+        _sessionState == DebuggerSessionState.Paused &&
+        IsTargetCurrent();
+
+    public bool CanAddBreakpoint =>
+        !_disposed &&
+        !IsBusy &&
+        HasBreakpointManagementCapability &&
+        IsAttachedState() &&
+        IsTargetCurrent();
+
+    public bool CanRemoveAllBreakpoints => CanAddBreakpoint && Breakpoints.Count > 0;
+
+    public bool CanNavigateToSelectedBreakpoint =>
+        SelectedBreakpoint?.Breakpoint.Request.Access == DebuggerBreakpointAccess.Execute &&
+        IsTargetCurrent() &&
+        _plugin.CanOpenDisassemblerForTarget(_targetProcess);
 
     public bool HasRegisterAccessCapability =>
         _plugin.Instance.Capabilities.HasFlag(TargetCapabilities.RegisterAccess);
@@ -210,6 +332,26 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
 
     public ICommand RefreshRegistersCommand => _refreshRegistersCommand;
 
+    public ICommand RefreshBreakpointsCommand => _refreshBreakpointsCommand;
+
+    public ICommand RefreshCallStackCommand => _refreshCallStackCommand;
+
+    public ICommand StepIntoCommand => _stepIntoCommand;
+
+    public ICommand StepOverCommand => _stepOverCommand;
+
+    public ICommand StepOutCommand => _stepOutCommand;
+
+    public ICommand RemoveBreakpointCommand => _removeBreakpointCommand;
+
+    public ICommand EnableBreakpointCommand => _enableBreakpointCommand;
+
+    public ICommand DisableBreakpointCommand => _disableBreakpointCommand;
+
+    public ICommand ShowBreakpointsWorkspaceCommand => _showBreakpointsWorkspaceCommand;
+
+    public ICommand ShowCallStackWorkspaceCommand => _showCallStackWorkspaceCommand;
+
     public async ValueTask DisposeAsync()
     {
         if (_disposed)
@@ -220,6 +362,8 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         _disposed = true;
         _plugin.PropertyChanged -= OnPluginPropertyChanged;
         _lifetimeCancellation.Cancel();
+        ClearSoftwareBreakpointInstructionState();
+        ClearComposedExecutionState();
 
         DebuggerSessionCoordinator? coordinator = _coordinator;
         _coordinator = null;
@@ -231,6 +375,55 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         }
 
         _lifetimeCancellation.Dispose();
+    }
+
+    internal bool IsAttachedTo(
+        PluginViewModel plugin,
+        TargetProcess targetProcess,
+        long connectionGeneration)
+    {
+        ArgumentNullException.ThrowIfNull(plugin);
+        ArgumentNullException.ThrowIfNull(targetProcess);
+
+        DebuggerSessionCoordinator? coordinator = _coordinator;
+        return !_disposed &&
+               ReferenceEquals(_plugin, plugin) &&
+               coordinator is { IsAttached: true } &&
+               (_sessionState is DebuggerSessionState.Attached or
+                   DebuggerSessionState.Running or
+                   DebuggerSessionState.Paused) &&
+               coordinator.Identity.Matches(plugin.Metadata.Id, targetProcess, connectionGeneration) &&
+               IsTargetCurrent();
+    }
+
+    internal DebuggerBreakpointValidationResult ValidateAddressActionRequest(
+        DebuggerBreakpointRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        bool capabilityAvailable = request.Kind switch
+        {
+            DebuggerBreakpointKind.Software => HasBreakpointCapability,
+            DebuggerBreakpointKind.Hardware => HasWatchpointCapability,
+            _ => false
+        };
+        if (!CanAddBreakpoint || !capabilityAvailable ||
+            _coordinator is not { IsAttached: true } coordinator ||
+            !IsTargetCurrent())
+        {
+            return DebuggerBreakpointValidationResult.Invalid(
+                "The Debugger must be attached to the current Active Target before this action can be used.");
+        }
+
+        IDebuggerBreakpointValidationService? validationService =
+            coordinator.GetService<IDebuggerBreakpointValidationService>();
+        if (validationService is null)
+        {
+            return DebuggerBreakpointValidationResult.Invalid(
+                "The attached debugger backend does not expose request validation for address shortcuts.");
+        }
+
+        return validationService.ValidateBreakpointRequest(request);
     }
 
     private bool CanAttach()
@@ -314,6 +507,84 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
                IsTargetCurrent();
     }
 
+    private bool CanRefreshBreakpoints()
+    {
+        return !_disposed &&
+               !IsBusy &&
+               HasBreakpointManagementCapability &&
+               IsAttachedState() &&
+               IsTargetCurrent();
+    }
+
+    private bool CanRefreshCallStack()
+    {
+        return !_disposed &&
+               !IsBusy &&
+               HasCallStackCapability &&
+               SelectedThread is not null &&
+               _sessionState == DebuggerSessionState.Paused &&
+               IsTargetCurrent();
+    }
+
+    private bool CanStepInto()
+    {
+        return !_disposed &&
+               !IsBusy &&
+               HasStepExecutionCapability &&
+               SelectedThread is not null &&
+               _sessionState == DebuggerSessionState.Paused &&
+               IsTargetCurrent();
+    }
+
+    private bool CanStepOver()
+    {
+        return CanStepInto() && CurrentInstructionPointer.HasValue;
+    }
+
+    private bool CanStepOut()
+    {
+        return CanStepInto() && SelectedStackFrame?.Frame.ReturnAddress.HasValue == true;
+    }
+
+    private void ShowBreakpointsWorkspace()
+    {
+        if (!HasBreakpointManagementCapability || !_isCallStackWorkspaceSelected)
+        {
+            return;
+        }
+
+        _isCallStackWorkspaceSelected = false;
+        OnPropertyChanged(nameof(IsBreakpointsWorkspaceSelected));
+        OnPropertyChanged(nameof(IsCallStackWorkspaceSelected));
+    }
+
+    private void ShowCallStackWorkspace()
+    {
+        if (!HasCallStackCapability || _isCallStackWorkspaceSelected)
+        {
+            return;
+        }
+
+        _isCallStackWorkspaceSelected = true;
+        OnPropertyChanged(nameof(IsBreakpointsWorkspaceSelected));
+        OnPropertyChanged(nameof(IsCallStackWorkspaceSelected));
+    }
+
+    private bool CanRemoveSelectedBreakpoint()
+    {
+        return CanRefreshBreakpoints() && SelectedBreakpoint is not null;
+    }
+
+    private bool CanEnableSelectedBreakpoint()
+    {
+        return CanRefreshBreakpoints() && SelectedBreakpoint?.IsEnabled == false;
+    }
+
+    private bool CanDisableSelectedBreakpoint()
+    {
+        return CanRefreshBreakpoints() && SelectedBreakpoint?.IsEnabled == true;
+    }
+
     private async Task AttachAsync()
     {
         if (!IsTargetCurrent())
@@ -333,6 +604,8 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         IsBusy = true;
         ErrorText = string.Empty;
         StatusText = "Attaching debugger...";
+        ClearSoftwareBreakpointInstructionState();
+        ClearComposedExecutionState();
 
         try
         {
@@ -348,10 +621,12 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
                 .ConfigureAwait(true);
 
             ApplyCoordinatorState(coordinator.State);
+            await RefreshBreakpointsCoreAsync(showStatus: false).ConfigureAwait(true);
             await RefreshThreadsCoreAsync(showStatus: false).ConfigureAwait(true);
             if (coordinator.State == DebuggerSessionState.Paused)
             {
                 await RefreshRegistersCoreAsync(showStatus: false).ConfigureAwait(true);
+                await RefreshCallStackCoreAsync(showStatus: false).ConfigureAwait(true);
             }
             StatusText = coordinator.State switch
             {
@@ -396,6 +671,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             ApplyCoordinatorState(coordinator.State);
             await RefreshThreadsCoreAsync(showStatus: false).ConfigureAwait(true);
             await RefreshRegistersCoreAsync(showStatus: false).ConfigureAwait(true);
+            await RefreshCallStackCoreAsync(showStatus: false).ConfigureAwait(true);
             StatusText = "Target paused.";
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -410,6 +686,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         finally
         {
             IsBusy = false;
+            RefreshDeferredStopContextIfNeeded();
         }
     }
 
@@ -420,6 +697,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        _continueInProgress = true;
         IsBusy = true;
         ErrorText = string.Empty;
         StatusText = "Continuing target...";
@@ -429,10 +707,13 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             await coordinator
                 .ContinueAsync(_lifetimeCancellation.Token)
                 .ConfigureAwait(true);
+            coordinator.DisassemblyOverlayState.CompleteStagedSoftwareBreakpointRetirements();
             ApplyCoordinatorState(coordinator.State);
-            ClearRegisters();
             await RefreshThreadsCoreAsync(showStatus: false).ConfigureAwait(true);
-            StatusText = "Target running.";
+            ApplyPostExecutionCommandState(
+                coordinator,
+                "Target running.",
+                "Target paused.");
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -445,7 +726,9 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         }
         finally
         {
+            _continueInProgress = false;
             IsBusy = false;
+            RefreshDeferredStopContextIfNeeded();
         }
     }
 
@@ -482,11 +765,873 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             await ReleaseCoordinatorAsync().ConfigureAwait(true);
             ClearThreads();
             ClearRegisters();
+            ClearCallStack();
+            ClearBreakpoints();
+            ClearSoftwareBreakpointInstructionState();
+            ClearComposedExecutionState();
             ApplyCoordinatorState(DebuggerSessionState.Detached);
             IsBusy = false;
         }
     }
 
+
+    private async Task RefreshCallStackAsync()
+    {
+        IsBusy = true;
+        ErrorText = string.Empty;
+        try
+        {
+            await RefreshCallStackCoreAsync(showStatus: true).ConfigureAwait(true);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task<bool> RefreshCallStackCoreAsync(
+        bool showStatus,
+        int? preferredFrameIndex = null,
+        ulong? expectedThreadId = null)
+    {
+        if (!HasCallStackCapability ||
+            _sessionState != DebuggerSessionState.Paused ||
+            !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator) ||
+            SelectedThread is not DebuggerThreadViewModel selectedThread)
+        {
+            ClearCallStack();
+            return false;
+        }
+
+        if (expectedThreadId.HasValue && selectedThread.Id != expectedThreadId.Value)
+        {
+            return false;
+        }
+
+        IDebuggerCallStackService? service = coordinator.GetService<IDebuggerCallStackService>();
+        if (service is null)
+        {
+            ClearCallStack();
+            ErrorText = "The plugin advertises call-stack support but the attached debugger session does not provide IDebuggerCallStackService.";
+            if (showStatus)
+            {
+                StatusText = "Call-stack access is unavailable.";
+            }
+            return false;
+        }
+
+        int? selectedFrameIndex = preferredFrameIndex ?? SelectedStackFrame?.Index;
+        ulong threadId = selectedThread.Id;
+        try
+        {
+            IReadOnlyList<DebuggerStackFrame> frames = await service
+                .GetCallStackAsync(threadId, _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            if (_sessionState != DebuggerSessionState.Paused ||
+                SelectedThread?.Id != threadId ||
+                !IsTargetCurrent())
+            {
+                return false;
+            }
+
+            CallFrames.Clear();
+            foreach (DebuggerStackFrame frame in frames.OrderBy(frame => frame.Index))
+            {
+                CallFrames.Add(new DebuggerStackFrameViewModel(frame));
+            }
+
+            SelectedStackFrame = selectedFrameIndex.HasValue
+                ? CallFrames.FirstOrDefault(frame => frame.Index == selectedFrameIndex.Value) ?? CallFrames.FirstOrDefault()
+                : CallFrames.FirstOrDefault();
+
+            if (showStatus)
+            {
+                StatusText = CallFrames.Count == 1
+                    ? $"Loaded 1 call frame for thread {selectedThread.IdText}."
+                    : $"Loaded {CallFrames.Count} call frames for thread {selectedThread.IdText}.";
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            if (showStatus)
+            {
+                StatusText = "Call-stack refresh cancelled.";
+            }
+            return false;
+        }
+        catch (Exception exception)
+        {
+            ClearCallStack();
+            ErrorText = exception.Message;
+            if (showStatus)
+            {
+                StatusText = "Call-stack refresh failed.";
+            }
+            return false;
+        }
+        finally
+        {
+            RaiseCallStackCommandStates();
+        }
+    }
+
+    private Task StepIntoAsync()
+    {
+        return ExecuteNativeStepIntoAsync("Step Into");
+    }
+
+    private async Task StepOverAsync()
+    {
+        if (!CanStepOver() || CurrentInstructionPointer is not ulong instructionPointer)
+        {
+            return;
+        }
+
+        DisassembledInstruction? instruction = GetLogicalSoftwareBreakpointInstruction(instructionPointer);
+        if (instruction is null)
+        {
+            IsBusy = true;
+            ErrorText = string.Empty;
+            StatusText = $"Resolving instruction at 0x{instructionPointer:X} for Step Over...";
+            try
+            {
+                DisassemblySnapshot snapshot = await _plugin
+                    .ReadDisassemblyContextAsync(
+                        _targetProcess,
+                        _connectionGeneration,
+                        instructionPointer,
+                        beforeByteCount: 0,
+                        afterByteCount: 32,
+                        _lifetimeCancellation.Token)
+                    .ConfigureAwait(true);
+                instruction = snapshot.Instructions.FirstOrDefault(item => item.Address == instructionPointer);
+            }
+            catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+            {
+                StatusText = "Step Over cancelled.";
+                return;
+            }
+            catch (Exception exception)
+            {
+                ErrorText = exception.Message;
+                StatusText = "Step Over could not inspect the current instruction.";
+                return;
+            }
+            finally
+            {
+                IsBusy = false;
+            }
+        }
+
+        if (instruction is null)
+        {
+            ErrorText = "The Disassembler did not return the current instruction.";
+            StatusText = "Step Over could not resolve the current instruction.";
+            return;
+        }
+
+        if (instruction.FlowControl != DisassemblyFlowControl.Call)
+        {
+            await ExecuteNativeStepIntoAsync("Step Over").ConfigureAwait(true);
+            return;
+        }
+
+        ulong returnAddress;
+        try
+        {
+            returnAddress = checked(instruction.Address + (ulong)instruction.Length);
+        }
+        catch (OverflowException exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = "Step Over could not calculate the instruction fall-through address.";
+            return;
+        }
+
+        await RunToAddressAsync(returnAddress, "Step Over").ConfigureAwait(true);
+    }
+
+    private async Task StepOutAsync()
+    {
+        if (!CanStepOut() || SelectedStackFrame?.Frame.ReturnAddress is not ulong returnAddress)
+        {
+            return;
+        }
+
+        await RunToAddressAsync(returnAddress, "Step Out").ConfigureAwait(true);
+    }
+
+    private async Task ExecuteNativeStepIntoAsync(string operationName)
+    {
+        if (!CanStepInto() ||
+            SelectedThread is not DebuggerThreadViewModel thread ||
+            !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            return;
+        }
+
+        IDebuggerStepService? service = coordinator.GetService<IDebuggerStepService>();
+        if (service is null)
+        {
+            ErrorText = "The plugin advertises stepping but the attached debugger session does not provide IDebuggerStepService.";
+            StatusText = $"{operationName} is unavailable.";
+            return;
+        }
+
+        _continueInProgress = true;
+        IsBusy = true;
+        ErrorText = string.Empty;
+        StatusText = $"{operationName} on thread {thread.IdText}...";
+        try
+        {
+            await service
+                .StepAsync(DebuggerStepKind.Into, thread.Id, _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            ApplyPostExecutionCommandState(
+                coordinator,
+                $"{operationName} started.",
+                $"{operationName} completed.");
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            StatusText = $"{operationName} cancelled.";
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = $"{operationName} failed.";
+        }
+        finally
+        {
+            _continueInProgress = false;
+            IsBusy = false;
+            RefreshDeferredStopContextIfNeeded();
+        }
+    }
+
+    public Task RunToAddressAsync(ulong address)
+    {
+        return RunToAddressAsync(address, "Run to Address");
+    }
+
+    private async Task RunToAddressAsync(ulong address, string operationName)
+    {
+        if (!CanRunToAddress || !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            return;
+        }
+
+        DebuggerBreakpointViewModel? existing = Breakpoints.FirstOrDefault(item =>
+            item.Breakpoint.Request.Kind == DebuggerBreakpointKind.Software &&
+            item.Breakpoint.Request.Access == DebuggerBreakpointAccess.Execute &&
+            item.Breakpoint.Request.Address == address);
+        if (existing is { IsEnabled: false })
+        {
+            ErrorText = $"A disabled software breakpoint already exists at 0x{address:X}. Enable or remove it before using {operationName}.";
+            StatusText = $"{operationName} was not started.";
+            return;
+        }
+
+        bool ownsTemporaryBreakpoint = existing is null;
+        if (existing is null)
+        {
+            bool added = await AddBreakpointAsync(new DebuggerBreakpointRequest(
+                    address,
+                    1,
+                    DebuggerBreakpointKind.Software,
+                    DebuggerBreakpointAccess.Execute,
+                    isTemporary: true))
+                .ConfigureAwait(true);
+            if (!added)
+            {
+                return;
+            }
+
+            existing = Breakpoints.FirstOrDefault(item =>
+                item.Breakpoint.Request.Kind == DebuggerBreakpointKind.Software &&
+                item.Breakpoint.Request.Access == DebuggerBreakpointAccess.Execute &&
+                item.Breakpoint.Request.Address == address &&
+                item.Breakpoint.Request.IsTemporary);
+            if (existing is null)
+            {
+                ErrorText = $"The temporary {operationName} breakpoint could not be resolved after creation.";
+                StatusText = $"{operationName} was not started.";
+                return;
+            }
+        }
+
+        ComposedExecutionOperation operation = new(
+            operationName,
+            address,
+            existing.Id,
+            ownsTemporaryBreakpoint);
+        _activeComposedExecutionOperation = operation;
+
+        if (_sessionState != DebuggerSessionState.Paused || !IsTargetCurrent())
+        {
+            _activeComposedExecutionOperation = null;
+            await CleanupComposedExecutionOperationAsync(operation, debugEvent: null).ConfigureAwait(true);
+            return;
+        }
+
+        _continueInProgress = true;
+        IsBusy = true;
+        ErrorText = string.Empty;
+        StatusText = $"{operationName}: continuing to 0x{address:X}...";
+        try
+        {
+            await coordinator.ContinueAsync(_lifetimeCancellation.Token).ConfigureAwait(true);
+            coordinator.DisassemblyOverlayState.CompleteStagedSoftwareBreakpointRetirements();
+            ApplyCoordinatorState(coordinator.State);
+            await RefreshThreadsCoreAsync(showStatus: false).ConfigureAwait(true);
+            ApplyPostExecutionCommandState(
+                coordinator,
+                $"{operationName} is running toward 0x{address:X}.",
+                $"{operationName} stopped.");
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            StatusText = $"{operationName} cancelled.";
+            if (ReferenceEquals(_activeComposedExecutionOperation, operation))
+            {
+                _activeComposedExecutionOperation = null;
+                _pendingInterruptedComposedExecutionOperation = operation;
+            }
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = $"{operationName} failed.";
+            if (ReferenceEquals(_activeComposedExecutionOperation, operation))
+            {
+                _activeComposedExecutionOperation = null;
+                _pendingInterruptedComposedExecutionOperation = operation;
+            }
+        }
+        finally
+        {
+            _continueInProgress = false;
+            IsBusy = false;
+
+            if (_deferredStopContextEvent is null &&
+                ReferenceEquals(_pendingInterruptedComposedExecutionOperation, operation))
+            {
+                _pendingInterruptedComposedExecutionOperation = null;
+                await CleanupComposedExecutionOperationAsync(operation, debugEvent: null).ConfigureAwait(true);
+            }
+
+            RefreshDeferredStopContextIfNeeded();
+        }
+    }
+
+    public Task<bool> AddSoftwareBreakpointAsync(ulong address, bool isTemporary)
+    {
+        return AddBreakpointAsync(new DebuggerBreakpointRequest(
+            address,
+            1,
+            DebuggerBreakpointKind.Software,
+            DebuggerBreakpointAccess.Execute,
+            isTemporary));
+    }
+
+    public async Task<bool> AddBreakpointAsync(DebuggerBreakpointRequest request)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        bool capabilityAvailable = request.Kind switch
+        {
+            DebuggerBreakpointKind.Software => HasBreakpointCapability,
+            DebuggerBreakpointKind.Hardware => HasWatchpointCapability,
+            _ => false
+        };
+        if (!CanAddBreakpoint || !capabilityAvailable ||
+            !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            return false;
+        }
+
+        IDebuggerBreakpointService? service = coordinator.GetService<IDebuggerBreakpointService>();
+        if (service is null)
+        {
+            ErrorText = "The plugin advertises breakpoint/watchpoint management but the attached debugger session does not provide IDebuggerBreakpointService.";
+            StatusText = "Breakpoint/watchpoint management is unavailable.";
+            return false;
+        }
+
+        string description = GetBreakpointDescription(request);
+        IsBusy = true;
+        ErrorText = string.Empty;
+        StatusText = $"Adding {description} at 0x{request.Address:X}...";
+
+        try
+        {
+            DisassembledInstruction? originalInstruction = await CaptureSoftwareBreakpointInstructionAsync(request)
+                .ConfigureAwait(true);
+            DebuggerBreakpoint added = await service
+                .AddBreakpointAsync(request, _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+
+            if (request.Kind == DebuggerBreakpointKind.Software &&
+                request.Access == DebuggerBreakpointAccess.Execute)
+            {
+                if (originalInstruction is not null)
+                {
+                    _softwareBreakpointInstructionCache[request.Address] = originalInstruction;
+                    coordinator.DisassemblyOverlayState.RememberSoftwareBreakpointInstruction(originalInstruction);
+                }
+                else
+                {
+                    _softwareBreakpointInstructionCache.Remove(request.Address);
+                }
+            }
+
+            await RefreshBreakpointsCoreAsync(showStatus: false, preferredBreakpointId: added.Id).ConfigureAwait(true);
+            StatusText = $"{(request.IsTemporary ? "Temporary " : string.Empty)}{description} added at 0x{request.Address:X}.";
+            return true;
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            StatusText = "Breakpoint/watchpoint add cancelled.";
+            return false;
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = "Breakpoint/watchpoint add failed.";
+            return false;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    public async Task RemoveAllBreakpointsAsync()
+    {
+        if (!CanRemoveAllBreakpoints || !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            return;
+        }
+
+        IDebuggerBreakpointService? service = coordinator.GetService<IDebuggerBreakpointService>();
+        if (service is null)
+        {
+            ErrorText = "The attached debugger session does not provide breakpoint/watchpoint management.";
+            return;
+        }
+
+        IsBusy = true;
+        ErrorText = string.Empty;
+        StatusText = "Removing all breakpoints/watchpoints...";
+        try
+        {
+            DebuggerBreakpointViewModel[] currentBreakpoints = Breakpoints.ToArray();
+            foreach (DebuggerBreakpointViewModel breakpoint in currentBreakpoints)
+            {
+                await service.RemoveBreakpointAsync(breakpoint.Id, _lifetimeCancellation.Token).ConfigureAwait(true);
+                if (coordinator.State == DebuggerSessionState.Paused && IsSoftwareExecuteBreakpoint(breakpoint.Breakpoint))
+                {
+                    coordinator.DisassemblyOverlayState.StageSoftwareBreakpointRetirement(
+                        breakpoint.Breakpoint.Request.Address);
+                }
+            }
+
+            await RefreshBreakpointsCoreAsync(showStatus: false).ConfigureAwait(true);
+            StatusText = "All breakpoints/watchpoints removed.";
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            StatusText = "Remove All breakpoints/watchpoints cancelled.";
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = "Remove All breakpoints/watchpoints failed.";
+            await RefreshBreakpointsCoreAsync(showStatus: false).ConfigureAwait(true);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RefreshBreakpointsAsync()
+    {
+        IsBusy = true;
+        ErrorText = string.Empty;
+        try
+        {
+            await RefreshBreakpointsCoreAsync(showStatus: true).ConfigureAwait(true);
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task RemoveSelectedBreakpointAsync()
+    {
+        if (SelectedBreakpoint is not DebuggerBreakpointViewModel selected ||
+            !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            return;
+        }
+
+        IDebuggerBreakpointService? service = coordinator.GetService<IDebuggerBreakpointService>();
+        if (service is null)
+        {
+            ErrorText = "The attached debugger session does not provide breakpoint/watchpoint management.";
+            return;
+        }
+
+        IsBusy = true;
+        ErrorText = string.Empty;
+        string description = GetBreakpointDescription(selected.Breakpoint.Request);
+        StatusText = $"Removing {description} at {selected.AddressText}...";
+        try
+        {
+            await service.RemoveBreakpointAsync(selected.Id, _lifetimeCancellation.Token).ConfigureAwait(true);
+            if (coordinator.State == DebuggerSessionState.Paused && IsSoftwareExecuteBreakpoint(selected.Breakpoint))
+            {
+                coordinator.DisassemblyOverlayState.StageSoftwareBreakpointRetirement(
+                    selected.Breakpoint.Request.Address);
+            }
+            await RefreshBreakpointsCoreAsync(showStatus: false).ConfigureAwait(true);
+            StatusText = $"{description} at {selected.AddressText} removed.";
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            StatusText = "Breakpoint/watchpoint removal cancelled.";
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = "Breakpoint/watchpoint removal failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private Task EnableSelectedBreakpointAsync() => SetSelectedBreakpointEnabledAsync(isEnabled: true);
+
+    private Task DisableSelectedBreakpointAsync() => SetSelectedBreakpointEnabledAsync(isEnabled: false);
+
+    private async Task SetSelectedBreakpointEnabledAsync(bool isEnabled)
+    {
+        if (SelectedBreakpoint is not DebuggerBreakpointViewModel selected ||
+            !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            return;
+        }
+
+        IDebuggerBreakpointStateService? service = coordinator.GetService<IDebuggerBreakpointStateService>();
+        if (service is null)
+        {
+            ErrorText = "The attached debugger session does not support enabling or disabling existing breakpoints/watchpoints.";
+            StatusText = "Breakpoint/watchpoint state change is unavailable.";
+            return;
+        }
+
+        IsBusy = true;
+        ErrorText = string.Empty;
+        string description = GetBreakpointDescription(selected.Breakpoint.Request);
+        StatusText = $"{(isEnabled ? "Enabling" : "Disabling")} {description} at {selected.AddressText}...";
+        try
+        {
+            await service
+                .SetBreakpointEnabledAsync(selected.Id, isEnabled, _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            if (IsSoftwareExecuteBreakpoint(selected.Breakpoint))
+            {
+                if (isEnabled)
+                {
+                    coordinator.DisassemblyOverlayState.CancelSoftwareBreakpointRetirement(
+                        selected.Breakpoint.Request.Address);
+                }
+                else if (coordinator.State == DebuggerSessionState.Paused)
+                {
+                    coordinator.DisassemblyOverlayState.StageSoftwareBreakpointRetirement(
+                        selected.Breakpoint.Request.Address);
+                }
+            }
+            await RefreshBreakpointsCoreAsync(showStatus: false, preferredBreakpointId: selected.Id).ConfigureAwait(true);
+            StatusText = $"{description} at {selected.AddressText} {(isEnabled ? "enabled" : "disabled")}.";
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            StatusText = "Breakpoint/watchpoint state change cancelled.";
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = "Breakpoint/watchpoint state change failed.";
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private async Task<bool> RefreshBreakpointsCoreAsync(bool showStatus, string? preferredBreakpointId = null)
+    {
+        if (!HasBreakpointManagementCapability || !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            ClearBreakpoints();
+            return false;
+        }
+
+        IDebuggerBreakpointService? service = coordinator.GetService<IDebuggerBreakpointService>();
+        if (service is null)
+        {
+            ClearBreakpoints();
+            ErrorText = "The plugin advertises breakpoint/watchpoint management but the attached debugger session does not provide IDebuggerBreakpointService.";
+            if (showStatus)
+            {
+                StatusText = "Breakpoint/watchpoint management is unavailable.";
+            }
+            return false;
+        }
+
+        string? selectedId = preferredBreakpointId ?? SelectedBreakpoint?.Id;
+        try
+        {
+            IReadOnlyList<DebuggerBreakpoint> breakpoints = await service
+                .GetBreakpointsAsync(_lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            coordinator.DisassemblyOverlayState.SynchronizeBreakpoints(breakpoints, coordinator.State);
+
+            Breakpoints.Clear();
+            foreach (DebuggerBreakpoint breakpoint in breakpoints
+                         .OrderBy(item => item.Request.Address)
+                         .ThenBy(item => item.Id, StringComparer.Ordinal))
+            {
+                Breakpoints.Add(new DebuggerBreakpointViewModel(breakpoint));
+            }
+
+            SelectedBreakpoint = selectedId is not null
+                ? Breakpoints.FirstOrDefault(item => string.Equals(item.Id, selectedId, StringComparison.Ordinal))
+                    ?? Breakpoints.FirstOrDefault()
+                : Breakpoints.FirstOrDefault();
+
+            if (showStatus)
+            {
+                StatusText = Breakpoints.Count == 1
+                    ? "Loaded 1 breakpoint/watchpoint."
+                    : $"Loaded {Breakpoints.Count} breakpoints/watchpoints.";
+            }
+
+            return true;
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            if (showStatus)
+            {
+                StatusText = "Breakpoint/watchpoint refresh cancelled.";
+            }
+            return false;
+        }
+        catch (Exception exception)
+        {
+            ClearBreakpoints();
+            ErrorText = exception.Message;
+            if (showStatus)
+            {
+                StatusText = "Breakpoint/watchpoint refresh failed.";
+            }
+            return false;
+        }
+        finally
+        {
+            RaiseBreakpointCommandStates();
+        }
+    }
+
+    private static bool IsSoftwareExecuteBreakpoint(DebuggerBreakpoint breakpoint)
+    {
+        ArgumentNullException.ThrowIfNull(breakpoint);
+        return breakpoint.Request.Kind == DebuggerBreakpointKind.Software &&
+               breakpoint.Request.Access == DebuggerBreakpointAccess.Execute;
+    }
+
+    private async Task<DisassembledInstruction?> CaptureSoftwareBreakpointInstructionAsync(
+        DebuggerBreakpointRequest request)
+    {
+        if (request.Kind != DebuggerBreakpointKind.Software ||
+            request.Access != DebuggerBreakpointAccess.Execute ||
+            !_plugin.CanOpenDisassemblerForTarget(_targetProcess))
+        {
+            return null;
+        }
+
+        try
+        {
+            DisassemblySnapshot snapshot = await _plugin
+                .ReadDisassemblyContextAsync(
+                    _targetProcess,
+                    _connectionGeneration,
+                    request.Address,
+                    beforeByteCount: 0,
+                    afterByteCount: 32,
+                    _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            return snapshot.Instructions.FirstOrDefault(item =>
+                item.Address == request.Address && item.IsValid);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Breakpoint creation must remain available even when optional instruction capture fails.
+            return null;
+        }
+    }
+
+    private DisassembledInstruction? GetLogicalSoftwareBreakpointInstruction(ulong instructionPointer)
+    {
+        if (_logicalSoftwareBreakpointStopAddress != instructionPointer ||
+            SelectedThread is not DebuggerThreadViewModel selectedThread ||
+            (_logicalSoftwareBreakpointStopThreadId.HasValue &&
+             _logicalSoftwareBreakpointStopThreadId.Value != selectedThread.Id))
+        {
+            return null;
+        }
+
+        return _softwareBreakpointInstructionCache.TryGetValue(instructionPointer, out DisassembledInstruction? instruction)
+            ? instruction
+            : null;
+    }
+
+    private void SetLogicalSoftwareBreakpointStop(DebuggerEvent debugEvent)
+    {
+        DebuggerBreakpoint? breakpoint = debugEvent.TriggeredBreakpoint;
+        if (debugEvent.Kind == DebuggerEventKind.Breakpoint &&
+            breakpoint is not null &&
+            breakpoint.Request.Kind == DebuggerBreakpointKind.Software &&
+            breakpoint.Request.Access == DebuggerBreakpointAccess.Execute &&
+            debugEvent.InstructionPointer.HasValue)
+        {
+            _logicalSoftwareBreakpointStopAddress = debugEvent.InstructionPointer.Value;
+            _logicalSoftwareBreakpointStopThreadId = debugEvent.ThreadId;
+            return;
+        }
+
+        ClearLogicalSoftwareBreakpointStop();
+    }
+
+    private void ClearLogicalSoftwareBreakpointStop()
+    {
+        _logicalSoftwareBreakpointStopAddress = null;
+        _logicalSoftwareBreakpointStopThreadId = null;
+    }
+
+    private void ClearSoftwareBreakpointInstructionState()
+    {
+        _softwareBreakpointInstructionCache.Clear();
+        ClearLogicalSoftwareBreakpointStop();
+    }
+
+    private void ClearComposedExecutionState()
+    {
+        _activeComposedExecutionOperation = null;
+        _pendingInterruptedComposedExecutionOperation = null;
+        _deferredStopContextEvent = null;
+    }
+
+    private static bool IsComposedExecutionTargetEvent(
+        ComposedExecutionOperation operation,
+        DebuggerEvent debugEvent)
+    {
+        if (debugEvent.Kind != DebuggerEventKind.Breakpoint ||
+            debugEvent.TriggeredBreakpoint is not DebuggerBreakpoint breakpoint ||
+            !string.Equals(breakpoint.Id, operation.BreakpointId, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        return true;
+    }
+
+    private async Task CleanupComposedExecutionOperationAsync(
+        ComposedExecutionOperation operation,
+        DebuggerEvent? debugEvent)
+    {
+        if (!operation.OwnsTemporaryBreakpoint ||
+            !EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            if (debugEvent is not null)
+            {
+                await RefreshStopContextFromEventAsync(debugEvent).ConfigureAwait(true);
+            }
+            return;
+        }
+
+        IDebuggerBreakpointService? service = coordinator.GetService<IDebuggerBreakpointService>();
+        if (service is null)
+        {
+            ErrorText = "The attached debugger session cannot clean up the interrupted temporary breakpoint.";
+            if (debugEvent is not null)
+            {
+                await RefreshStopContextFromEventAsync(debugEvent).ConfigureAwait(true);
+            }
+            return;
+        }
+
+        bool wasBusy = IsBusy;
+        IsBusy = true;
+        try
+        {
+            IReadOnlyList<DebuggerBreakpoint> current = await service
+                .GetBreakpointsAsync(_lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            if (current.Any(item => string.Equals(item.Id, operation.BreakpointId, StringComparison.Ordinal)))
+            {
+                await service
+                    .RemoveBreakpointAsync(operation.BreakpointId, _lifetimeCancellation.Token)
+                    .ConfigureAwait(true);
+                if (coordinator.State == DebuggerSessionState.Paused)
+                {
+                    coordinator.DisassemblyOverlayState.StageSoftwareBreakpointRetirement(operation.Address);
+                }
+            }
+
+            if (debugEvent is not null)
+            {
+                await RefreshStopContextFromEventAsync(debugEvent).ConfigureAwait(true);
+                StatusText = $"{operation.Name} was interrupted before 0x{operation.Address:X}; the operation-owned temporary breakpoint was retired. {debugEvent.Message}".Trim();
+            }
+            else
+            {
+                await RefreshBreakpointsCoreAsync(showStatus: false).ConfigureAwait(true);
+            }
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            if (debugEvent is not null)
+            {
+                StatusText = $"{operation.Name} was interrupted before 0x{operation.Address:X}; temporary breakpoint cleanup will complete during session cleanup.";
+            }
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            if (debugEvent is not null)
+            {
+                StatusText = $"{operation.Name} was interrupted before 0x{operation.Address:X}, and temporary breakpoint cleanup reported an error.";
+                await RefreshStopContextFromEventAsync(debugEvent).ConfigureAwait(true);
+            }
+        }
+        finally
+        {
+            IsBusy = wasBusy;
+        }
+    }
 
     private async Task RefreshThreadsAsync()
     {
@@ -498,6 +1643,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             if (_sessionState == DebuggerSessionState.Paused)
             {
                 await RefreshRegistersCoreAsync(showStatus: false).ConfigureAwait(true);
+                await RefreshCallStackCoreAsync(showStatus: false).ConfigureAwait(true);
             }
         }
         finally
@@ -673,11 +1819,19 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
-    private async Task RefreshRegistersAfterThreadSelectionAsync(ulong threadId)
+    private async Task RefreshStopContextAfterThreadSelectionAsync(ulong threadId)
     {
         try
         {
-            await RefreshRegistersCoreAsync(showStatus: false, expectedThreadId: threadId).ConfigureAwait(true);
+            if (HasRegisterAccessCapability)
+            {
+                await RefreshRegistersCoreAsync(showStatus: false, expectedThreadId: threadId).ConfigureAwait(true);
+            }
+
+            if (HasCallStackCapability)
+            {
+                await RefreshCallStackCoreAsync(showStatus: false, expectedThreadId: threadId).ConfigureAwait(true);
+            }
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
@@ -852,6 +2006,23 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    private static string GetBreakpointDescription(DebuggerBreakpointRequest request)
+    {
+        if (request.Kind == DebuggerBreakpointKind.Software)
+        {
+            return "software breakpoint";
+        }
+
+        string access = request.Access switch
+        {
+            DebuggerBreakpointAccess.Read => "read",
+            DebuggerBreakpointAccess.Write => "write",
+            DebuggerBreakpointAccess.ReadWrite => "read/write",
+            _ => request.Access.ToString().ToLowerInvariant()
+        };
+        return $"{access} hardware watchpoint";
+    }
+
     private bool TryGetThreadControlContext(
         [NotNullWhen(true)] out DebuggerSessionCoordinator? coordinator,
         [NotNullWhen(true)] out DebuggerThreadViewModel? thread)
@@ -887,6 +2058,21 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         SelectedRegister = null;
         CurrentInstructionPointer = null;
         RaiseRegisterCommandStates();
+    }
+
+    private void ClearCallStack()
+    {
+        CallFrames.Clear();
+        SelectedStackFrame = null;
+        RaiseCallStackCommandStates();
+        RaiseStepCommandStates();
+    }
+
+    private void ClearBreakpoints()
+    {
+        Breakpoints.Clear();
+        SelectedBreakpoint = null;
+        RaiseBreakpointCommandStates();
     }
 
     private void ApplyThreadExecutionState(DebuggerSessionState state)
@@ -960,6 +2146,10 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         StatusText = "Debugger target is no longer current.";
         ClearThreads();
         ClearRegisters();
+        ClearCallStack();
+        ClearBreakpoints();
+        ClearSoftwareBreakpointInstructionState();
+        ClearComposedExecutionState();
         RaiseCommandStates();
     }
 
@@ -998,6 +2188,11 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             return;
         }
 
+        if (sender is DebuggerSessionCoordinator coordinator)
+        {
+            coordinator.DisassemblyOverlayState.ObserveEvent(context.Event);
+        }
+
         DispatchToUi(() =>
         {
             if (!IsTargetCurrent())
@@ -1013,10 +2208,13 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
 
             _clearEventsCommand.RaiseCanExecuteChanged();
             StatusText = context.Event.Message ?? $"Debugger event: {context.Event.Kind}.";
+            SetLogicalSoftwareBreakpointStop(context.Event);
 
             if (context.Event.ExecutionState == DebuggerExecutionState.Running)
             {
+                _deferredStopContextEvent = null;
                 ClearRegisters();
+                ClearCallStack();
             }
             else if (context.Event.ExecutionState == DebuggerExecutionState.Paused)
             {
@@ -1025,18 +2223,74 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
                     CurrentInstructionPointer = context.Event.InstructionPointer.Value;
                 }
 
+                if (_activeComposedExecutionOperation is ComposedExecutionOperation operation)
+                {
+                    _activeComposedExecutionOperation = null;
+                    if (!IsComposedExecutionTargetEvent(operation, context.Event) &&
+                        operation.OwnsTemporaryBreakpoint)
+                    {
+                        _pendingInterruptedComposedExecutionOperation = operation;
+                    }
+                }
+
                 if (!IsBusy)
                 {
-                    _ = RefreshStopContextFromEventAsync(context.Event);
+                    _deferredStopContextEvent = context.Event;
+                    RefreshDeferredStopContextIfNeeded();
+                }
+                else if (_continueInProgress || _pendingInterruptedComposedExecutionOperation is not null)
+                {
+                    _deferredStopContextEvent = context.Event;
                 }
             }
         });
+    }
+
+    private void RefreshDeferredStopContextIfNeeded()
+    {
+        if (_deferredStopContextEvent is not DebuggerEvent debugEvent ||
+            _disposed ||
+            IsBusy ||
+            _sessionState != DebuggerSessionState.Paused ||
+            !IsTargetCurrent())
+        {
+            return;
+        }
+
+        _deferredStopContextEvent = null;
+        if (_pendingInterruptedComposedExecutionOperation is ComposedExecutionOperation interruptedOperation)
+        {
+            _pendingInterruptedComposedExecutionOperation = null;
+            _ = CleanupComposedExecutionOperationAsync(interruptedOperation, debugEvent);
+            return;
+        }
+
+        _ = RefreshStopContextFromEventAsync(debugEvent);
+    }
+
+    private void ApplyPostExecutionCommandState(
+        DebuggerSessionCoordinator coordinator,
+        string runningStatus,
+        string pausedFallbackStatus)
+    {
+        DebuggerSessionState finalState = coordinator.State;
+        ApplyCoordinatorState(finalState);
+
+        if (finalState == DebuggerSessionState.Running)
+        {
+            StatusText = runningStatus;
+        }
+        else if (finalState == DebuggerSessionState.Paused && _deferredStopContextEvent is null)
+        {
+            StatusText = pausedFallbackStatus;
+        }
     }
 
     private async Task RefreshStopContextFromEventAsync(DebuggerEvent debugEvent)
     {
         try
         {
+            await RefreshBreakpointsCoreAsync(showStatus: false).ConfigureAwait(true);
             await RefreshThreadsCoreAsync(
                     showStatus: false,
                     preferredThreadId: debugEvent.ThreadId ?? SelectedThread?.Id)
@@ -1045,6 +2299,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             if (_sessionState == DebuggerSessionState.Paused)
             {
                 await RefreshRegistersCoreAsync(showStatus: false).ConfigureAwait(true);
+                await RefreshCallStackCoreAsync(showStatus: false).ConfigureAwait(true);
             }
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
@@ -1077,7 +2332,10 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         ApplyThreadExecutionState(state);
         if (state != DebuggerSessionState.Paused)
         {
+            _deferredStopContextEvent = null;
+            ClearLogicalSoftwareBreakpointStop();
             ClearRegisters();
+            ClearCallStack();
         }
         StateText = state switch
         {
@@ -1099,8 +2357,25 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         _continueCommand.RaiseCanExecuteChanged();
         _detachCommand.RaiseCanExecuteChanged();
         _clearEventsCommand.RaiseCanExecuteChanged();
+        _showBreakpointsWorkspaceCommand.RaiseCanExecuteChanged();
+        _showCallStackWorkspaceCommand.RaiseCanExecuteChanged();
         RaiseThreadCommandStates();
         RaiseRegisterCommandStates();
+        RaiseBreakpointCommandStates();
+        RaiseCallStackCommandStates();
+        RaiseStepCommandStates();
+        OnPropertyChanged(nameof(HasBreakpointManagementCapability));
+        OnPropertyChanged(nameof(HasCallStackCapability));
+        OnPropertyChanged(nameof(HasStepExecutionCapability));
+        OnPropertyChanged(nameof(HasUpperDebuggerWorkspaceCapability));
+        OnPropertyChanged(nameof(IsBreakpointsWorkspaceSelected));
+        OnPropertyChanged(nameof(IsCallStackWorkspaceSelected));
+        OnPropertyChanged(nameof(CanAddBreakpoint));
+        OnPropertyChanged(nameof(CanRemoveAllBreakpoints));
+        OnPropertyChanged(nameof(CanNavigateToSelectedBreakpoint));
+        OnPropertyChanged(nameof(CanNavigateToSelectedFrameDisassembler));
+        OnPropertyChanged(nameof(CanNavigateToSelectedFrameMemoryViewer));
+        OnPropertyChanged(nameof(CanRunToAddress));
     }
 
     private void RaiseThreadCommandStates()
@@ -1115,6 +2390,33 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         _refreshRegistersCommand.RaiseCanExecuteChanged();
         OnPropertyChanged(nameof(CanEditSelectedRegister));
         OnPropertyChanged(nameof(CanNavigateToCurrentInstruction));
+        RaiseStepCommandStates();
+    }
+
+    private void RaiseBreakpointCommandStates()
+    {
+        _refreshBreakpointsCommand.RaiseCanExecuteChanged();
+        _removeBreakpointCommand.RaiseCanExecuteChanged();
+        _enableBreakpointCommand.RaiseCanExecuteChanged();
+        _disableBreakpointCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(CanAddBreakpoint));
+        OnPropertyChanged(nameof(CanRemoveAllBreakpoints));
+        OnPropertyChanged(nameof(CanNavigateToSelectedBreakpoint));
+    }
+
+    private void RaiseCallStackCommandStates()
+    {
+        _refreshCallStackCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(CanNavigateToSelectedFrameDisassembler));
+        OnPropertyChanged(nameof(CanNavigateToSelectedFrameMemoryViewer));
+    }
+
+    private void RaiseStepCommandStates()
+    {
+        _stepIntoCommand.RaiseCanExecuteChanged();
+        _stepOverCommand.RaiseCanExecuteChanged();
+        _stepOutCommand.RaiseCanExecuteChanged();
+        OnPropertyChanged(nameof(CanRunToAddress));
     }
 
     private void DispatchToUi(Action action)
@@ -1130,4 +2432,10 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             _dispatcher.BeginInvoke(action);
         }
     }
+
+    private sealed record ComposedExecutionOperation(
+        string Name,
+        ulong Address,
+        string BreakpointId,
+        bool OwnsTemporaryBreakpoint);
 }

@@ -1,5 +1,1452 @@
 # Changelog
 
+## TeeKay87's Memory Engine 0.1.7.rev31 - Safe PS5 Watchpoint Detach Cleanup
+
+Revision 31 continues the active `0.1.7` Debugger block from the supplied rev30 package. Rev30 introduced debugger-address shortcuts and clearer Breakpoint/Watchpoint classification, but it was superseded before verification after live PS5 shutdown testing exposed a target-safety problem: leaving a hardware watchpoint enabled and then closing the application could leave the watchpoint armed after debugger teardown. The game continued running until the watched access occurred again, at which point it could terminate because the stale hardware debug-register condition was still active without the client debugger attached.
+
+### Changed - PS5 hardware-watchpoint teardown ownership
+
+- PS5 plugin advances from `0.1.0.rev37` to **`0.1.0.rev38`**.
+- Explicit debugger `DetachAsync` now performs client-owned hardware-watchpoint cleanup before sending the backend detach command.
+- `DisposeAsync`, including application/tool-window shutdown cleanup, performs the same hardware-watchpoint cleanup on a best-effort basis before backend detach.
+- The cleanup pass includes both hardware watchpoints still tracked as backend-active and staged temporary-watchpoint removals that have not yet been flushed by Continue.
+- Hardware slots are deduplicated by backend slot index and disabled through the existing `CMD_DEBUG_SET_WATCHPOINT` path, preserving the plugin's current access/size/address encoding rather than adding a second transport path.
+- A shared `DisableHardwareWatchpointBackendSlotAsync` helper now owns state updates for staged Continue cleanup and detach/disposal cleanup, avoiding duplicate slot-disable bookkeeping.
+- Cleanup attempts every tracked hardware slot even if an earlier slot reports an error. Explicit detach still gives backend teardown a chance to run and reports combined instrumentation/detach failures when necessary.
+- The debugger event channel remains open while software-breakpoint and hardware-watchpoint cleanup commands run. Existing detaching-state gating continues to prevent teardown interrupts from mutating the logical debugger workspace before the channel is closed.
+
+### Preserved - Existing debugger behavior
+
+- Rev36's defensive software-breakpoint restoration remains unchanged in purpose and still runs before backend detach/disposal.
+- Rev30's Breakpoint/Watchpoint **Type** and Software/Hardware **Mechanism** columns remain unchanged.
+- Rev30's validated **Add Breakpoint** / **Add Watchpoint** shortcuts for Scan Results and Saved Addresses remain unchanged and still require an already-open Debugger attached to the same target/session.
+- Rev29 logical Disassembler bytes and `Markers` remain unchanged; debugger instrumentation is still presented as metadata instead of replacing the original instruction view.
+- Hardware watchpoint add/remove/enable/disable rules, DR0-DR3 slot allocation, Write/Read-Write mapping, size/alignment validation, hit attribution, and conservative zero-DR6 behavior are not redesigned.
+- Plugin API remains `2.16.0`, Mock remains `1.0.0.rev16`, and no new public contract or ps5debug-NG opcode is introduced.
+
+### Added - External ps5debug-NG bug report
+
+- Added `docs/bug-reports/ps5debug-ng-detach-can-leave-hardware-watchpoints-active.md`.
+- The report documents the observed reproduction and the current upstream teardown path in `debugger/source/debug.c`.
+- `debug_full_teardown()` zero-initializes a local DBREG buffer, calls `PT_GETDBREGS` using the process id, does not check the return value, and uses the resulting low DR7 byte to decide whether per-LWP debug-register clearing is needed. A failed or non-representative probe can therefore look identical to "no active hardware debug registers" and bypass the per-thread zeroing path before `PT_DETACH`.
+- Rev31 does not modify the external backend. The plugin instead removes every hardware-watchpoint slot it owns explicitly before requesting backend detach, so target safety does not depend solely on teardown rediscovery.
+
+### Verification coverage
+
+- Added **PS5 debugger safe detach clears hardware watchpoints** to the automated registry.
+- The new protocol test creates one still-active persistent hardware watchpoint and one temporary watchpoint whose triggered removal is staged, then disposes the debugger session directly. It verifies that both backend slots receive explicit disable commands before detach completes.
+- The automated registry target advances from **141 to 142 checks**.
+- Rev30 was not accepted as a verified baseline before this correction; its planned `141/141` gate is therefore superseded by rev31's `142/142` gate.
+- Live rev31 acceptance must reproduce the original failure path: leave a hardware watchpoint enabled, close the application without manually removing it, then trigger the formerly watched access and confirm the game remains running. Explicit Debugger Detach with an active watchpoint must pass the same safety regression.
+
+### Documentation and development order
+
+- Updated README current-state/version information, PS5 plugin documentation, debugger architecture, ps5debug-NG protocol mapping, Plugin SDK compatibility notes, verification documentation, and the full development action plan.
+- Rev30 verification is recorded as superseded before completion by this target-safety correction.
+- Debugger **Integration, Export and Finalization** moves from rev31 to **rev32** so rev31 can remain focused on safe PS5 watchpoint teardown and its regression coverage.
+
+### Version / compatibility
+
+| Component | rev31 value | Change |
+| --- | --- | --- |
+| Application | `0.1.7.rev31` | Safe PS5 watchpoint detach cleanup |
+| Feature title | `Safe PS5 Watchpoint Detach Cleanup` | New application feature title |
+| Plugin API | `2.16.0` | Unchanged |
+| Mock plugin | `1.0.0.rev16` | Unchanged |
+| PS5 plugin | `0.1.0.rev38` | Explicit hardware-watchpoint cleanup before detach/disposal |
+| Automated registry | `142` | One new PS5 teardown regression |
+
+## TeeKay87's Memory Engine 0.1.7.rev30 - Debugger Address Actions and Breakpoint Classification
+
+Revision 30 continues the active `0.1.7` Debugger block after rev29 runtime acceptance. The revision improves the Breakpoints / Watchpoints table terminology, adds validated debugger shortcuts to Scan Results and Saved Addresses, advances the optional Plugin SDK validation surface required to enable those shortcuts safely, records the completed rev29 verification, and documents an external ps5debug-NG interaction discovered during the combined breakpoint/watchpoint marker test.
+
+### Changed - Breakpoint and watchpoint classification
+
+- The Breakpoints / Watchpoints table now separates the semantic record type from its implementation mechanism.
+- **Type** now reports `Breakpoint` for execute-trigger records and `Watchpoint` for data-access records.
+- Added **Mechanism**, which reports the neutral backend mechanism (`Software` or `Hardware`).
+- The visible table is now **Address | State | Type | Mechanism | Access | Size | Lifetime**. Existing breakpoint/watchpoint ids, requests, state transitions, lifetime behavior, and backend mappings are unchanged.
+- This split is intentionally future-facing: a future Hardware/Execute record can still be presented as `Type = Breakpoint`, `Mechanism = Hardware`, `Access = Execute` without overloading one column with two different concepts.
+
+### Added - Scan Results and Saved Addresses debugger shortcuts
+
+- Added **Add Breakpoint** and **Add Watchpoint** to the row context menus for both Scan Results and Saved Addresses.
+- The shortcuts deliberately require an already-open Debugger window that is attached to the same plugin, target process, and connection generation. A row context menu never opens or attaches the Debugger implicitly.
+- **Add Breakpoint** creates a persistent one-byte Software/Execute request for the selected address.
+- **Add Watchpoint** creates a persistent Hardware/Write request using the selected row's value width (`CurrentValue.Size` for Scan Results and `ValueSize` for Saved Addresses).
+- Each menu item is enabled independently. It remains disabled when the matching capability is unavailable, the Debugger is detached/busy/stale, the Debugger belongs to another target/session generation, the backend cannot pre-validate the request, or the plugin rejects the address/access/size/alignment/slot/duplicate/pending-cleanup combination.
+- Final request creation still goes through the existing `DebuggerViewModel.AddBreakpointAsync` path and the plugin's normal breakpoint service. The shortcut does not bypass runtime validation or backend safety.
+
+### Added - Optional breakpoint request validation contract
+
+- Plugin API advances from `2.15.0` to **`2.16.0`** with optional `IDebuggerBreakpointValidationService` and neutral `DebuggerBreakpointValidationResult`.
+- The service performs a non-mutating legality/availability check for a complete `DebuggerBreakpointRequest`, allowing generic host UI to decide whether an action can be offered before changing debugger state.
+- Plugins targeting an older compatible Plugin API remain loadable. If an attached debugger session does not expose the optional validation service, the new address shortcuts stay disabled while the existing Debugger **Add** workflow remains available and authoritative.
+- Mock advances to **`1.0.0.rev16`** and exposes deterministic validation for executable software breakpoints, aligned hardware watchpoints, duplicate requests, and slot limits.
+- PS5 advances to **`0.1.0.rev37`** and exposes validation by reusing its existing software-breakpoint mapped/executable checks and hardware-watchpoint mapped-range, protection, access, width, natural-alignment, slot, duplicate, and staged-cleanup rules. No ps5debug-NG wire command changes in this revision.
+
+### Documented - Rev29 runtime acceptance and external backend behavior
+
+- Rev29 is now recorded as verified after **138/138** automated checks and focused live-PS5 acceptance of logical Software/Execute breakpoint rendering, hardware `Watchpoint hit` rendering, and simultaneous `Breakpoint` plus `Watchpoint hit` marker presentation while original bytes/instructions remained authoritative.
+- Added `docs/bug-reports/ps5debug-ng-software-breakpoint-step-consumes-overlapping-watchpoint-hit.md` for the external ps5debug-NG behavior observed when a Software breakpoint is placed on the exact instruction whose memory write would trigger a hardware watchpoint. The backend restores the original byte, single-steps the instruction, synchronously consumes the resulting stop with `wait4`, and rearms `INT3`; the overlapping watchpoint stop is therefore not delivered as a separate client event.
+- The external overlap behavior does not change rev29 logical Disassembler presentation and is not worked around by broadening or guessing debugger events in the host.
+
+### Verification and preservation
+
+- The automated registry target increases from **138** to **141 checks**. New coverage verifies the optional neutral validation service, Breakpoint/Watchpoint `Type` versus Software/Hardware `Mechanism` presentation, and both main-workspace context-menu integrations.
+- Existing rev29 logical disassembly/Markers behavior, debugger stepping/run-to/cleanup semantics, breakpoint/watchpoint transport, scanner behavior, Saved Addresses, Memory Viewer, Universal Export, and modeless-window lifecycle are preserved.
+- The previously planned Debugger **Integration, Export and Finalization** milestone moves from rev30 to **rev31**. Rev30 is consumed by these debugger-address workflow and classification corrections.
+
+### Version / compatibility
+
+| Component | rev30 value | Change |
+| --- | --- | --- |
+| Application | `0.1.7.rev30` | Debugger address actions and classification |
+| Feature title | `Debugger Address Actions and Breakpoint Classification` | New application title |
+| Plugin API | `2.16.0` | Optional breakpoint-request validation service |
+| Mock plugin | `1.0.0.rev16` | Validation-service implementation |
+| PS5 plugin | `0.1.0.rev37` | Validation-service implementation; wire protocol unchanged |
+| Automated registry | `141` | Three new checks |
+
+## TeeKay87's Memory Engine 0.1.7.rev29 - Logical Disassembly and Debugger Markers
+
+Revision 29 extends the still-active `0.1.7` Debugger block with the missing presentation boundary between debugger instrumentation and the Disassembler. Runtime cheat-development testing after rev28 acceptance demonstrated the problem directly: a Software/Execute breakpoint placed on `0x8033D981` replaced the first byte of the original `01 70 40  add [rax+40h],esi` instruction with `CC`. The debugger behaved correctly, but the existing Disassembler read the instrumented process bytes literally and rendered `int3` followed by a false instruction decoded from the remaining bytes. That presentation is unsuitable both for debugger analysis and for the later assembly/patch workflow, where the application must retain a trustworthy view of the instruction that belongs to the game rather than exposing debugger-owned trap bytes as if they were game code.
+
+### Added - Logical disassembly overlays
+
+- Added Core `DisassemblyOverlay`, `DisassemblyByteOverlay`, and `DisassemblyMarker` models. They describe presentation-only byte substitutions and address markers without changing `IDisassemblerProvider`, target memory, or any platform protocol.
+- Added an overload path in `DisassemblyReader` that applies debugger-owned original bytes to a local copy of the bounded read buffer before decoding. The target read remains untouched; only the bytes passed to the decoder and stored in the resulting `DisassemblySnapshot` are made logical.
+- `DisassemblySnapshot` now carries the markers that fall inside its bounded byte range while preserving the existing constructor for callers that do not provide presentation metadata.
+- Logical bytes remain subject to the existing range/order/raw-byte validation, so provider output is still checked against the exact byte sequence that the user-facing Disassembler presents.
+
+### Added - Debugger/Disassembler presentation state
+
+- Added Core `DebuggerDisassemblyOverlayState` and attached one instance to each `DebuggerSessionCoordinator`.
+- The state keeps the original neutral `DisassembledInstruction` captured by the existing breakpoint-aware Step Over path before a Software/Execute breakpoint is installed. The same captured bytes are now reused for Disassembler presentation instead of creating a second original-byte cache.
+- Enabled Software/Execute breakpoints publish a `Breakpoint` marker at their code address while their original instruction bytes replace debugger-owned `INT3` instrumentation in the logical view.
+- Disabled breakpoint records remain visible as `Breakpoint (disabled)` markers. They do not mask live bytes once backend retirement has completed.
+- If a Software/Execute breakpoint is disabled, removed, or automatically retired while the target is Paused, the original bytes remain presentation-active until the staged backend cleanup is known to have completed. This prevents a transient/staged ps5debug-NG `CC` byte from leaking into the Disassembler between UI removal and Continue/Detach cleanup.
+- Successful Continue clears completed staged retirements. Detach/disposal resets the debugger presentation state with the coordinator lifecycle.
+- A hardware-watchpoint stop publishes `Watchpoint hit` at the event's reported instruction pointer. Watchpoints do not replace instruction bytes, so they contribute marker metadata only. The marker is cleared when execution resumes or a later non-watchpoint paused stop replaces that context.
+- `PluginViewModel` resolves the attached debugger coordinator matching the Disassembler's plugin/process/connection generation and supplies its current overlay to Core. Disassembler windows opened from the Debugger, MainWindow, Memory Viewer, or another existing entry point therefore share the same logical code view without platform checks in WPF.
+
+### Changed - Disassembler presentation and export
+
+- Added a fourth visible Disassembler column named **Markers** between **Bytes** and **Instruction**. The stable display order is now **Address | Bytes | Markers | Instruction**.
+- `DisassemblyInstructionViewModel` joins multiple address markers with a neutral separator while retaining the existing origin-row and syntax-token presentation.
+- Active Software/Execute breakpoints now display the original bytes and original decoded instruction in the normal Bytes/Instruction columns rather than `CC / int3` plus a false decode of the remaining instruction bytes.
+- Added `markers` to the structured Disassembler export column set. Displayed and Selected exports preserve marker metadata together with the logical bytes/instruction already visible to the user. The flexible disassembly export schema remains version `1`, consistent with previous additive columns.
+- Existing clipboard commands are unchanged; this revision does not alter the verified selection/copy behavior from the completed `0.1.6` Disassembler block.
+
+### Preserved - Runtime instrumentation and future patch boundary
+
+- No debugger breakpoint or watchpoint transport is changed. Software breakpoints still use the backend's normal runtime trap mechanism, and hardware watchpoints remain data-breakpoint records owned by the platform debugger implementation.
+- The logical byte overlay is read-only presentation. It never writes original bytes back to the target, never disables a breakpoint to perform a Disassembler read, and never changes debugger event/step semantics.
+- The PS5 plugin remains `0.1.0.rev36`; its safe detach, staged breakpoint cleanup, logical stop snapshot, watchpoint mapping, and transport behavior are unchanged.
+- Plugin API remains `2.15.0` and Mock remains `1.0.0.rev15`; no public plugin contract is required for this host/Core integration.
+- The later assembly/instruction-editing feature remains separate. Intentional user-created code patches must be tracked explicitly when that feature is implemented and must not be confused with debugger-owned instrumentation. Revision 29 establishes the original-instruction/logical-code foundation that later patching can build on.
+
+### Verification and documentation
+
+- Added **Core disassembly debugger-byte overlay** coverage. The test deliberately writes an `INT3` byte into Mock target memory, supplies the original instruction through the logical overlay, verifies that the provider decodes the original instruction, verifies both breakpoint/watchpoint markers, and then proves the target memory still contains `CC` after the read.
+- Added **Core debugger disassembly overlay lifecycle** coverage for enabled software breakpoints, paused staged retirement, completed retirement, watchpoint-hit markers, and marker cleanup on resume.
+- Added **Disassembler debugger markers and logical instruction source contract** coverage for the new column order/binding, debugger state publication, target-matched overlay consumption, and platform-neutral host ownership.
+- Extended the existing structured Disassembler export test to require the `Markers` column and marker JSON value.
+- Automated registry target increases from **135** to **138 checks**.
+- Added `APP_0.1.7_REV29_SOURCE_REVIEW.md` and `APP_0.1.7_REV29_VERIFICATION.md` with the focused Windows/Mock/live-PS5 acceptance path.
+- Updated README, debugger/disassembly architecture, export documentation, UI documentation, PS5 disassembly/protocol notes, and the full development action plan. Debugger **Integration, Export and Finalization** moves to rev30 because rev29 is consumed by this debugger/disassembler correction.
+
+### Version and compatibility
+
+- Host application: `0.1.7.rev29`.
+- Feature title: `Logical Disassembly and Debugger Markers`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev36`.
+- Automated registry target: **138 checks**.
+- Next planned revision after rev29 acceptance: `0.1.7.rev30 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev28 - Debugger Deferred Stop Verification Contract Fix
+
+Revision 28 is a verification-contract correction built directly from the supplied `0.1.7.rev27` candidate after the Windows automated run completed **134/135** checks. The single failing check was `Debugger breakpoint manager source contract`. Production debugger code was not failing: rev27 had intentionally widened its deferred-stop branch from a Continue-only condition to a combined Continue/interrupted-composed-operation condition, while the older breakpoint-manager source assertion still required the exact obsolete source text. The dedicated rev27 interrupted-operation cleanup contract already validated the widened condition and passed in the same run.
+
+### Changed - Deferred stop source verification
+
+- Corrected the existing breakpoint-manager source contract to require `else if (_continueInProgress || _pendingInterruptedComposedExecutionOperation is not null)` instead of the obsolete literal `else if (_continueInProgress)`.
+- Updated the assertion message so it describes both protected cases: a Paused breakpoint event arriving while Continue is still completing and a Paused interruption that must remain deferred until composed-operation cleanup can run safely.
+- Kept the older breakpoint-manager requirements for `_deferredStopContextEvent`, `_continueInProgress`, and `RefreshDeferredStopContextIfNeeded()` intact; the contract is aligned with the rev27 implementation rather than weakened.
+- No new automated test is added. The registry remains **135 checks**.
+
+### Preserved - Rev27 production behavior
+
+- `DebuggerViewModel` production source is unchanged from rev27, including exact composed-operation breakpoint ownership, target-event matching, interruption cleanup, deferred paused-context refresh, and execution-status reconciliation.
+- PS5 plugin `0.1.0.rev36` is unchanged, including defensive restoration of active/staged software breakpoints before detach/disposal.
+- Rev25 logical software-breakpoint event/Register/Call Stack stop reconciliation remains unchanged.
+- Rev26 breakpoint-aware Step Over original-instruction capture remains unchanged.
+- Core debugger contracts, Plugin SDK `2.15.0`, Mock `1.0.0.rev15`, scanner, Memory Viewer, Disassembler, Universal Export foundation, themes, status-bar layout, and modeless tool-window lifecycle are unchanged.
+
+### Verification and documentation
+
+- Recorded rev27's actual Windows result as **134/135 PASS** and marked rev27 superseded before live acceptance.
+- Added `APP_0.1.7_REV28_SOURCE_REVIEW.md` documenting why the failure was a stale assertion and why no production correction is required.
+- Added `APP_0.1.7_REV28_VERIFICATION.md`. After a clean Windows build and **135/135 PASS**, runtime verification resumes with the rev27 correction-sensitive Step Over/Step Out cleanup regression, controlled interrupted Run to Address, safe Detach/reconnect, successful Run to Address, and final cleanup regression.
+- Updated README, current architecture/plugin references, and the full development action plan to `0.1.7.rev28`.
+- Debugger **Integration, Export and Finalization** moves to `0.1.7.rev29` because rev28 is consumed by this corrective verifier revision.
+
+### Version and compatibility
+
+- Host application: `0.1.7.rev28`.
+- Feature title: `Debugger Deferred Stop Verification Contract Fix`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev36`.
+- Automated registry target: **135 checks**.
+- Next planned feature revision after rev28 acceptance: `0.1.7.rev29 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev27 - Interrupted Operation and Safe Detach Breakpoint Cleanup
+
+Revision 27 is a focused debugger cleanup correction built directly from the supplied `0.1.7.rev26` package after rev26 passed its Windows **133/133** automated gate and live-corrected breakpoint-aware Step Over. The live Step Over regression at `0xE9F74E call 0x1A3BC30` finished Paused at the expected fall-through `0xE9F753` and removed its temporary breakpoint. A clean natural-pause Step Out also reached its selected return address and left no visible temporary breakpoint behind.
+
+The remaining blocker appeared during Run to Address. A Run-to operation targeting `0x81C15634` was interrupted first by a PS5 signal-10 stop at `0x81C1563B`. The target stop itself was not the requested Run-to breakpoint, but the operation-owned temporary Software/Execute breakpoint remained Enabled/Temporary in the manager. Detaching from that interrupted paused state was then followed by the game terminating. The signal and target termination are recorded as runtime observations only; this revision does not assign either event to ps5debug-NG. The client-side defects addressed here are the orphaned host-owned temporary breakpoint after an unrelated Paused event and the lack of an explicit client-side restore pass for still-active/staged software-breakpoint slots before teardown.
+
+### Changed - Composed execution operation ownership
+
+- Added explicit host state for the currently active Step Over, Step Out, or Run to Address composition and for an interrupted operation whose cleanup must wait until the current execution command leaves its busy section.
+- Each composed execution operation now records the exact neutral breakpoint id used as its stop target, the requested address, the operation name, and whether the breakpoint was created temporarily by that operation or was an existing persistent breakpoint being reused.
+- Run to Address resolves the exact temporary breakpoint record immediately after successful creation. If the created record cannot be resolved, the operation does not continue with ambiguous ownership.
+- A Paused event now completes the active composition only when it is a neutral breakpoint event whose `TriggeredBreakpoint.Id` matches the exact target breakpoint id.
+- Any other Paused event interrupts the active operation. This applies without platform-specific event inspection, so PauseRequested, signals/exceptions, hardware watchpoints, another breakpoint, and other neutral Paused stops can all terminate a composed operation safely.
+- Existing persistent breakpoints reused as the Run-to target are never removed by interruption cleanup. Cleanup is restricted to breakpoints explicitly owned as temporary by the current composed operation.
+
+### Changed - Interrupted temporary-breakpoint cleanup and deferred stop handling
+
+- Extended the existing deferred stop-context mechanism rather than adding a second event pipeline.
+- If an interrupting Paused event arrives while Continue or manual Pause is still completing, the event and pending operation cleanup are retained until `IsBusy` clears.
+- Deferred interruption cleanup runs before the final paused-context refresh and removes the exact operation-owned temporary breakpoint through the neutral `IDebuggerBreakpointService`.
+- If the backend has already consumed/removed the temporary record, the host treats the missing id as already retired and proceeds with the normal stop-context refresh.
+- Manual Pause now releases deferred composed-operation cleanup in its completion path, providing a deterministic way to cancel an in-flight Run-to operation without leaving the temporary record visible.
+- Continue-command cancellation/failure also retires an operation-owned temporary breakpoint instead of abandoning it.
+- Attach setup, completed detach, ViewModel disposal, and stale-target invalidation clear active/pending composed-operation state together with the existing deferred stop state.
+- The final status after an interruption describes the interrupted operation and cleanup result rather than leaving stale `...is running toward...` text visible.
+
+### Changed - PS5 safe software-breakpoint teardown
+
+- Advanced the PlayStation 5 plugin from `0.1.0.rev35` to `0.1.0.rev36`; Plugin API remains `2.15.0`.
+- Added a teardown-only software-breakpoint restore pass before explicit PS5 debugger detach.
+- The restore set is built from every managed software-breakpoint slot still marked backend-enabled plus every paused disable/removal already staged in `_pendingBreakpointDisables`; duplicate slot/address entries are collapsed.
+- Each collected slot is explicitly disabled/restored through the existing ps5debug-NG software-breakpoint command before the normal backend detach request is sent.
+- The debugger event channel remains open during the teardown-only restore pass because the already documented ps5debug-NG disable behavior can resume a paused target as a side effect. While `_detaching` is active, complete interrupt packets are drained from the callback socket but ignored for session state/event projection; the channel is closed after the detach attempt finishes.
+- A failed pre-restore does not suppress the backend detach attempt. If both cleanup and detach fail, both failures are retained; if detach succeeds but a pre-restore failed, the session is still placed in Detached state and the cleanup error is returned to the caller instead of being hidden.
+- Session disposal uses the same restore-before-detach logic on a best-effort basis when explicit detach did not already complete.
+- Successful restore updates client-side backend-enabled/pending-disable bookkeeping before final teardown state is cleared.
+- Hardware watchpoint teardown remains unchanged; the correction is specific to software execute breakpoints and does not alter the public breakpoint model.
+
+### Preserved - Previously accepted debugger behavior
+
+- Rev25 logical software-breakpoint event/IP/Register/Call Stack frame-zero reconciliation is unchanged.
+- Rev25's Step Into handling from a logical software-breakpoint stop remains unchanged and still avoids a second native backend step.
+- Rev26 original-instruction capture and breakpoint-aware Step Over classification are preserved unchanged.
+- Step Over still composes calls by running to the original call fall-through address, Step Out still uses the selected neutral frame return address, and Run to Address remains a host-composed neutral operation.
+- Normal paused PS5 breakpoint Disable/Remove behavior remains staged; rev27's explicit restore pass is limited to debugger teardown and does not make ordinary paused breakpoint management send the known state-changing backend disable command immediately.
+- Core debugger contracts, Plugin SDK `2.15.0`, Mock `1.0.0.rev15`, scanner/export behavior, Memory Viewer, Disassembler, status-bar layout, breakpoint/watchpoint legality, register safety, and modeless tool-window ownership are not redesigned.
+
+### Verification coverage
+
+- Added **Debugger interrupted composed-operation cleanup source contract** covering active/pending operation state, exact target-breakpoint identity, temporary-only ownership cleanup, busy/deferred event retention, manual-Pause release of deferred cleanup, neutral breakpoint removal, and lifecycle clearing.
+- Added **PS5 debugger safe detach restores software breakpoints** protocol coverage. The test creates one still-active software breakpoint plus one temporary breakpoint whose removal is staged while Paused, then verifies that both backend slots receive explicit disable/restore requests before detach completes.
+- Updated the PS5 plugin metadata expectation to `0.1.0.rev36`.
+- The automated registry advances from **133 to 135 checks**.
+- Rev26's verification record is updated to preserve the actual **133/133 PASS**, live Step Over/Step Out acceptance, Run-to interruption failure, orphan temporary breakpoint evidence, and subsequent detach/target-termination observation.
+- Added dedicated rev27 source-review and verification documents. After a clean Windows build and **135/135 PASS**, verification performs a short Step Over/Step Out cleanup regression, a controlled interrupted Run-to using manual Pause, detach/reconnect from that cleanup state, a normal successful Run to Address, and final cleanup/tool-window regression.
+
+### Documentation and development order
+
+- Updated README current-state/version information, PS5 plugin documentation, ps5debug-NG protocol mapping, Debugger architecture, Plugin SDK foundation, Universal Export current-version reference, and the full development action plan for rev27.
+- The development plan records rev26 as superseded after partial live acceptance while retaining its successful Step Over and Step Out evidence.
+- No external-backend cause is assigned to the observed signal-10 stop or subsequent target termination because the available runtime evidence does not establish one. Source review did, however, establish a separate ps5debug-NG teardown defect: `debug_full_teardown()` stops software-breakpoint restoration at the first empty indexed slot. Added `docs/bug-reports/ps5debug-ng-debugger-detach-stops-breakpoint-restore-at-first-empty-slot.md` with the exact source sequence and sparse-slot reproduction. The existing paused software-breakpoint-disable report remains relevant to why normal paused cleanup is staged and why teardown keeps the event channel alive only as a drain until the detach attempt has finished.
+- Debugger **Integration, Export and Finalization** moves to `0.1.7.rev28` because rev27 is consumed by this corrective cleanup work.
+
+### Version and compatibility
+
+- Host application: `0.1.7.rev27`.
+- Feature title: `Interrupted Operation and Safe Detach Breakpoint Cleanup`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: `0.1.0.rev36`.
+- Automated registry target: **135 checks**.
+- Next planned feature revision after rev27 acceptance: `0.1.7.rev28 - Integration, Export and Finalization`.
+
+
+## TeeKay87's Memory Engine 0.1.7.rev26 - Breakpoint-Aware Step Over Fix
+
+Revision 26 is a focused host-side stepping correction built directly from the supplied `0.1.7.rev25` package after rev25 passed its Windows **132/132** automated gate, MainWindow status-bar alignment checks, focused Mock regression, and complete live-PS5 logical software-breakpoint stop-context gate. Verification then reached the first live Step Over case and exposed one remaining interaction between host-composed stepping and ps5debug-NG's software-breakpoint implementation.
+
+The accepted rev25 logical stop at `0xE9F74E` correctly showed the original `call 0x1A3BC30` address in the breakpoint event, displayed IP, Registers `RIP`, and Call Stack frame zero. Pressing **Step Over** nevertheless produced a Step Into completion at `0x1A3BC30` instead of the expected fall-through `0xE9F753`. A disassembly export captured while that persistent software breakpoint was armed showed the physical target byte at `0xE9F74E` as `CC / int3`, which established the host-side failure mode: rev25's generic Step Over composition re-read target memory after ps5debug-NG had rearmed `INT3`, so the host no longer saw the original instruction as a `Call` and selected its normal non-call native Step Into path.
+
+### Changed - Breakpoint-aware Step Over instruction resolution
+
+- Added a session-local host cache that retains the original neutral `DisassembledInstruction` for Software/Execute breakpoint addresses.
+- Before a Software/Execute breakpoint is installed, the Debugger uses the existing target-safe Disassembler path to request a small context beginning at the breakpoint address and captures the valid instruction at that exact address.
+- The decoded instruction is committed to the cache only after the breakpoint itself is successfully added. Failed breakpoint creation therefore cannot leave behind a false installed-breakpoint instruction record.
+- If a fresh successful Software/Execute add cannot capture its original instruction, any older cached instruction at that address is discarded rather than being reused for the new breakpoint.
+- The captured original instruction is retained across ordinary enable/disable state changes within the same debugger session. Rev26 intentionally does not re-read the instruction during re-enable because the existing PS5 paused-disable workaround may leave the physical `INT3` armed until the next explicit Continue; a re-read at that point could overwrite valid original metadata with the patched byte.
+- Original-instruction capture is deliberately optional. Failure to obtain the extra Disassembler context does not reject or alter otherwise valid breakpoint creation; the existing breakpoint behavior remains available and Step Over can still fall back to its ordinary live-disassembly path when no cached instruction exists.
+
+### Changed - Logical breakpoint stop matching
+
+- The Debugger now records the current logical software-breakpoint stop address and optional thread id from the neutral `DebuggerEvent.TriggeredBreakpoint` context.
+- Cached original instructions are eligible for Step Over only when the current instruction pointer matches that logical Software/Execute breakpoint stop and the selected thread matches the event thread when one is present.
+- Step Over now checks that breakpoint-aware original instruction **before** reading live target disassembly. A matching cached `Call` therefore retains its original length/flow-control classification even while the backend has rearmed the physical address as `INT3`.
+- Non-breakpoint pauses, other breakpoint kinds/accesses, other threads, and ordinary paused instruction contexts continue to use the verified live Disassembler lookup. The cache does not replace general instruction resolution.
+- Transitions away from Paused clear the current logical-stop association while preserving session breakpoint instruction snapshots for later hits.
+- Debugger disposal, new attach setup, detach, and stale-target invalidation clear both the cache and logical-stop association so data cannot cross debugger/target lifetimes.
+
+### Preserved - Step Over / Run-to composition
+
+- The existing platform-neutral Step Over algorithm is unchanged after instruction resolution: non-calls use native Step Into, while a decoded `Call` calculates `instruction.Address + instruction.Length` and composes Step Over through the existing temporary Run-to breakpoint path.
+- The expected live regression case remains `0xE9F74E call 0x1A3BC30` -> temporary fall-through target `0xE9F753`.
+- Temporary software-breakpoint instruction snapshots are retained for the current debugger session even after the one-shot record is removed on hit. This is intentional because ps5debug-NG may already have rearmed the physical `INT3` while the client is presenting that logical stop; a subsequent Step Over at such a stop still needs the original decoded instruction.
+- Step Out and Run to Address are not redesigned by this revision. Their remaining live acceptance resumes after the corrected Step Over regression passes.
+
+### Preserved - Platform and public contracts
+
+- No Core debugger model, Plugin SDK contract, public capability, or platform-specific wire protocol is changed.
+- PS5 plugin remains `0.1.0.rev35` and continues to own the rev25 logical software-breakpoint packet snapshot/transparent-Step-Into reconciliation.
+- Plugin API remains `2.15.0`.
+- Mock plugin remains `1.0.0.rev15`.
+- MainWindow status-bar alignment, rev24 selector/splitter presentation, Call Stack transport, register handling, native Step Into, breakpoint/watchpoint legality, modeless tool-window cleanup, scanner, Memory Viewer, Disassembler provider, and existing export infrastructure are unchanged.
+
+### Verification coverage
+
+- Added **Debugger breakpoint-aware Step Over source contract**.
+- The new contract verifies that the original Software/Execute instruction is captured before backend breakpoint installation, stored only after successful add, and preferred by Step Over before breakpoint-patched live disassembly when the neutral logical stop matches.
+- The contract also verifies that matching is driven by neutral `TriggeredBreakpoint` Software/Execute context and that cached state participates in debugger lifecycle cleanup.
+- The automated registry advances from **132 to 133 checks**.
+- Rev25's verification record is updated with the actual **132/132 PASS**, status-bar PASS, Mock PASS, live logical-stop/Step-Into PASS, and the Gate E Step Over failure at `0xE9F74E`.
+- Added dedicated rev26 source-review and verification documents. After a clean Windows build and **133/133 PASS**, live verification resumes directly at the failed Step Over case rather than repeating the already accepted rev25 MainWindow, Mock, and logical-stop gates.
+- After Step Over passes, the remaining live Step Out, Run to Address, and cleanup/reconnect gates continue from the rev25 plan.
+
+### Documentation and development order
+
+- Updated the README to describe the rev26 candidate and breakpoint-aware host stepping behavior without changing unrelated usage documentation.
+- Currentized the README verification section to the 133-check rev26 registry/current verification documents and corrected the current PS5 plugin reference there to `0.1.0.rev35`.
+- Corrected stale current-version references in README/architecture/PS5 disassembly documentation so the application, Plugin API, and PS5 plugin current metadata consistently report `0.1.7.rev26`, `2.15.0`, and `0.1.0.rev35` while preserving historical revision descriptions.
+- Updated the Debugger architecture, PS5 plugin documentation, and full development action plan to record why host Step Over must preserve pre-breakpoint instruction metadata while PS5 remains responsible only for platform-private breakpoint transport/stop reconciliation.
+- Rev25 is recorded as superseded after Gate E Step Over failure; all earlier accepted rev25 gates remain explicit carried-forward evidence.
+- The Debugger **Integration, Export and Finalization** milestone moves from rev26 to **rev27** because rev26 is consumed by this corrective revision under the project's version/revision rules.
+
+### Version and compatibility
+
+- Host application: `0.1.7.rev26`.
+- Feature title: `Breakpoint-Aware Step Over Fix`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev35`.
+- Automated registry target: **133 checks**.
+- Next planned feature revision after rev26 acceptance: `0.1.7.rev27 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev25 - PS5 Breakpoint Stop Context and Status Alignment Fix
+
+Revision 25 is a focused corrective revision built directly from the supplied `0.1.7.rev24` package after the rev24 runtime cycle completed the redesigned Debugger workspace acceptance and the complete Mock Call Stack/stepping cycle, then exposed a live PS5 software-breakpoint stop-context mismatch in ps5debug-NG. The rev24 Windows registry returned **129/130** because one source contract still searched for the removed TabItem-era `Text="Breakpoints / Watchpoints"` presentation instead of the new selector Button `Content`. The application behavior behind that single source-contract failure was already runtime-accepted.
+
+Live PS5 verification passed server-side Call Stack population, thread switching, frame navigation, and selected-thread native Step Into. The later Run to Address / software-breakpoint isolation sequence established that ps5debug-NG reports a logical software-breakpoint hit at the requested instruction while transparently restoring and single-stepping that instruction before the client receives the 1184-byte interrupt packet. A breakpoint at `0xE9F747` reported `0xE9F747` in the event but a subsequent live GETREGS returned `0xE9F74C`; a breakpoint at the five-byte `call` on `0xE9F74E` reported `0xE9F74E` but live RIP had already entered the callee at `0x1A3BC30`. This is not call-specific and cannot be treated as a host Run-to-only problem.
+
+### PS5 logical software-breakpoint stop context
+
+- Advanced the PlayStation 5 plugin from `0.1.0.rev34` to `0.1.0.rev35`; Plugin API remains `2.15.0`.
+- Added explicit interrupt-packet floating-point register offset metadata alongside the existing 1184-byte debugger interrupt layout.
+- When a managed software breakpoint is attributed to an incoming interrupt, the PS5 session now preserves the packet's 176-byte general-register block and 832-byte floating-point block as the authoritative **logical breakpoint stop snapshot** for that thread and breakpoint address.
+- Register inspection for the matching stopped thread uses that packet snapshot instead of immediately replacing it with ps5debug-NG's already advanced live GETREGS state. Other threads and ordinary pause/step stops continue to use the existing live register path.
+- Call Stack frame zero for the matching stopped thread now starts from the logical breakpoint packet RIP/RBP/RSP, keeping the visible frame consistent with the breakpoint event instead of mixing a pre-instruction event with post-instruction live registers.
+- Because ps5debug-NG has already transparently executed the restored instruction before delivering the breakpoint event, **Step Into from a logical software-breakpoint stop does not issue a second native step**. The plugin reads the backend's current post-step general registers, consumes the logical snapshot, and publishes one neutral Resumed/StepCompleted transition ending at the backend's already reached RIP.
+- The logical snapshot is cleared on explicit Pause, Continue, Detach, a new interrupt, and after the transparent breakpoint step has been consumed so stale pre-instruction state cannot leak into a later debugger context.
+- This correction deliberately does not pretend to roll back memory or other side effects already performed by the backend's transparent step. It reconciles the host-visible debugger stop and composed operation semantics with the packet ps5debug-NG actually sends.
+
+### Debugger execution-status race
+
+- Corrected a host-side race where an awaited Continue, native Step Into, or Run to Address command could finish after a fast asynchronous stop event and then overwrite the newer Paused/breakpoint/StepCompleted message with stale text such as `Target running.` or `Run to Address is running toward ...`.
+- Added one post-execution state reconciliation path that re-reads the coordinator's final state after the awaited operation and reapplies the final command state.
+- When a stop event arrived while the command was busy, its deferred stop-context message remains authoritative. A Paused result is no longer overwritten by the stale Running text produced before the interrupt was processed.
+
+### MainWindow status-bar alignment
+
+- Updated the permanent bottom status bar so every visible item shares the same vertical centerline within the horizontal status row.
+- Connection state, general status text, error text, scan status text, the existing progress/elapsed group, and the right-side `AppInfo.DisplayVersion` value now all use explicit centered vertical alignment.
+- Column order, spacing, bindings, progress behavior, elapsed-time behavior, and the rule that version/revision appears only at the status bar's right edge are unchanged.
+
+### Verification contracts and fixtures
+
+- Corrected **Debugger breakpoint manager source contract** to validate the rev24 selector Button's `Content="Breakpoints / Watchpoints"` instead of the removed TabItem-era `Text` attribute.
+- Added **PS5 debugger logical software-breakpoint stop context** coverage. The test server now places deterministic general/FPU state in the same interrupt-packet offsets used by ps5debug-NG so the regression verifies event-address/register/call-frame agreement and verifies that Step Into from that logical stop does not send a second native step command.
+- Added **Main status bar content alignment source contract** covering the connection badge, status/error/scan text, progress group, and version field.
+- Extended the existing Run to Address source contract so a fast stop cannot regress to stale running-status presentation.
+- The automated registry therefore advances from 130 to **132 checks**.
+
+### External backend documentation
+
+- Added `docs/bug-reports/ps5debug-ng-software-breakpoint-event-and-live-register-state-diverge.md` with the two live reproductions, the exact current ps5debug-NG restore/rewind/PT_STEP/wait/rearm/send sequence, expected/actual behavior, and impact on debugger clients.
+- The previously documented ps5debug-NG behavior where disabling a software breakpoint while paused resumes the target is unchanged; the existing plugin-side staged cleanup remains in place and this revision does not broaden that workaround.
+
+### Documentation and development order
+
+- Updated the README, Debugger architecture, Plugin SDK foundation, PS5 plugin/protocol documentation, Main Workspace documentation, rev24 verification record, and full development action plan to the rev25 state.
+- Rev24 is recorded with its actual **129/130** automated result, accepted selector/splitter/window behavior, complete Mock Call Stack/stepping PASS, partial live-PS5 PASS, and the breakpoint stop-context blocker found during live verification.
+- Added dedicated rev25 source-review and verification documents. A clean Windows WPF build, **132/132** automated checks, focused live PS5 logical-breakpoint/Run-to/Step Over/Step Out regression, and carried-forward cleanup/lifecycle regression are required before rev25 can be accepted.
+- The Debugger **Integration, Export and Finalization** milestone moves from rev25 to **rev26** because this corrective revision consumes rev25 under the project revision rules.
+
+### Version and compatibility
+
+- Host application: `0.1.7.rev25`.
+- Feature title: `PS5 Breakpoint Stop Context and Status Alignment Fix`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: `0.1.0.rev35`.
+- Automated registry target: **132 checks**.
+- Next planned feature revision after rev25 acceptance: `0.1.7.rev26 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev24 - Debugger Mode Switcher Layout Refresh
+
+### Summary
+
+Revision 24 is a focused Debugger workspace presentation correction built directly from the supplied `0.1.7.rev23` package after Windows runtime verification completed the **130/130** automated gate but confirmed that the WPF tab-header right edge still rendered as abruptly clipped. The previously verified MainWindow-driven tool-window cleanup continued to work correctly. Rather than adding another TabItem border workaround, rev24 removes the Debugger's active `TabControl`/`TabItem` presentation entirely and replaces it with two compact application-styled selector buttons that switch the same existing Breakpoints / Watchpoints and Call Stack views.
+
+The layout refresh also removes the duplicated inner section titles and their item-count labels, moves the former title-row actions down to the existing action rows, and increases the Debugger's default window size slightly while keeping it smaller than MainWindow. Call Stack data, breakpoint/watchpoint behavior, stepping, target/session safety, tool-window lifecycle, Core, Plugin SDK, Mock, and PS5 backend behavior are unchanged.
+
+### Changed - Debugger Workspace Mode Switcher
+
+- Removed the Debugger's `TabControl` and both `TabItem` headers from the upper-right workspace.
+- Added compact **Breakpoints / Watchpoints** and **Call Stack** selector buttons above the shared content area.
+- Added ViewModel-owned selection state and commands so only the selected workspace is visible; Breakpoints / Watchpoints remains the default when both capabilities exist, while a call-stack-only backend falls back to Call Stack automatically.
+- Added shared `DebuggerWorkspaceSwitchButtonStyle` in `ButtonStyles.xaml`, derived from the existing Secondary button style so the selectors reuse normal application hover, pressed, disabled, focus, and theme behavior.
+- Selector buttons use a deliberate compact `28`-unit height and `12`-point label size. The selected selector receives a two-unit `AccentBrush` outline instead of a separate tab chrome implementation.
+- Added small selector-specific derived styles for the two selection-state bindings without duplicating the shared button template.
+- Removed the now-unused `WorkspaceTabControlStyle` and `WorkspaceTabItemStyle` from active shared resources. Historical rev18-rev23 verification documents continue to describe the superseded tab experiments.
+
+### Changed - Upper Workspace Content Layout
+
+- Removed the duplicated **Breakpoints / Watchpoints** and **Call Stack** title rows inside their content surfaces.
+- Removed the `Breakpoints.Count` and `CallFrames.Count` labels that existed only beside those removed inner titles.
+- Breakpoints / Watchpoints keeps Enable, Disable, Remove, Remove All, and Disassembler left-aligned on the bottom action row.
+- The former title-row **Add...** and **Refresh** actions are now right-aligned on that same bottom row.
+- Call Stack keeps Disassembler and Memory Viewer left-aligned on its bottom action row.
+- The former title-row Call Stack **Refresh** action is now right-aligned on that same row.
+- SP, FP, and Return details remain directly below the Call Stack table and above its action row.
+- Existing capability gating, command bindings, DataGrid columns, selection bindings, double-click navigation, and splitters are preserved.
+
+### Changed - Debugger Default Window Size
+
+- Increased the Debugger default size from `1120 x 720` to `1240 x 780` device-independent units.
+- MainWindow remains larger at `1460 x 880`; Debugger minimum size remains `820 x 520`.
+- The change affects only the initial Debugger workspace size and does not alter splitter ratios or minimum-pane rules.
+
+### Preserved - Verified Window Lifecycle
+
+- The rev21/rev23 MainWindow shutdown path is unchanged. Runtime verification already confirmed that closing MainWindow closes the open modeless tools through their normal cleanup paths without the previous WPF close re-entry exception.
+- `MainWindow.xaml.cs` and `ToolWindowManager.cs` are unchanged.
+- Debugger, Disassembler, and Memory Viewer retain independent modeless z-order after initial centered placement.
+
+### Changed - Verification Coverage
+
+- The automated registry remains **130** top-level checks. The three superseded tab-presentation source contracts are rewritten in place as mode-switcher, selected-button-theme, and panel-layout contracts.
+- Rev24 source checks reject reintroduction of Debugger `TabControl`/`TabItem`, verify ViewModel-owned exclusive workspace visibility, verify the compact shared selector-button styles and accent selected outline, ensure the removed inner titles/counts stay absent, check the new bottom-row action placement, and enforce the `1240 x 780` default size.
+- Rev24 Gate A requires a clean Windows WPF build and **130/130 PASS**. Runtime acceptance starts with the new selector/layout behavior in Dimmed, Dark, and Light before the carried-forward Call Stack/Stepping gates resume.
+
+### Documentation
+
+- Recorded rev23's **130/130 PASS** and the continued right-edge runtime failure without relabeling rev23 verified.
+- Updated README, the full development action plan, Debugger architecture, shared button/control-metric guidance, theme documentation, Plugin SDK/current-host status, and current PS5 host references.
+- Added dedicated rev24 source-review and verification documents under `docs/testing/`.
+- The planned Debugger **Integration, Export and Finalization** milestone moves from rev24 to **rev25** because this corrective revision consumes rev24 under the project revision rules.
+
+### Versioning
+
+- Host application: `0.1.7.rev24`.
+- Feature title: `Debugger Mode Switcher Layout Refresh`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev34`.
+- Automated registry: unchanged at `130` checks.
+- Next planned feature revision after rev24 acceptance: `0.1.7.rev25 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev23 - Debugger Tab Header Rendering Fix
+
+### Summary
+
+Revision 23 is a focused WPF presentation correction built directly from the `0.1.7.rev22` package after Windows runtime inspection showed that the reserved-column tab template introduced a larger visual regression instead of fixing the original edge defect. The **Breakpoints / Watchpoints** and **Call Stack** header text disappeared, and the selected Call Stack header rendered as a solid accent-colored block. The previously accepted MainWindow/tool-window shutdown behavior continued to work and is not changed here.
+
+Rev23 removes the separate right-edge visual and the two-column header layout entirely. The shared `WorkspaceTabItemStyle` returns to a single application-owned `Border`/`ContentPresenter` structure so header measurement, text rendering, selected background, and theme state handling follow the last known-good themed layout. The border's right side is widened to two device-independent units while the other sides remain one unit. This keeps the visible right stroke inside the rendered header even if the outermost device pixel is lost at the WPF/TabPanel boundary, without introducing another overlay or layout column. Core, Plugin SDK, Mock, PS5, debugger transport, Call Stack/Call Frames, stepping, breakpoints/watchpoints, registers, Memory Viewer, Disassembler, window lifecycle, and all platform-specific behavior are unchanged.
+
+### Fixed - Workspace Tab Header Rendering
+
+- Removed the rev22 two-column `Grid` from `WorkspaceTabItemStyle`.
+- Removed `TabRightEdge`, its templated-parent `BorderBrush` background binding, and the separate right-edge z-order path.
+- Restored the header to one `TabBorder` containing the normal `ContentPresenter`, which keeps the header text in the same measured visual that owns its background and border.
+- Restored hover, selected, and disabled border-color triggers to target `TabBorder` directly instead of routing state through a separate edge visual.
+- Uses `BorderThickness="1,1,2,1"`: left/top/bottom remain one unit and only the right stroke is widened.
+- Keeps `UseLayoutRounding=True` and `SnapsToDevicePixels=True` on the rendered border.
+- Preserves the existing theme resources, padding, inter-tab spacing, rounded top corners, and Debugger content layout.
+
+### Preserved - Window Lifecycle and Debugger Functionality
+
+- Rev21 runtime verification already confirmed that closing MainWindow closes open tool windows through their normal cleanup paths. Rev23 does not modify `MainWindow.xaml.cs` or `ToolWindowManager.cs`.
+- Debugger, Disassembler, and Memory Viewer remain independent modeless windows after initial centered placement.
+- The rev17 Call Stack/Call Frames and Step Into/Step Over/Step Out/Run-to implementation is unchanged.
+- Core, Plugin SDK, Mock `1.0.0.rev15`, and PS5 `0.1.0.rev34` production code is unchanged.
+
+### Changed - Verification Coverage
+
+- The automated registry remains **130** top-level checks. The two existing workspace-tab source contracts are strengthened rather than adding duplicate test registrations.
+- The complete-tab-border contract now requires the single-border template, visible header `ContentPresenter`, widened right border, layout rounding, and explicit absence of the failed rev22 column/edge structure.
+- The selected-tab contract now requires theme state to target `TabBorder` directly and rejects the rev22 path that used the current border brush as a separate background visual.
+- Rev23 Gate A requires a clean Windows WPF build and **130/130 PASS**.
+- Runtime Gate B first verifies readable tab labels plus complete selected/unselected right edges in Dimmed, Dark, and Light. Only after that visual gate passes should the carried-forward Call Stack/Stepping tests resume.
+
+### Documentation
+
+- Recorded rev22 as superseded after the observed Windows tab-header rendering failure.
+- Updated README, the full development action plan, Debugger architecture, theme guidance, Main Workspace lifecycle note, Plugin SDK/current-host status, PS5 current-host references, and the carried-forward rev17 verification pointer.
+- Added dedicated rev23 source-review and verification documents under `docs/testing/`.
+- The planned Debugger **Integration, Export and Finalization** milestone moves from rev23 to **rev24** because this corrective code revision consumes rev23 under the project revision rules.
+
+### Versioning
+
+- Host application: `0.1.7.rev23`.
+- Feature title: `Debugger Tab Header Rendering Fix`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev34`.
+- Automated registry: unchanged at `130` checks.
+- Next planned feature revision after rev23 acceptance: `0.1.7.rev24 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev22 - Debugger Tab Right Edge Layout Fix
+
+### Summary
+
+Revision 22 is a narrowly scoped WPF presentation correction built directly from the `0.1.7.rev21` candidate after the clean Windows automated gate completed at **130/130 PASS**. Runtime verification confirmed that the rev20/rev21 MainWindow shutdown sequence now closes the open tool windows cleanly, but the reusable **Breakpoints / Watchpoints** and **Call Stack** tab headers still rendered without their right vertical edge. The previous rev20 strategy placed an overlay edge at the right alignment boundary of an unconstrained template grid; although the source contract proved that the visual existed, Windows runtime rendering still did not allocate a dedicated layout column for it.
+
+Rev22 changes only the reusable WPF `WorkspaceTabItemStyle`, its automated source contracts, host version metadata, and documentation. The verified MainWindow/tool-window cleanup implementation is preserved unchanged. Core, Plugin SDK, Mock, PS5, debugger transport, Call Stack/Call Frames, stepping, breakpoints/watchpoints, registers, Memory Viewer, Disassembler, and all platform-specific behavior are unchanged.
+
+### Fixed - Workspace Tab Right Edge Layout
+
+- Replaced the unconstrained overlay placement used by the rev20/rev21 `TabRightEdge` with an explicit two-column header-template layout.
+- The first column owns the normal header width and the second column is a dedicated one-unit right-edge column. Because that column participates in WPF measure/arrange, the right-edge visual no longer depends on `HorizontalAlignment=Right` at the same boundary that was disappearing at runtime.
+- `TabBorder` spans both columns and deliberately draws only its left, top, and bottom edges (`1,1,0,1`). The dedicated `TabRightEdge` is therefore the sole right-hand stroke instead of competing with or depending on a clipped outer Border stroke.
+- `TabRightEdge` is placed in the fixed right-edge column and rendered above the background through `Panel.ZIndex=2`.
+- The explicit edge binds directly to the templated `TabItem.BorderBrush`, so Normal, Hover, Selected, and Disabled states continue to use the existing Light/Dimmed/Dark theme resources.
+- `UseLayoutRounding` is enabled on the header root so the dedicated one-unit column is arranged consistently at fractional display scaling.
+- Existing tab text, external four-unit inter-tab spacing, rounded top corners, content layout, Debugger bindings, and capability behavior are unchanged.
+
+### Preserved - Window Lifecycle Fixes
+
+- Rev21's Windows runtime check confirmed that closing MainWindow now closes the open tool windows as intended without the previous WPF close re-entry exception.
+- `MainWindow.xaml.cs` is unchanged in rev22, including the dispatcher-posted guarded final close and explicit discard of the returned `DispatcherOperation`.
+- `ToolWindowManager.cs` is unchanged. Debugger asynchronous cleanup/detach, synchronous tool disposal, normal modeless window closure, and independent desktop z-order behavior remain on the rev19-rev21 implementation.
+- No modal-dialog ownership behavior is changed.
+
+### Changed - Verification Coverage
+
+- The automated registry remains **130** checks because rev22 strengthens the two existing workspace-tab border contracts rather than adding a duplicate top-level test.
+- The complete-tab-border source contract now requires an explicit one-unit layout column, a spanning background/border, and removal of the outer right Border stroke.
+- The selected-tab right-edge source contract now requires the edge to occupy that dedicated column, bind directly to the templated parent border brush, and render above the tab background.
+- Rev22 Gate A requires a clean Windows application build and **130/130 PASS**.
+- Runtime acceptance starts with the exact failure from rev21: selected and unselected right edges in Dimmed, Dark, and Light. Window shutdown is rechecked as a regression only; after those host gates pass, the carried-forward Call Stack/Stepping verification resumes.
+
+### Documentation
+
+- Recorded rev21's **130/130 PASS**, successful tested MainWindow/tool-window shutdown behavior, and failed tab-right-edge runtime gate without relabeling rev21 as verified.
+- Updated README, the full development action plan, Debugger architecture, theme documentation, Main Workspace lifecycle notes, Plugin SDK/current-host status, and PS5 current-host references for rev22.
+- Added dedicated rev22 source-review and verification documents under `docs/testing/`.
+- The planned Debugger **Integration, Export and Finalization** milestone moves from rev22 to **rev23** because this corrective code revision consumes rev22 under the project revision rules.
+
+### Versioning
+
+- Host application: `0.1.7.rev22`.
+- Feature title: `Debugger Tab Right Edge Layout Fix`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev34`.
+- Automated registry: unchanged at `130` checks.
+- Next planned feature revision after rev22 acceptance: `0.1.7.rev23 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev21 - MainWindow Shutdown Compile Fix
+
+### Summary
+
+Revision 21 is a narrow corrective host revision built directly from the `0.1.7.rev20` package after its first Windows build exposed one warnings-as-errors compiler failure in the new MainWindow shutdown path. The failure is `CS4014` on the `Dispatcher.BeginInvoke(new Action(Close))` call in `MainWindow.xaml.cs`: WPF's `DispatcherOperation` is awaitable, so discarding the returned operation implicitly triggers the compiler warning, and the repository-wide `TreatWarningsAsErrors` policy converts that warning into a build error.
+
+The same Visual Studio Error List also showed XAML designer/type-resolution errors such as `XLS0414`, `XDG0008`, `XDG0024`, `XDG0006`, and `XDG0010` in `MainWindow.xaml`. Source review found no corresponding removal or rename of `UiMetrics`, `ProportionalGridSplitter`, or `TextBoxInputFilter`; those diagnostics appeared alongside the failed application build and are treated as downstream designer resolution fallout until the clean Windows Gate A confirms otherwise.
+
+Rev21 changes only the host application's acknowledgement of the dispatcher operation and the associated source-verification/documentation contracts. It preserves rev20's explicit in-bounds workspace-tab right-edge implementation unchanged so that the visual fix can receive its first runtime verification after the application builds successfully. Core, Plugin SDK, Mock, PS5, debugger transport, Call Stack, stepping, breakpoints/watchpoints, registers, Memory Viewer, and Disassembler behavior are unchanged.
+
+### Fixed - Warnings-as-Errors Build Failure
+
+- Changed the final queued MainWindow close from `Dispatcher.BeginInvoke(new Action(Close));` to `_ = Dispatcher.BeginInvoke(new Action(Close));`.
+- The explicit discard documents that the returned `DispatcherOperation` is intentionally fire-and-forget. The close callback must remain queued rather than awaited from the shutdown helper because the purpose of the rev20 sequencing fix is to let the original WPF `OnClosing` callback unwind before the final `Close()` request executes.
+- No exception path is lost by this change: `CompleteToolWindowShutdownAsync()` still catches cleanup failures, sets the shutdown-completed guard in `finally`, and only then queues the final close.
+- No new `using` directive is required; all namespaces used by `MainWindow.xaml.cs` remain complete.
+
+### Preserved - Rev20 Runtime Corrections
+
+- The rev20 `WorkspaceTabItemStyle` and its explicit in-bounds `TabRightEdge` are unchanged. Rev20 never reached runtime because of the compile failure, so rev21 carries that exact visual correction forward for verification rather than introducing another untested tab geometry change.
+- Independent modeless z-order for Debugger, Disassembler, and Memory Viewer is unchanged.
+- `ToolWindowManager.CloseAllAsync()` cleanup order is unchanged: tools are disabled, asynchronous Debugger cleanup is awaited, synchronous tool cleanup is run where applicable, and each tracked window is closed through its normal WPF close path.
+- The final MainWindow close remains dispatcher-posted and guarded against shutdown re-entry.
+
+### Changed - Verification Coverage
+
+- Strengthened the existing **Main-window shutdown re-entry guard source contract** so it now requires the dispatcher call to be explicitly discarded as `_ = Dispatcher.BeginInvoke(new Action(Close));`. This would reject the exact source form that produced `CS4014` in rev20.
+- No redundant top-level verification case is added; the registry remains **130** unique checks because the existing shutdown source contract is the correct owner for this requirement.
+- Rev21 Gate A requires a clean Windows application build and **130/130 PASS** before any runtime UI/shutdown acceptance resumes.
+- After Gate A, rev21 first re-tests the rev20 workspace-tab edge and MainWindow cleanup/z-order changes, then resumes the carried-forward Call Stack/Stepping runtime verification.
+
+### Documentation
+
+- Recorded the rev20 Windows build failure in the historical rev20 source-review/verification documents without marking rev20 as verified.
+- Updated README, the full development action plan, Debugger architecture, Main Workspace lifecycle documentation, theme guidance, Plugin SDK status, and current PS5 status references to rev21.
+- Added dedicated rev21 source-review and verification documents under `docs/testing/`.
+- The planned Debugger **Integration, Export and Finalization** milestone moves from rev21 to **rev22** because this compile-fix revision consumes rev21 under the project revision rules.
+
+### Versioning
+
+- Host application: `0.1.7.rev21`.
+- Feature title: `MainWindow Shutdown Compile Fix`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev34`.
+- Next planned feature revision after rev21 acceptance: `0.1.7.rev22 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev20 - Debugger Tab Border and Shutdown Re-entry Fixes
+
+### Summary
+
+Revision 20 is a focused corrective host/UI revision built directly from the `0.1.7.rev19` candidate after its Windows automated gate completed at **128/128 PASS**. The first rev19 runtime inspection showed that the previous one-unit inset did not fully solve the selected/last workspace-tab header clipping: the right vertical edge of the selected **Call Stack** header was still absent. The same runtime pass exposed a WPF close re-entry failure when MainWindow was closed while Debugger remained open: `InvalidOperationException` reported that `Close` could not be called while a `Window` was already closing.
+
+Both failures are confined to host WPF presentation/lifecycle code. Rev20 does not change Core, Plugin SDK, Mock, PS5, debugger transport, Call Stack data, stepping semantics, breakpoints/watchpoints, registers, Memory Viewer data, or Disassembler data. Plugin API remains `2.15.0`, Mock remains `1.0.0.rev15`, and PS5 remains `0.1.0.rev34`.
+
+### Fixed - Selected Workspace Tab Right Edge
+
+- Reworked only the reusable `WorkspaceTabItemStyle` template in `Resources/Styles/ControlStyles.xaml`; the shared `WorkspaceTabControlStyle`, Debugger tab content, dimensions, bindings, and capability behavior remain unchanged.
+- Replaced the rev19 single `TabBorder` margin workaround with an in-bounds template grid that reserves one unit at the right side of the header.
+- Added a dedicated one-unit `TabRightEdge` visual inside that grid. This guarantees that the final right vertical edge is rendered inside the TabItem allocation instead of depending on the outer border stroke that WPF clipped on the selected/last header.
+- The explicit edge follows the TabItem's template-bound `BorderBrush`, so normal, hover, selected, and disabled states continue to use the existing theme brushes. The selected state still uses `AccentBrush`; no literal color is introduced.
+- Existing rounded top corners, header padding, external spacing, Light/Dimmed/Dark live-theme behavior, and Breakpoints / Watchpoints + Call Stack layout are preserved.
+
+### Fixed - MainWindow Shutdown Close Re-entry
+
+- Root cause: rev19 used an `async void OnClosing` override and called `Close()` directly in its `finally` block after `CloseAllAsync()`. When all tracked cleanup completed synchronously or without yielding long enough to unwind the original WPF close stack, the second `Close()` re-entered the same MainWindow while WPF still considered the first close request active. WPF correctly raised `InvalidOperationException`.
+- `MainWindow.OnClosing` is now synchronous. It still cancels the first close request, preserves the existing in-progress/completed guards, disables MainWindow, and starts the established asynchronous tracked-tool cleanup.
+- Asynchronous work moved into `CompleteToolWindowShutdownAsync()`, which still awaits `ToolWindowManager.CloseAllAsync()` and retains the existing error tracing.
+- The final MainWindow close is now posted with `Dispatcher.BeginInvoke(new Action(Close))` after cleanup. Posting rather than invoking immediately guarantees that WPF has returned from the original `OnClosing` call before the final close request is issued.
+- The completed guard is set before the queued close, so the second `OnClosing` pass follows the normal direct-close path and cannot start cleanup again.
+- `ToolWindowManager`, independent modeless z-order, DataContext cleanup order, tool disabling, normal child `Close()` calls, and modal-dialog ownership are unchanged from rev19.
+
+### Changed - Verification Coverage
+
+- Preserved all **128** existing automated checks and strengthened the rev19 tab-border and MainWindow-cleanup source contracts to match the corrected implementation.
+- Added **Debugger selected-tab right-edge rendering source contract**, which requires the explicit in-bounds `TabRightEdge` and verifies that it follows the template-bound selected/theme border brush.
+- Added **Main-window shutdown re-entry guard source contract**, which requires the asynchronous shutdown helper, dispatcher-posted final close, completed guard, and absence of a direct standalone `Close()` in the helper.
+- The automated registry increases from **128 to 130** unique checks.
+- Rev20 runtime acceptance begins by re-running the two failures observed in rev19: selected/unselected workspace-tab borders in all three themes, then MainWindow shutdown with an open Debugger and with multiple modeless tools. Only after those gates pass does the carried-forward Call Stack/Stepping acceptance resume.
+
+### Documentation
+
+- Recorded rev19's successful **128/128 PASS** automated gate and the two runtime failures without relabeling rev19 as verified.
+- Updated README, the full development action plan, debugger architecture, theme guidance, main-workspace lifecycle documentation, Plugin SDK status text, and current PS5 protocol-mapping status to point to the rev20 corrective candidate.
+- Added dedicated rev20 source-review and verification documents under `docs/testing/`.
+- The planned Debugger **Integration, Export and Finalization** milestone moves from rev20 to **rev21** because this corrective code revision consumes rev20 under the project's revision rules.
+
+### Versioning
+
+- Host application: `0.1.7.rev20`.
+- Feature title: `Debugger Tab Border and Shutdown Re-entry Fixes`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev34`.
+- Next planned feature revision after rev20 acceptance: `0.1.7.rev21 - Integration, Export and Finalization`.
+
+## TeeKay87's Memory Engine 0.1.7.rev19 - Debugger UI and Window Lifecycle Fixes
+
+### Summary
+
+Revision 19 is a focused corrective host/UI revision built from the `0.1.7.rev18` Debugger Tab Theme Fix candidate before the carried-forward Call Stack/Stepping runtime cycle resumed. Runtime inspection confirmed that the operating-system-white tab surface had been removed, but the application-owned Breakpoints / Watchpoints and Call Stack headers still clipped their one-pixel right border at the `TabPanel` layout edge. The same inspection cycle also established a host-window lifecycle requirement: the modeless Debugger, Disassembler, and Memory Viewer must participate in normal desktop z-order instead of remaining permanently above MainWindow, while closing MainWindow must still run each open tool's cleanup before the application exits.
+
+The correction is intentionally host-owned. No Core debugger contract, Plugin SDK contract, Mock backend, PS5 backend, call-stack implementation, stepping implementation, breakpoint/watchpoint transport, register handling, scanner behavior, memory viewer behavior, or disassembly behavior is changed. Plugin API remains `2.15.0`, Mock remains `1.0.0.rev15`, and PS5 remains `0.1.0.rev34`.
+
+### Changed - Complete Workspace Tab Border
+
+- Kept the shared `WorkspaceTabControlStyle` and `WorkspaceTabItemStyle` introduced in rev18 and changed only the application-owned `TabItem` template geometry.
+- Inset the rendered `TabBorder` by one device-independent unit on the right. This keeps the complete right-hand border inside the header's allocated `TabPanel` layout area instead of letting the final stroke be clipped at the item's layout boundary.
+- Preserved the existing header padding, external tab spacing, rounded top corners, normal/hover/selected/disabled states, and all `DynamicResource` theme bindings.
+- No Breakpoints / Watchpoints or Call Stack content, binding, command, capability, splitter, or debugger-state behavior was changed.
+
+### Added - Modeless Tool Window Lifecycle Manager
+
+- Added host-owned `ToolWindowManager` in the WPF application layer. The manager tracks the modeless Debugger, Disassembler, and Memory Viewer windows opened through MainWindow.
+- Modeless tools temporarily use MainWindow as their WPF owner only while `Show()` establishes the existing `CenterOwner` startup placement. Ownership is cleared immediately after the window is shown, leaving the tool as a normal independent top-level window for desktop z-order.
+- MainWindow can therefore be activated and raised above an open Debugger, Disassembler, or Memory Viewer. Activating a tool window can in turn raise that tool above MainWindow. No `Topmost` behavior is used.
+- Existing modal dialogs remain owned by the window that invoked them and retain normal modal blocking/placement behavior. The new manager is only for the application's modeless tool workspaces.
+- Tool windows remove themselves from the manager when they close normally, preventing stale `Window` references from being retained.
+
+### Changed - Main Window Shutdown Cleanup
+
+- MainWindow now performs a two-stage close when modeless tools are still open. The first close request is held while tracked tool cleanup runs; after cleanup and child-window closure finish, MainWindow completes its normal `OnClosed` disposal path.
+- Before asynchronous shutdown cleanup starts, all currently tracked modeless tools are disabled so no new tool action can race the application-exit sequence. The manager then invokes each tool DataContext's established cleanup contract. `IAsyncDisposable` is awaited first, which covers the Debugger's asynchronous detach/session-release path. Existing `IDisposable` cleanup is used for the Disassembler and Memory Viewer.
+- Each tracked window is then closed through normal WPF `Close()`, so its existing `Closed` handlers and window-specific cleanup remain part of the shutdown path. Existing ViewModel cleanup implementations are idempotent, so the normal per-window `Closed` handler remains safe after manager-initiated pre-cleanup.
+- Cleanup is attempted for every tracked tool even if another tool reports a cleanup error. Errors are collected and reported to the diagnostic trace; the shutdown sequence still closes all tracked windows before MainWindow completes application exit.
+- Closing MainWindow with no modeless tool windows open follows the existing direct close path.
+
+### Changed - Verification Coverage
+
+- Added the new tool-window manager source to the verification fixtures.
+- Added one source-contract check requiring the complete right-side workspace-tab border geometry.
+- Added one source-contract check requiring all three modeless tool launch paths to use the shared manager, release WPF ownership after modeless `Show()`, and avoid `Topmost`.
+- Added one source-contract check requiring MainWindow to await tracked tool cleanup and requiring the manager to honor both `IAsyncDisposable` and `IDisposable` before closing windows.
+- The automated registry increases from **125 to 128** unique checks.
+- Rev19 runtime acceptance must verify the tab border in Light/Dimmed/Dark, two-way MainWindow/tool-window activation order, multiple simultaneous modeless tools, and MainWindow shutdown while an attached Mock Debugger plus other tools are open before the carried-forward Call Stack/Stepping gates resume.
+
+### Versioning
+
+- Host application: `0.1.7.rev19`.
+- Feature title: `Debugger UI and Window Lifecycle Fixes`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev34`.
+- The Debugger Integration, Export and Finalization milestone moves from rev19 to **rev20** because rev19 is now the corrective revision required before runtime acceptance can continue.
+
+## TeeKay87's Memory Engine 0.1.7.rev18 - Debugger Tab Theme Fix
+
+### Summary
+
+Revision 18 is a focused corrective revision for the `0.1.7.rev17` Call Stack, Call Frames and Stepping candidate. The complete rev17 Windows automated gate passed at **124/124**, but the first runtime/UI inspection exposed an unthemed WPF `TabControl` in the new upper-right Debugger workspace. In Dimmed theme, the system-default tab template rendered the tab strip and selected-content surface white while the surrounding Debugger remained theme-aware, making the tab headers difficult to read and breaking the application's established Light/Dimmed/Dark visual consistency.
+
+No debugger backend, Core contract, Plugin SDK contract, call-stack logic, stepping logic, breakpoint/watchpoint behavior, transport, target-lifetime behavior, or platform plugin implementation is changed by rev18. The fix is limited to shared WPF tab presentation, its Debugger usage, regression coverage, version metadata, and documentation. Because rev17 required a code correction after its automated gate, rev18 becomes the corrective candidate and the planned Debugger Integration, Export and Finalization milestone moves to rev19 in accordance with the revision rules.
+
+### Changed - Theme-Aware Workspace Tabs
+
+- Added reusable `WorkspaceTabControlStyle` and `WorkspaceTabItemStyle` definitions to the existing shared `ControlStyles.xaml` resource dictionary rather than introducing Debugger-local hardcoded colors.
+- Replaced the operating-system default `TabControl` content surface with an application-owned template using `PanelBackgroundBrush`, `BorderBrush`, and the current theme resources.
+- Replaced the operating-system default `TabItem` header template with an application-owned theme-aware template using `PrimaryTextBrush`, `PanelSecondaryBrush`, `SurfaceRaisedBrush`, `BorderBrush`, `BorderStrongBrush`, `AccentBrush`, and `AccentMutedBrush`.
+- Added clear theme-aware states for normal, hover, selected, and disabled tab headers while preserving the existing tab layout and the Breakpoints / Watchpoints + Call Stack workspace structure introduced in rev17.
+- Applied the shared styles to both upper-right Debugger tabs. No content layout, binding, command, splitter, or capability-gating behavior inside either tab was changed.
+- The fix uses `DynamicResource` throughout so switching between Light, Dimmed, and Dark continues to update already-open controls through the existing theme system.
+
+### Changed - Verification Coverage
+
+- Added the shared control-style file to the test project's source fixtures.
+- Added one focused source-contract regression check that requires the Debugger to use the shared workspace `TabControl`/`TabItem` styles and requires those styles to consume the application's theme resources.
+- The automated registry therefore increases from **124 to 125** unique checks.
+- Updated the rev17 verification record to preserve the successful **124/124 PASS** automated result and record that runtime acceptance stopped before the focused Call Stack/Stepping gates because the new tab surface was visibly unthemed.
+- Added a dedicated rev18 verification document. Rev18 must first pass **125/125** on Windows, then the themed Debugger tab surface must be visually confirmed in Light, Dimmed, and Dark before the remaining rev17 Call Stack/Stepping runtime gates resume.
+
+### Versioning
+
+- Host application: `0.1.7.rev18`.
+- Feature title: `Debugger Tab Theme Fix`.
+- Plugin API: unchanged at `2.15.0`.
+- Mock plugin: unchanged at `1.0.0.rev15`.
+- PlayStation 5 plugin: unchanged at `0.1.0.rev34`.
+- The Debugger Integration, Export and Finalization milestone moves from rev18 to **rev19**.
+
+## TeeKay87's Memory Engine 0.1.7.rev17 - Call Stack, Call Frames and Stepping
+
+### Summary
+
+Revision 17 continues the active `0.1.7` Debugger feature block by combining the previously separate Call Stack/Call Frames and Stepping milestones into one dependency-complete revision. The implementation builds on the fully verified `0.1.7.rev16` Hardware Watchpoints baseline: rev16 completed the Windows automated gate at **118/118 PASS** and the complete focused Mock/live-PS5 hardware-watchpoint acceptance cycle, including persistent/temporary watchpoints, 1/2/4/8-byte live PS5 coverage, all four hardware slots plus slot reuse, Enable/Disable/Remove/Remove All, debugger/session cleanup, software-breakpoint coexistence, and the conservative DR6 attribution fallback required by the current ps5debug-NG backend.
+
+Rev17 does not introduce new public debugger contracts. The neutral `IDebuggerCallStackService`, `IDebuggerStepService`, `DebuggerStackFrame`, `DebuggerStepKind`, `TargetCapabilities.CallStack`, and `TargetCapabilities.StepExecution` contracts already exist in Plugin API `2.15.0` through the debugger foundation. The host now consumes those existing contracts, Mock and PS5 implement them, and all platform-specific stack-walk/step transport remains inside the corresponding plugin.
+
+### Added - Call Stack and Call Frames
+
+- Added capability-driven Call Stack presentation to the modeless Debugger workspace. The tab is visible only when the active plugin advertises `TargetCapabilities.CallStack`.
+- Added `DebuggerStackFrameViewModel` as the WPF presentation adapter for the existing neutral `DebuggerStackFrame` model; no new architecture-specific frame model was introduced.
+- Added frame columns for frame index, instruction address, module, and symbol, plus selected-frame detail for stack pointer, frame pointer, and return address.
+- Added explicit Refresh for the selected paused debugger thread's call stack.
+- Call-frame snapshots are valid only while the bound debugger session is Paused and the selected thread/target/connection generation still match the request that produced them.
+- Call frames are cleared on Continue, detach, stale-target invalidation, connection-generation replacement, debugger cleanup, or any other transition away from a valid Paused stop context.
+- Changing the selected debugger thread while Paused refreshes both Registers and Call Stack for that thread through the existing stop-context path.
+- Added Call Stack navigation to the existing Disassembler using the selected frame's instruction address. Double-clicking a frame performs the same Disassembler navigation when the target still supports it.
+- Added Call Stack navigation to the existing Memory Viewer using the selected frame's instruction address. The Debugger does not create duplicate memory/disassembly viewers or bypass their existing target/session safety rules.
+- Preserved frame ordering supplied by the neutral service and selects the previous frame index again when possible after refresh.
+
+### Added - Stepping and Run-to Operations
+
+- Added **Step Into**, **Step Over**, **Step Out**, and **Run to...** controls to a dedicated second execution-control row in the Debugger header. The row is capability-driven by `TargetCapabilities.StepExecution`.
+- Step operations require a current Paused debugger attachment and a selected debugger thread; commands are disabled outside that valid stop context.
+- **Step Into** calls the existing neutral `IDebuggerStepService` with `DebuggerStepKind.Into`. Mock and PS5 implement native Step Into only.
+- **Step Over** reuses the existing Core Disassembler pipeline to inspect the current instruction. Non-call instructions use native Step Into. A direct current Call instruction is stepped over by calculating its fall-through address and running to that address through the established temporary software-breakpoint lifecycle.
+- **Step Out** uses the selected neutral call frame's return address and the same Run-to/temporary-breakpoint path instead of introducing a platform-specific return implementation in WPF or Core.
+- Added the themed `RunToAddressDialog` for direct hexadecimal target-address entry. It accepts the standard optional `0x` prefix, rejects invalid/overflow input, and contains no platform-specific address semantics.
+- **Run to Address** requires both `StepExecution` and software-breakpoint capability. If an enabled software execute breakpoint already exists at the destination it is reused; otherwise a temporary one-byte Software/Execute breakpoint is created through the existing breakpoint service before Continue.
+- A disabled software execute breakpoint already present at the requested run-to address blocks the operation with a clear error instead of silently changing that user's breakpoint state.
+- Step Over, Step Out, and Run to Address therefore reuse already established Disassembler, breakpoint, temporary-lifetime, Continue, event, cleanup, and stale-session behavior rather than adding parallel execution-control mechanisms.
+- Existing rapid `Continue -> Paused event` stop-context deferral is reused for stepping/run-to operations so a fast stop is not lost while the initiating command is still busy.
+
+### Changed - Debugger Workspace Layout
+
+- Reworked the Debugger layout so rev17 functionality fits without adding another permanently visible full-size pane.
+- The existing Breakpoints / Watchpoints manager and the new Call Stack share the upper-right workspace through tabs.
+- Threads and Registers remain simultaneously visible in the left workspace when their capabilities are present.
+- Events remains permanently available in the lower-right workspace and now owns its own **Events / count / Clear Events** header instead of placing event controls in the execution-control card.
+- Added a vertical `ProportionalGridSplitter` between the left Threads/Registers workspace and the right tabbed/events workspace. It starts at approximately **36/64** and retains the shared **20/80 to 80/20** proportional movement limits.
+- Retained the existing proportional Threads/Registers splitter on the left.
+- Retained the existing approximately **65/35** upper-workspace/Events starting split on the right; the upper row collapses when neither breakpoint/watchpoint management nor Call Stack is available.
+- Reused the application's existing `ColumnWorkspaceSplitterStyle`, `RowWorkspaceSplitterStyle`, button styles, card styling, DataGrid styling, theme resources, and responsive modeless-window behavior rather than creating debugger-specific duplicates.
+
+### Added - Mock Call Stack and Step Backend
+
+- Advanced Mock from `1.0.0.rev14` to `1.0.0.rev15`; Plugin API remains `2.15.0`.
+- Added `TargetCapabilities.CallStack` and `TargetCapabilities.StepExecution` to Mock metadata.
+- Updated the Mock plugin description so the public metadata reflects call-stack and stepping support.
+- `MockDebuggerSession` now implements the existing `IDebuggerCallStackService` and `IDebuggerStepService` contracts.
+- Added a deterministic three-frame stack for each Mock thread while Paused. The top frame uses the thread's current instruction/stack/frame pointers, caller frames use deterministic fixture addresses, module text uses `TestGame.exe`, and deterministic symbol names allow host/UI verification without real symbol infrastructure.
+- Call-stack access is rejected while Running and for unknown thread ids, matching the existing paused-only register safety model.
+- Added deterministic native Step Into. It transitions the Mock debugger to Running, emits a normal Resumed event, advances the selected thread's synthetic instruction pointer through the existing Mock instruction fixture, and asynchronously returns to Paused with a `StepCompleted` event.
+- Mock deliberately rejects native Step Over/Step Out because those operations are host-composed from verified shared services in rev17.
+- Existing deterministic breakpoint/watchpoint, thread, register, memory, scanner, Memory Viewer, and Disassembler behavior remains unchanged.
+
+### Added - PS5 Call Stack Backend
+
+- Advanced the PS5 plugin from `0.1.0.rev33` to `0.1.0.rev34`; Plugin API remains `2.15.0`.
+- Added `TargetCapabilities.CallStack` and `TargetCapabilities.StepExecution` to PS5 metadata.
+- Updated the PS5 plugin description so the public metadata reflects server-side call-stack access and native Step Into.
+- `Ps5DebuggerSession` now implements the existing `IDebuggerCallStackService` and `IDebuggerStepService` contracts.
+- Added ps5debug-NG `CMD_PROC_READ_STACK` (`0xBDAA0023`) support on the debugger-owner command client.
+- The plugin first reads the selected paused thread's verified 176-byte general-register block to obtain RIP/RBP/RSP, then sends the packed 24-byte `{ pid, rbp, rsp, depth }` server-side stack-walk request.
+- Call-stack depth is bounded to the backend's documented maximum of 64 frames.
+- Added strict response framing checks for payload length, frame count, fixed 44-byte frame headers, per-frame locals/code lengths, truncation, and unexpected trailing data before any frame is exposed to the host.
+- The variable frame-local/code payload returned by ps5debug-NG is validated and skipped in rev17 because the neutral Call Stack UI needs frame topology/addresses only; those backend bytes do not leak into Core/WPF.
+- The top neutral frame uses the selected thread's current RIP. Subsequent neutral frame instruction addresses use the previous frame's return address. RSP/RBP/return address are mapped from the backend response, and module names are resolved through the PS5 plugin's existing current-process memory-map snapshot.
+- If the server-side walk returns no frames, the plugin still exposes one safe neutral current frame from RIP/RSP/RBP rather than fabricating caller frames.
+
+### Added - PS5 Native Step Into
+
+- Added `CMD_DEBUG_STEP` (`0xBDBB0012`) and `CMD_DEBUG_STEP_THREAD` (`0xBDBB0013`) protocol constants and command-client support.
+- Rev17 normally uses `CMD_DEBUG_STEP_THREAD` with the currently selected debugger thread id; the process-wide command remains supported by the plugin-private client when no thread id is supplied.
+- Before native Step Into, the PS5 session flushes any staged software-breakpoint or hardware-watchpoint disables using the already verified paused-disable cleanup path.
+- The PS5 session tracks only the pending step/thread identity required to classify the matching asynchronous SIGTRAP as neutral `DebuggerEventKind.StepCompleted` / `DebuggerStopReason.StepCompleted`.
+- Manual Pause clears pending step state so an unrelated later trap cannot be misclassified as the completion of an abandoned step.
+- Existing managed software-breakpoint and hardware-watchpoint attribution takes precedence over generic StepCompleted classification when a trap identifies one of those managed records.
+- No register-write command, architecture-specific stepping enum, or Core/WPF ps5debug-NG command knowledge was introduced.
+
+### Added - Verification Coverage
+
+- Expanded the automated verification registry from **118 to 124 unique checks**.
+- Added deterministic Mock call-stack service coverage, including paused-only access, frame ordering/metadata, and invalidation after Continue.
+- Added deterministic Mock native Step Into coverage, including Running transition, `StepCompleted` event semantics, selected-thread RIP update, and rejection outside Paused state.
+- Added Debugger Call Stack/stepping workspace source-contract coverage for capability gating, tabs, frame detail/navigation, shared proportional splitters, and host-composed Step Over/Step Out behavior.
+- Added Run to Address source-contract coverage for themed hexadecimal input, capability gating, temporary software breakpoint reuse, disabled-existing-breakpoint rejection, and platform-neutral implementation.
+- Added PS5 server-side call-stack protocol coverage for GETREGS-derived RBP/RSP input, `CMD_PROC_READ_STACK` framing, response parsing, depth bounds, and neutral frame mapping.
+- Added PS5 native Step Into protocol/event coverage for selected-thread `CMD_DEBUG_STEP_THREAD`, immediate Running state, matching asynchronous StepCompleted mapping, and rejection of backend-native Step Over/Out.
+- Updated the ps5debug-NG protocol test server with deterministic call-stack responses and native step command capture needed by the new checks.
+- Rev17 remains a **candidate** until the clean Windows suite reports `All 124 checks passed.` and the focused Mock/live-PS5 Call Stack/Stepping runtime gates in `docs/testing/APP_0.1.7_REV17_VERIFICATION.md` pass.
+
+### Rev16 Verification Result
+
+- Rev16 completed the clean Windows automated gate at **118/118 PASS**.
+- Mock hardware-watchpoint lifecycle, temporary/persistent behavior, validation, and manager UI acceptance passed.
+- Live PS5 hardware-watchpoint acceptance passed for Write/ReadWrite behavior and 1/2/4/8-byte naturally aligned sizes.
+- All four PS5 hardware watchpoint slots were exercised and released/reused successfully.
+- Persistent and temporary watchpoints, Enable/Disable/Remove/Remove All, detach/reattach, Debugger close/reopen, disconnect/reconnect cleanup, and software-breakpoint coexistence passed.
+- The known upstream zero-DR6 case remained safely handled: exact slot attribution is used when available, the sole active watchpoint is inferred only when unambiguous, and no arbitrary record is chosen when multiple active watchpoints cannot be distinguished.
+- Rev16 is therefore the fully verified baseline for rev17.
+
+### Version and Compatibility Notes
+
+- Host application: `0.1.7.rev17`.
+- Feature title: `Call Stack, Call Frames and Stepping`.
+- Plugin API: unchanged at `2.15.0`; rev17 consumes existing debugger contracts and introduces no public API change.
+- In-Memory Test Target plugin: `1.0.0.rev15`.
+- PlayStation 5 plugin: `0.1.0.rev34`.
+- Application metadata remains centralized in `AppInfo`; plugin metadata remains independent in each plugin's `xxPluginInfo` source.
+- Compatible third-party Plugin API 2.x plugins are unaffected unless they choose to advertise the existing `CallStack` and/or `StepExecution` capabilities and provide the matching attached-session services.
+
+### Documentation
+
+- Updated `README.md` for the current rev17 candidate, verified rev16 baseline, new Debugger workspace layout, Call Stack/Call Frames behavior, stepping/run-to workflow, and current built-in plugin versions/capabilities.
+- Updated the full development action plan so the former separate rev17 Call Stack and rev18 Stepping milestones are combined into rev17, with **rev18 - Integration, Export and Finalization** becoming the remaining debugger-closing revision.
+- Updated the Debugger architecture for current Call Stack/Step consumption, host composition rules, frame lifetime, workspace layout, and revised remaining development order.
+- Updated Plugin SDK foundation documentation to record that rev17 activates the already existing `CallStack` and `StepExecution` contracts without changing Plugin API `2.15.0`.
+- Updated Mock plugin documentation for `1.0.0.rev15` deterministic frames and native Step Into.
+- Updated PS5 plugin and ps5debug-NG protocol documentation for `0.1.0.rev34`, server-side stack walking, native step commands, and host-composed Step Over/Out/Run-to behavior.
+- Updated `APP_0.1.7_REV16_VERIFICATION.md` from candidate to the actual verified acceptance result.
+- Added `APP_0.1.7_REV17_SOURCE_REVIEW.md` and `APP_0.1.7_REV17_VERIFICATION.md`.
+
+### Unchanged / Deferred
+
+- Plugin SDK/Core debugger public contracts are unchanged in rev17.
+- PS5 register editing remains intentionally unavailable; no SETREGS/SETFPREGS/SETDBREGS/SETFSGSBASE path is enabled.
+- The current guarded PS5 extended-register strategy remains unchanged, including suppression of paused `GETDBREGS`.
+- The verified software breakpoint and Hardware Watchpoint manager/lifecycle behavior remains unchanged except where temporary software breakpoints are now reused by run-to composition.
+- Individual PS5 Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the tested ps5debug-NG backend.
+- Debugger universal export, final integration/cleanup stress acceptance, and feature-block closure are intentionally deferred to `0.1.7.rev18`.
+- Find What Writes / Reads / Accesses follows the completed and verified `0.1.7` Debugger block rather than being mixed into rev17.
+
+
+
+## TeeKay87's Memory Engine 0.1.7.rev16 - Hardware Watchpoints
+
+### Summary
+
+Revision 16 extends the still-active `0.1.7` Debugger block with neutral hardware data watchpoints. It builds directly on the fully verified `0.1.7.rev15` software-breakpoint baseline: rev15 completed the Windows suite at **114/114 PASS** and the focused runtime checks for breakpoint address validation, immediate breakpoint re-hit register refresh, and the Disassembler presentation cleanup all passed.
+
+The existing Breakpoint Manager is expanded rather than duplicated. Software execute breakpoints and hardware data watchpoints share the same neutral lifecycle/state service, list, Enable/Disable/Remove controls, event history, session cleanup, and plugin-owned backend policy. Platform-specific slot counts, DR7 encodings, address rules, and transport remain inside the respective plugins.
+
+### Added - Neutral Hardware Watchpoint Context
+
+- Advanced Plugin API from `2.14.0` to `2.15.0` without creating a second watchpoint-only management service.
+- Reused the established `DebuggerBreakpointKind.Hardware`, `DebuggerBreakpointAccess`, `DebuggerBreakpointRequest`, `DebuggerEventKind.Watchpoint`, `DebuggerStopReason.Watchpoint`, and `TargetCapabilities.Watchpoints` neutral contracts.
+- Extended `DebuggerEvent` with optional `TriggeredBreakpoint` context while retaining the existing constructor for compatible event producers.
+- `InstructionPointer` continues to mean the instruction that caused the stop. For a data watchpoint, the watched memory address is available through `TriggeredBreakpoint.Request.Address` instead of being conflated with the instruction pointer.
+- Capability gating remains neutral: a plugin can advertise Breakpoints, Watchpoints, both, or neither.
+
+### Added - Breakpoints / Watchpoints Manager
+
+- Renamed the Debugger pane heading to **Breakpoints / Watchpoints** while retaining the existing manager/command layout and adding a compact Size column so hardware watchpoint widths remain visible after creation.
+- The pane is available when the active plugin advertises either `Breakpoints` or `Watchpoints`.
+- Extended the Add dialog with a type selector for **Software Execute Breakpoint** and **Hardware Watchpoint**.
+- Hardware Watchpoint creation exposes neutral Address, Access, Size, and Temporary/Persistent lifetime inputs.
+- Reused the host `HexAddress` and `UnsignedInteger` live input filters for the Add dialog Address and Size fields; final plugin validation remains authoritative for mapped ranges, legal widths, and alignment.
+- Preserved the existing State column and the existing Add, Refresh, Enable, Disable, Remove, Remove All, and Disassembler buttons; Address, State, Type, Access, Size, and Lifetime are visible for managed records.
+- Disassembler navigation is enabled only for selected execute breakpoints. A data watchpoint is not treated as a code address simply because it is selected in the same list.
+- Access/size/alignment policy is intentionally delegated to the active plugin so Core/WPF does not contain PS5 or Mock register rules.
+
+### Added - Mock Hardware Watchpoints
+
+- Advanced Mock from `1.0.0.rev13` to `1.0.0.rev14` and target Plugin API from `2.14.0` to `2.15.0`.
+- Added `TargetCapabilities.Watchpoints` to Mock metadata.
+- Added four hardware-watchpoint slots independent of the existing 30 software execute-breakpoint slots.
+- Mock accepts Read, Write, and ReadWrite data watchpoints with widths 1, 2, 4, or 8 bytes.
+- Hardware watchpoints require natural alignment and a watched range fully contained inside the deterministic Mock memory map.
+- Duplicate detection includes breakpoint kind, address, size, and access so distinct legal watchpoint definitions do not collide accidentally.
+- Deterministic Mock Continue can now produce a Watchpoint stop. The event reports a synthetic accessing instruction inside the Mock code fixture while `TriggeredBreakpoint` identifies the watched data range.
+- Temporary Mock watchpoints are removed after their first deterministic hit; persistent watchpoints remain enabled for repeated hits.
+
+### Added - PS5 Hardware Data Watchpoints
+
+- Advanced the PS5 plugin from `0.1.0.rev32` to `0.1.0.rev33` and target Plugin API from `2.14.0` to `2.15.0`.
+- Added `TargetCapabilities.Watchpoints` to PS5 metadata.
+- Implemented ps5debug-NG `CMD_DEBUG_SET_WATCHPOINT` (`0xBDBB0004`) with the documented 24-byte `{ index, enabled, length, breaktype, address }` request.
+- Kept the backend's four DR0-DR3 hardware slots private to the PS5 plugin.
+- Maps neutral Write to DR7 break type `1` and ReadWrite to `3`.
+- Maps 1/2/4/8-byte widths to the backend's `0/1/3/2` DR7 length encoding.
+- Rejects a true Read-only request because amd64 DR7 provides no equivalent data-watchpoint mode; the error directs callers to ReadWrite when read observation is required.
+- Validates supported width, natural alignment, complete mapped range, and guard state before mutating a PS5 hardware slot.
+- Keeps software execute breakpoints on the already verified INT3 path; rev16 does not replace them with hardware execute breakpoints.
+- Enable, Disable, Remove, Remove All, temporary lifetime, Detach, debugger-window cleanup, and connection-generation teardown cover both managed breakpoint kinds.
+
+### Added - Watchpoint Hit Attribution and Backend Guarding
+
+- Reads hardware-trigger context from the 128-byte debug-register block already embedded in the normal 1184-byte asynchronous debugger event packet; rev16 does not re-enable paused `GETDBREGS`.
+- Maps DR6 B0-B3 to the corresponding managed PS5 hardware slot when the backend preserves those bits.
+- Added a safe fallback for the current ps5debug-NG event-dispatch behavior: if DR6 is zero and exactly one managed hardware watchpoint is enabled, that one watchpoint can be inferred without ambiguity.
+- If DR6 is zero while multiple managed hardware watchpoints are enabled, the plugin deliberately does not guess. It reports a generic signal/other stop explaining that exact watchpoint attribution is unavailable and leaves temporary watchpoints intact.
+- Added `docs/bug-reports/ps5debug-ng-watchpoint-interrupt-clears-dr6-trigger-status.md` documenting the upstream event-dispatch sequence that clears the outgoing DR6 trigger-slot status before the client receives it.
+- The existing rev10 guarded optional-register transport and rev15 rapid re-hit register refresh remain unchanged.
+
+### Verification Coverage
+
+- Expanded the automated verification registry from **114 to 118 unique checks**.
+- Added neutral triggered-breakpoint event-context coverage.
+- Added Mock hardware-watchpoint lifecycle, validation, persistent/temporary hit, and slot behavior coverage.
+- Added Debugger hardware-watchpoint manager/Add-dialog source-contract coverage.
+- Added PS5 watchpoint packet framing, access/length encoding, validation, slot lifecycle, exact DR6 attribution, zero-DR6 single-watchpoint fallback, ambiguous multi-watchpoint handling, and no-paused-GETDBREGS coverage.
+- Rev16 completed the clean Windows automated gate at **118/118 PASS** and the focused Mock/live-PS5 hardware-watchpoint runtime acceptance succeeded.
+
+### Rev15 Verification Result
+
+- Rev15 completed the Windows automated gate at **114/114 PASS**.
+- Focused runtime verification passed software execute-breakpoint address validation on Mock/PS5, the immediate `Continue -> same breakpoint hit` Registers refresh correction, and removal of the Disassembler explanatory paragraph.
+- Rev15 is the accepted software-breakpoint baseline for rev16.
+
+### Version and Metadata
+
+- Advanced the application from `0.1.7.rev15` to `0.1.7.rev16` with feature title **Hardware Watchpoints**.
+- Advanced Plugin API from `2.14.0` to `2.15.0` for optional triggered-breakpoint event context.
+- Advanced Mock from `1.0.0.rev13` to `1.0.0.rev14` because Mock production watchpoint behavior changed.
+- Advanced PS5 from `0.1.0.rev32` to `0.1.0.rev33` because PS5 production watchpoint transport and event mapping changed.
+- Centralized application metadata remains sourced from `AppInfo`; plugin metadata remains independent.
+
+### Documentation
+
+- Updated the root README, full development action plan, Debugger architecture, Plugin SDK foundation, Mock plugin guide, PS5 plugin guide, and ps5debug-NG protocol mapping for the current watchpoint implementation.
+- Updated `APP_0.1.7_REV15_VERIFICATION.md` with the actual 114/114 and focused runtime PASS result.
+- Added `APP_0.1.7_REV16_SOURCE_REVIEW.md` and `APP_0.1.7_REV16_VERIFICATION.md`.
+- Added a dedicated external ps5debug-NG DR6 watchpoint-attribution bug report under `docs/bug-reports/`.
+
+### Unchanged
+
+- The existing Breakpoint Manager State column and separate Enable/Disable controls remain unchanged; no Enabled checkbox is introduced.
+- Software execute-breakpoint framing, 30-slot PS5 software allocation, corrected-RIP handling, persistent/temporary behavior, and paused Disable/Remove staging remain unchanged from the verified rev15 baseline.
+- The Breakpoints/Events pane still starts at approximately 65/35 and uses the existing proportional splitter.
+- PS5 paused register refresh still suppresses `GETDBREGS`; successful full safe snapshots continue to expose the verified 76-row general/FPU-SIMD/FS-GS surface.
+- Individual PS5 Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the currently tested ps5debug-NG backend.
+- Scanner, Saved Addresses, Memory Viewer, Disassembler, export, themes, settings, and ordinary target-memory workflows are unchanged except where the shared Debugger event context is consumed.
+
+## TeeKay87's Memory Engine 0.1.7.rev15 - Breakpoint Runtime Validation Fixes
+
+### Summary
+
+Revision 15 is a focused correction for two defects found during the complete rev14 Mock/live-PS5 Breakpoint Manager acceptance cycle, plus a small Disassembler presentation cleanup requested during that review. Rev14 passed the full Windows verification suite at **114/114** and its breakpoint runtime workflow passed persistent and temporary hits, repeated hits, state changes, paused-state cleanup, Remove All, debugger lifecycle cleanup, connection-generation invalidation, Disassembler navigation, and the rev10 guarded register-transport regression. Runtime acceptance also exposed two remaining host/plugin defects: invalid software execute-breakpoint addresses were not rejected before backend mutation, and an immediate breakpoint re-hit could arrive while Continue was still completing, leaving the Registers list empty after the target returned to Paused.
+
+Rev15 corrects those defects without changing the public Plugin API, ps5debug-NG breakpoint framing, the verified paused Disable/Remove staging rule, breakpoint lifetime semantics, or the existing Breakpoints/Events layout.
+
+### Fixed - Software Execute-Breakpoint Address Validation
+
+- Added deterministic Mock validation before a software execute breakpoint is accepted.
+- Mock now rejects addresses outside its target memory map and rejects mapped data addresses that are outside the explicit synthetic code fixture beginning at `0x10000400`.
+- Preserved the existing one-byte Software/Execute contract and duplicate-address handling.
+- Added PS5 plugin-owned address validation before any `CMD_DEBUG_SET_BREAKPOINT` request is sent.
+- The PS5 target session now retains the latest memory-map snapshot produced by its normal `IMemoryMapProvider` enumeration for the current process. The debugger consumes that immutable plugin-private snapshot instead of issuing another command on the debugger/target transport.
+- PS5 software execute breakpoints are rejected when the current map is unavailable, when the address is unmapped, when the containing region is not executable, or when the region is guarded.
+- Memory-map/protection policy remains platform-specific. No PS5 addresses, page rules, slots, or wire details were moved into Core or WPF.
+- Rejected breakpoint requests do not allocate a managed/backend slot or mutate ps5debug-NG breakpoint state.
+
+### Fixed - Registers After Immediate Breakpoint Re-hit
+
+- Corrected the Debugger ViewModel race where `Continue` temporarily transitions the target to Running and clears Registers, but the same enabled breakpoint can re-hit before the Continue command has fully left its busy state.
+- A Paused stop-context event that arrives specifically while Continue is still completing is now retained as deferred stop context instead of being discarded because the UI is busy.
+- Once Continue leaves its busy state, the newest deferred stop context is replayed through the existing Breakpoints/Threads/Registers refresh path when the target is still Paused and current.
+- Running transitions still clear stale register data immediately.
+- Manual Pause keeps its existing explicit register refresh and is not changed into a duplicate event-driven refresh path.
+- Removed the redundant unconditional register clear after Continue; non-Paused coordinator state already owns that cleanup, while a rapid Paused re-hit must retain the new stop state.
+
+### Changed - Disassembler Presentation Cleanup
+
+- Removed the complete explanatory paragraph beginning `The visible range is decoded as one continuous stream...` from the Disassembler.
+- Removed the now-unused spacing/layout row associated only with that paragraph so the remaining controls do not leave an empty gap.
+- Disassembly navigation, decoding, syntax highlighting, origin selection, region/module/protection display, splitters, and table layout are otherwise unchanged.
+
+### Verification Coverage
+
+- Kept the automated verification registry at **114 unique checks**.
+- Extended the existing Mock breakpoint lifecycle check to reject both a mapped data address and an out-of-map address before exercising the valid executable fixture.
+- Extended the existing PS5 breakpoint protocol check to populate the target memory-map cache, reject mapped non-executable and unmapped addresses, and verify that rejected requests produce no backend breakpoint command.
+- Extended the existing Debugger breakpoint source contract to protect the Continue-specific deferred stop-context refresh path.
+- Extended the existing Disassembler source contract to ensure the removed explanatory text does not return.
+- Rev15 completed a clean Windows run at **114/114 PASS**, and the focused Mock/live-PS5 runtime correction gates also passed. Rev15 is fully verified and is the accepted baseline for rev16.
+
+### Rev14 Verification Result
+
+- Rev14 completed the clean Windows automated gate at **114/114 PASS**.
+- Mock runtime acceptance passed persistent and temporary breakpoint hits, repeated hits, Enable/Disable, Remove/Remove All, Disassembler integration, Detach/Reattach, window-close cleanup, stale-session protection, and the 65/35 Breakpoints/Events splitter.
+- Live PS5 acceptance passed persistent/repeated and temporary breakpoint hits, paused-safe Disable/Enable/Remove/Remove All behavior, Detach, window close, Disconnect/Reconnect, duplicate handling, Disassembler navigation, and the guarded register-transport regression.
+- Rev14 is superseded by rev15 because the runtime cycle exposed the two defects corrected here rather than because the core breakpoint transport failed.
+
+### Version and Metadata
+
+- Advanced the application from `0.1.7.rev14` to `0.1.7.rev15` with feature title **Breakpoint Runtime Validation Fixes**.
+- Kept Plugin API at `2.14.0`; no public contract changed.
+- Advanced Mock from `1.0.0.rev12` to `1.0.0.rev13` because Mock production breakpoint validation changed.
+- Advanced PS5 from `0.1.0.rev31` to `0.1.0.rev32` because PS5 production memory-map/breakpoint validation changed.
+- Centralized application metadata remains sourced from `AppInfo`; plugin metadata remains independent.
+
+### Documentation
+
+- Updated the root README to describe the current rev15 behavior and verification state.
+- Updated the full development action plan so rev15 is the runtime-fix candidate and Hardware Watchpoints moves to rev16.
+- Updated debugger, Plugin SDK, Mock, PS5, and ps5debug-NG mapping documentation for the new validation and stop-context behavior.
+- Recorded the actual rev14 automated/runtime result in its verification documentation.
+- Added `APP_0.1.7_REV15_SOURCE_REVIEW.md` and `APP_0.1.7_REV15_VERIFICATION.md`.
+- No external-tool bug report was added because both corrected defects are in this codebase; the existing ps5debug-NG paused-disable report remains unchanged.
+
+### Unchanged
+
+- Breakpoint Manager retains Add, Refresh, Enable, Disable, Remove, Remove All, and Disassembler navigation; no Enabled checkbox is added and the existing State column remains unchanged.
+- Persistent/temporary semantics, Mock deterministic hit generation, PS5 30-slot allocation, SIGTRAP hit mapping, and corrected-RIP handling remain unchanged.
+- PS5 Disable/Remove while Paused continues to stage backend cleanup until explicit Continue to avoid the documented ps5debug-NG side effect.
+- Rev10 guarded PS5 optional-register transport and the 76-row successful register surface remain unchanged.
+- The Breakpoints/Events pane still starts at approximately 65/35 and uses the existing proportional splitter.
+- Scanner, Saved Addresses, Memory Viewer, export, themes, settings, and ordinary target-memory paths are unchanged.
+- Individual PS5 Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the currently tested ps5debug-NG backend.
+
+## TeeKay87's Memory Engine 0.1.7.rev14 - PS5 Breakpoint Capability Verification Fix
+
+### Summary
+
+Revision 14 is a focused verification correction for the still-unverified Breakpoint Manager and Software Breakpoints feature block. Rev13 successfully repaired the breakpoint test-project compile blocker and allowed all 114 checks to execute, but the supplied Windows run completed at **113/114**. The only failure was `PS5 plugin metadata and connection settings`: its exact expected capability set had not been updated when PS5 software breakpoints were introduced, so it rejected the production plugin's correct `TargetCapabilities.Breakpoints` flag as an unexpected extra capability.
+
+Rev14 updates that stale expectation while preserving exact capability-set validation. No production breakpoint behavior, PS5 transport, Mock behavior, public Plugin API contract, Debugger WPF workflow, or rev13 splitter layout is redesigned.
+
+### Fixed - PS5 Capability Verification
+
+- Updated `VerifyPs5PluginMetadataAsync` in `tests/TeeKay87.MemoryEngine.Tests/Program.cs` so the exact expected PS5 capability set includes `TargetCapabilities.Breakpoints`.
+- Updated the assertion message to name software-breakpoint support explicitly.
+- Kept the assertion as exact equality rather than weakening it to individual `HasFlag` checks; missing or unexpected PS5 capabilities therefore continue to fail deterministically.
+- Kept the verification registry at **114 checks**. No test was removed, skipped, bypassed, or reclassified.
+- Confirmed the production PS5 capability declaration, breakpoint-specific protocol test, and Mock/PS5 debugger-capability contract already agree that Breakpoints is implemented.
+
+### Rev13 Gate A Result
+
+- Rev13 is recorded as **superseded after automated Gate A**.
+- Its clean Windows run compiled and executed the full 114-check registry.
+- **113 checks passed** and exactly one failed: `PS5 plugin metadata and connection settings`.
+- The failure reported expected capabilities without `Breakpoints` and actual capabilities with `Breakpoints`.
+- Because 114/114 did not pass, rev13 is not a verified baseline and focused breakpoint runtime acceptance remains attached to the superseding rev14 candidate.
+
+### Version and Metadata
+
+- Advanced the application from `0.1.7.rev13` to `0.1.7.rev14` with feature title **PS5 Breakpoint Capability Verification Fix**.
+- Kept Plugin API at `2.14.0`; no public contract changed.
+- Kept Mock at `1.0.0.rev12`; no Mock production source changed.
+- Kept PS5 at `0.1.0.rev31`; no PS5 production source changed.
+- Centralized application metadata remains sourced from `AppInfo`.
+
+### Documentation
+
+- Updated the root README to identify rev14 as the active breakpoint candidate and record rev13's 113/114 result.
+- Updated the full development action plan to mark rev13 superseded and move Hardware Watchpoints to rev15.
+- Updated Debugger architecture and current Mock/PS5 host/protocol documentation.
+- Updated `APP_0.1.7_REV13_VERIFICATION.md` with the actual one-check failure.
+- Added `docs/testing/APP_0.1.7_REV14_SOURCE_REVIEW.md`.
+- Added `docs/testing/APP_0.1.7_REV14_VERIFICATION.md`.
+- No external bug report was added because this defect is in the project's own verification expectation rather than an external tool/backend.
+
+### Unchanged
+
+- Breakpoint Manager UI/commands and the rev13 approximate 65/35 Breakpoints/Events starting split are unchanged.
+- Mock persistent/temporary breakpoint lifecycle and deterministic hit behavior are unchanged.
+- PS5 software breakpoint framing, slot allocation, SIGTRAP hit mapping, temporary cleanup, duplicate handling, and paused Disable/Remove staging are unchanged.
+- Rev10 guarded PS5 register transport remains unchanged.
+- Scanner, Saved Addresses, Memory Viewer, Disassembler, export, themes, settings, and ordinary target-memory paths are unchanged.
+- Individual PS5 Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the currently tested ps5debug-NG backend.
+
+## TeeKay87's Memory Engine 0.1.7.rev13 - Breakpoint Test Build and Layout Fix
+
+### Summary
+
+Revision 13 is a focused correction for the still-unverified Breakpoint Manager and Software Breakpoints feature block. Rev12 fixed the PS5 nullable compile errors that had blocked rev11, and the application itself could launch, but the packaged verification project failed to compile before the 114-check suite could execute. The breakpoint source-contract tests introduced with rev11 called an `AssertContains` helper that was not present in the test harness, producing repeated `CS0103` errors in `Program.cs`.
+
+Rev13 adds the missing shared assertion helper without changing the breakpoint test intent, adds source-contract coverage for the requested right-side Debugger layout, and changes the initial Breakpoints/Events split to approximately 65/35 as shown in the supplied runtime reference. The existing proportional splitter remains fully draggable and retains its 20/80 to 80/20 movement limits. No breakpoint transport, event mapping, plugin contract, target-memory path, or previously verified feature behavior is redesigned.
+
+### Fixed - Breakpoint Verification Harness Build
+
+- Added the missing `AssertContains(string source, string expected, string message)` helper to `tests/TeeKay87.MemoryEngine.Tests/Program.cs`.
+- The helper reuses the existing `AssertTrue` failure path and performs an ordinal string comparison through `string.Contains(..., StringComparison.Ordinal)`.
+- The existing breakpoint-manager and breakpoint-dialog source-contract assertions now compile without replacing or weakening any of the rev11/rev12 checks.
+- Kept the verification registry at **114 unique checks**. This revision repairs the test harness; it does not inflate the check count solely for the compile correction.
+- Added two assertions inside the existing **Debugger breakpoint manager source contract** registration so the requested initial Breakpoints/Events row proportions are protected against accidental regression.
+
+### Changed - Breakpoints/Events Initial Split
+
+- Changed the right-side Debugger workspace's initial star-row proportions from `2* / 3*` to `13* / 7*`.
+- The resulting starting position gives Breakpoints approximately **65%** and Events approximately **35%** of the available right-side vertical workspace, matching the supplied reference layout much more closely.
+- Reused the existing `ProportionalGridSplitter`; no second splitter implementation or fixed pixel-height behavior was introduced.
+- Preserved `MinimumPreviousRatio=0.2` and `MaximumPreviousRatio=0.8`, so the user can still drag between the established 20/80 and 80/20 relative limits.
+- Preserved both pane minimum heights, theme-aware splitter styling, adaptive window resizing, and capability-driven collapse of the Breakpoints row when a backend does not advertise `Breakpoints`.
+- The already verified left-side Threads/Registers 50/50 splitter is unchanged.
+
+### Version and Metadata
+
+- Advanced the application from `0.1.7.rev12` to `0.1.7.rev13` with feature title **Breakpoint Test Build and Layout Fix**.
+- Kept Plugin API at `2.14.0`; no public contract changed.
+- Kept Mock at `1.0.0.rev12`; no Mock production source changed.
+- Kept PS5 at `0.1.0.rev31`; no PS5 production source changed.
+- Centralized application metadata remains sourced from `AppInfo`.
+
+### Rev12 Gate A Result
+
+- Rev12 is recorded as **superseded before verification**.
+- The authoritative Windows test command failed during test-project compilation with repeated `CS0103` errors stating that `AssertContains` did not exist in the current context.
+- The errors originated in the new breakpoint source-contract methods at `Program.cs` lines 2316-2340 in the rev12 package.
+- Because the verification executable never started, rev12 has no 114/114 automated PASS and no complete breakpoint runtime acceptance.
+- The supplied rev12 runtime screenshot confirms the application/Debugger UI could launch; that does not replace the blocked automated gate.
+
+### Documentation
+
+- Updated the root README for the rev13 candidate, unchanged plugin/API versions, repaired 114-check gate, and new Breakpoints/Events default layout.
+- Updated the full development action plan so rev12 is marked superseded and rev13 remains the active breakpoint candidate.
+- Shifted later debugger milestones again: Hardware Watchpoints -> rev14, Call Stack/Frames -> rev15, Stepping/Run-to -> rev16, Integration/Export/Finalization -> rev17.
+- Updated Debugger architecture and current Mock/PS5 host context.
+- Updated the rev12 source-review and verification documents with the actual Windows test-project failure.
+- Added `docs/testing/APP_0.1.7_REV13_SOURCE_REVIEW.md`.
+- Added `docs/testing/APP_0.1.7_REV13_VERIFICATION.md`.
+
+### Unchanged
+
+- Breakpoint Manager commands and presentation remain otherwise unchanged from rev12.
+- Mock persistent/temporary breakpoint lifecycle and deterministic hit behavior are unchanged.
+- PS5 software breakpoint transport, 30-slot ownership, SIGTRAP hit mapping, duplicate handling, temporary cleanup, and paused Disable/Remove staging are unchanged.
+- Rev10 guarded PS5 register transport remains unchanged.
+- Scanner, Saved Addresses, Memory Viewer, Disassembler, export, themes, settings, and ordinary target-memory paths are unchanged.
+- Individual PS5 Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the currently tested ps5debug-NG backend.
+
+## TeeKay87's Memory Engine 0.1.7.rev12 - Breakpoint Manager Compile Fix
+
+### Summary
+
+Revision 12 is a focused build correction for the rev11 Breakpoint Manager and Software Breakpoints candidate. The first Windows build of rev11 stopped before the automated/runtime gates because nullable analysis is enabled globally and warnings are treated as errors. `Ps5DebuggerSession.cs` produced two `CS8600` diagnostics in the PS5 breakpoint lookup paths used by Remove and Enable/Disable. Visual Studio also reported `XLS0414` for `System.Object` in `MainWindow.xaml`; that XAML designer error is a downstream symptom of the referenced project not producing a valid build after the PS5 compile failure rather than an independent MainWindow change.
+
+Rev12 preserves the complete rev11 breakpoint implementation and changes only the nullable-safe lookup form, affected metadata/test expectations, and documentation required to record the failed Gate A and the correction. No breakpoint transport, slot allocation, paused cleanup, hit mapping, UI command, Mock behavior, or public Plugin API contract is redesigned.
+
+### Fixed - PS5 Nullable Breakpoint Lookup
+
+- Corrected both PS5 breakpoint dictionary lookups that previously passed a non-nullable `SoftwareBreakpointEntry` variable directly to `Dictionary<TKey,TValue>.TryGetValue`.
+- Each lookup now receives the dictionary result into an explicitly nullable local, rejects the missing/null path together, and assigns the proven non-null value to the existing non-nullable `entry` variable only after the guard succeeds.
+- The correction covers:
+  - `RemoveBreakpointAsync`;
+  - `SetBreakpointEnabledAsync`.
+- The existing unknown-breakpoint `KeyNotFoundException` behavior is unchanged.
+- No null-forgiving operator is used to suppress nullable analysis; the control flow now establishes the non-null state explicitly.
+- No new namespace dependency is required, and the existing `using` set in `Ps5DebuggerSession.cs` remains sufficient.
+
+### Version and Metadata
+
+- Advanced the application from `0.1.7.rev11` to `0.1.7.rev12` with feature title **Breakpoint Manager Compile Fix**.
+- Advanced the PS5 plugin from `0.1.0.rev30` to `0.1.0.rev31` because the corrected source is inside the PS5 plugin.
+- Kept Mock at `1.0.0.rev12`; no Mock source changed.
+- Kept Plugin API at `2.14.0`; the public breakpoint contracts are unchanged.
+- Updated the deterministic plugin-version verification expectation to PS5 `0.1.0.rev31`.
+- The verification registry remains **114 checks** because this correction does not add a new runtime feature or new public behavior.
+
+### Rev11 Gate A Result
+
+- Rev11 is now recorded as **superseded before verification**.
+- Its first clean Windows build reported:
+  - `CS8600` in `Ps5DebuggerSession.cs` at the rev11 Remove breakpoint lookup;
+  - `CS8600` in `Ps5DebuggerSession.cs` at the rev11 Enable/Disable lookup;
+  - `XLS0414` in `MainWindow.xaml` after the referenced assembly failed to build.
+- No rev11 automated/runtime PASS is claimed because Gate A did not complete.
+- The breakpoint implementation itself is carried forward unchanged into rev12 apart from the compile correction above.
+
+### Documentation
+
+- Updated the root README for the rev12 candidate and PS5 plugin `0.1.0.rev31`.
+- Updated the full development action plan so rev11 is marked superseded by the compile failure and the breakpoint feature remains the active candidate in rev12.
+- Shifted later debugger revision numbers by one: Hardware Watchpoints -> rev13, Call Stack/Frames -> rev14, Stepping/Run-to -> rev15, Integration/Export/Finalization -> rev16.
+- Updated Debugger architecture, Plugin SDK foundation, PS5 plugin/protocol documentation, and Mock host-version context.
+- Updated the rev11 verification document with its failed Gate A result.
+- Added `docs/testing/APP_0.1.7_REV12_SOURCE_REVIEW.md`.
+- Added `docs/testing/APP_0.1.7_REV12_VERIFICATION.md`.
+
+### Unchanged
+
+- Breakpoint Manager presentation and commands are unchanged from rev11.
+- Mock persistent/temporary breakpoint lifecycle and deterministic hit behavior are unchanged.
+- PS5 `CMD_DEBUG_SET_BREAKPOINT` framing, 30-slot ownership, duplicate-address handling, SIGTRAP hit mapping, temporary-breakpoint cleanup, and paused Disable/Remove staging are unchanged.
+- Rev10 guarded register transport remains unchanged.
+- Scanner, Saved Addresses, Memory Viewer, Disassembler, export, themes, settings, and ordinary target-memory paths are unchanged.
+- Individual PS5 Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the currently tested ps5debug-NG backend.
+
+## TeeKay87's Memory Engine 0.1.7.rev11 - Breakpoint Manager and Software Breakpoints
+
+### Summary
+
+Revision 11 begins the breakpoint layer of the active Debugger feature block from the fully verified `0.1.7.rev10` baseline. Rev10 passed the complete **110/110** Windows verification suite and the focused live-PS5 transport/runtime acceptance, including the correction for the rev9 optional-register stall, repeated Pause/Continue, Current Instruction -> Disassembler, Detach/Reattach, Debugger-window cleanup, and disconnect/reconnect stale-session handling.
+
+Rev11 adds the first generic Breakpoint Manager and implements software execute breakpoints through the existing neutral debugger contracts. The host still owns only generic breakpoint presentation and lifecycle actions. Backend slot allocation, ps5debug-NG command ids, INT3 behavior, and PS5-specific cleanup rules remain inside the PS5 plugin. Persistent and temporary breakpoints are first-class records so later Step Over, Step Out, and Run-to workflows can build on the same manager instead of introducing a second breakpoint mechanism.
+
+### Added - Public Breakpoint State Contract
+
+- Advanced the public Plugin API from `2.13.0` to `2.14.0`.
+- Added the optional `IDebuggerBreakpointStateService` contract for debugger backends that can enable or disable an existing breakpoint without removing the neutral breakpoint record.
+- Reused the existing neutral `DebuggerBreakpoint`, `DebuggerBreakpointRequest`, `DebuggerBreakpointKind`, `DebuggerBreakpointAccess`, and `IDebuggerBreakpointService` types introduced with the debugger foundation. No PS5 slot id, INT3 byte, packet structure, or architecture-specific breakpoint concept was added to Core or WPF.
+- Preserved the existing 2.x compatibility rule: plugins targeting an older compatible 2.x minor remain loadable, while rev11 Mock/PS5 plugins advance to API `2.14.0` because they consume the new state service.
+
+### Added - Breakpoint Manager UI
+
+- Added a capability-gated **Breakpoints** pane to the modeless Debugger workspace.
+- Added neutral breakpoint columns for Address, State, Type, Access, and Lifetime.
+- Added **Add...**, **Refresh**, **Enable**, **Disable**, **Remove**, **Remove All**, and **Disassembler...** actions.
+- Added a theme-aware breakpoint dialog for hexadecimal address entry plus a **Temporary breakpoint** option. The current host workflow creates one-byte Software/Execute requests; backend validation remains authoritative.
+- Added a destructive confirmation before **Remove All** and reused the existing application Danger button/confirmation styling.
+- Added breakpoint-to-Disassembler navigation through the existing Disassembler workspace rather than introducing a debugger-local code viewer.
+- Added host-side selection preservation by neutral breakpoint id during refresh/state changes.
+- Breakpoint controls are hidden when the active plugin does not advertise `Breakpoints`, and remain unavailable until the Debugger is attached to the current Active Target/session generation.
+
+### Added - Mock Breakpoint Backend
+
+- Advanced Mock from `1.0.0.rev11` to `1.0.0.rev12` and API `2.14.0`.
+- Mock now advertises `Breakpoints` and exposes both `IDebuggerBreakpointService` and `IDebuggerBreakpointStateService`.
+- Added deterministic software-execute breakpoint add/list/remove/enable/disable behavior with duplicate-address and finite-slot validation.
+- Added deterministic breakpoint-hit generation after Continue. A hit moves the session to Paused, updates the Main thread RIP to the breakpoint address, and emits a neutral `Breakpoint` event/stop reason.
+- Persistent Mock breakpoints remain after a hit. Temporary Mock breakpoints are removed after their first hit.
+- Existing deterministic thread/register behavior remains unchanged.
+
+### Added - PS5 Software Breakpoints
+
+- Advanced the PS5 plugin from `0.1.0.rev29` to `0.1.0.rev30` and API `2.14.0`.
+- PS5 now advertises `Breakpoints` and implements software execute breakpoints through ps5debug-NG `CMD_DEBUG_SET_BREAKPOINT` (`0xBDBB0003`).
+- The packed 16-byte request remains plugin-private: backend slot index, enabled flag, and 64-bit address.
+- Kept ps5debug-NG's **30-slot** software-breakpoint limit entirely inside the PS5 plugin. The neutral host stores only backend-issued breakpoint ids and breakpoint requests.
+- Added plugin-owned slot allocation, duplicate-address rejection, running-state enable/disable/remove, and cleanup state.
+- Added SIGTRAP breakpoint-hit classification on the existing async debugger event channel. ps5debug-NG rewinds the event RIP to the managed software-breakpoint address before delivering the interrupt packet; rev11 matches that corrected address against active managed breakpoints and emits neutral `DebuggerEventKind.Breakpoint` / `DebuggerStopReason.Breakpoint`.
+- Added first-class temporary breakpoints. A temporary breakpoint disappears from the manager after its first hit and its backend cleanup is staged for the next safe Continue boundary.
+
+### PS5 Paused-Breakpoint Safety Boundary
+
+- Source review identified an external ps5debug-NG behavior that makes immediate disable/remove unsafe while the target is already Paused. In `debug_set_breakpoint_handle`, the disable branch restores the saved byte and then calls `PT_CONTINUE` on the debugged process before returning success.
+- Rev11 therefore does **not** send a disable/remove command immediately for an enabled PS5 software breakpoint while the neutral debugger state is Paused. The UI state is updated locally and the backend disable is staged.
+- Staged disables/removals are flushed immediately before the next explicit Continue. Re-enabling a breakpoint while it is still only staged-disabled cancels that pending disable without touching the backend.
+- Slots awaiting staged cleanup are not reused. This prevents a new breakpoint from being assigned to a backend slot whose old INT3 is still installed.
+- The external behavior is documented in `docs/bug-reports/ps5debug-ng-disabling-software-breakpoint-resumes-paused-target.md`.
+- This workaround is deliberately plugin-specific and does not change the generic breakpoint contract.
+
+### Verification Coverage Added
+
+- Expanded the verification registry from **110 to 114** unique checks.
+- Added deterministic Mock breakpoint lifecycle/hit coverage, including persistent/temporary semantics and enable/disable state.
+- Added Debugger Breakpoint Manager source-contract coverage for capability gating, neutral breakpoint services, destructive confirmation, and Disassembler integration.
+- Added breakpoint-dialog source-contract coverage for the current Software/Execute/Temporary workflow.
+- Added PS5 protocol coverage for command `0xBDBB0003`, 16-byte request framing, backend slot use, running-state state changes, paused disable/remove staging, temporary-hit mapping, staged cleanup on Continue, and persistent removal.
+- The packaged **114-check** suite is a candidate gate and is not recorded as passed until run in the authoritative Windows environment.
+
+### Documentation
+
+- Updated the root README, Debugger architecture, development action plan, PS5 plugin README/protocol mapping, and Mock plugin README for rev11.
+- Updated rev10 verification documentation to record its final **110/110 PASS** and live-PS5 acceptance.
+- Added `docs/testing/APP_0.1.7_REV11_SOURCE_REVIEW.md`.
+- Added `docs/testing/APP_0.1.7_REV11_VERIFICATION.md`.
+- Added the GitHub-issue-ready external ps5debug-NG breakpoint-disable report under `docs/bug-reports/`.
+
+### Unchanged
+
+- Scanner, Saved Addresses, Memory Viewer, Disassembler, export, themes, settings, and normal target-memory behavior are not redesigned by rev11.
+- The rev10 PS5 extended-register transport guard remains intact: paused GETDBREGS is still suppressed and safe optional register groups remain isolated/bounded.
+- PS5 register rows remain read-only.
+- Individual PS5 Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the currently tested ps5debug-NG backend.
+- Hardware watchpoints, call stacks, stepping/run-to, debugger export, Find What Writes/Reads/Accesses, and Break and Trace remain later milestones.
+
+
+## TeeKay87's Memory Engine 0.1.7.rev10 - PS5 Extended Register Transport Guard
+
+### Summary
+
+Revision 10 is a focused correction to the live-PS5 failure found while accepting rev9. Rev9's automated suite passed all **108/108** checks and its focused Mock splitter, extended-register, and lifecycle gates passed. During live PS5 Gate E, Attach and global Pause succeeded, the target stopped, the UI remained responsive, and thread enumeration completed, but the register refresh remained pending with `Registers 0` and no instruction pointer.
+
+The source review performed for this correction identified two separate safety requirements. First, optional extended-register responses must never be allowed to leave the reusable debugger-owner command stream waiting indefinitely or partially framed. Second, the current ps5debug-NG `GETDBREGS` handler is unsafe for the already-paused state used by the Registers pane: the debugger Pause path consumes the stop notification, `is_process_stopped()` can then report false on its later non-blocking `wait4()`, and `GETDBREGS` can send a second `SIGSTOP` followed by a blocking `wait4()` while the process is already stopped. Because debugger commands execute behind shared backend locks, that condition can also prevent Continue/Detach from progressing.
+
+Rev10 therefore keeps the fully verified 176-byte general-register transport unchanged, moves safe optional reads to disposable bounded probe connections, gates those probes on negotiated backend metadata, and deliberately suppresses paused `GETDBREGS` until the external backend behavior is corrected and hardware-verified.
+
+### Changed
+
+- Advanced application metadata from `0.1.7.rev9` to `0.1.7.rev10` with feature title **PS5 Extended Register Transport Guard**.
+- Advanced the PS5 plugin from `0.1.0.rev28` to `0.1.0.rev29`; Plugin API remains `2.13.0`.
+- Kept Mock at `1.0.0.rev11`; no Mock production behavior was changed by this correction.
+- Preserved mandatory PS5 `GETREGS` (`0xBDBB0008`) on the established debugger-owner command connection. Its 176-byte general-register mapping and semantic RIP/RSP/RBP roles are unchanged from the fully verified rev8 baseline.
+- Added explicit extended-register eligibility derived from the ps5debug-NG connection metadata already collected during connection. Automatic optional reads require protocol version `1.3` or newer and capability level `1.0` or newer; a backend without that advertisement uses the verified general-register snapshot only.
+- Reworked optional `GETFPREGS` (`0xBDBB000A`) and `GETFSGSBASE` (`0xBDBB000E`) reads so each runs through its own short-lived ps5debug-NG command connection instead of the debugger-owner stream.
+- Added a two-second linked timeout to each disposable optional probe. Timeout, socket/connection failure, ordinary backend error/data-null status, or a probe-local malformed/truncated response returns that optional group as unavailable instead of blocking the complete Registers refresh.
+- Kept caller cancellation distinct from optional fallback: user/session cancellation still propagates and is not converted into an unsupported-group result.
+- Added a per-attached-session unavailable-command cache. Once an optional command fails or times out, that command is not retried on every later Register Refresh in the same attachment; independently successful optional groups continue to refresh normally.
+- Deliberately stopped issuing `GETDBREGS` (`0xBDBB000C`) from the paused Registers workflow. Current ps5debug-NG can block in that handler when Pause has already consumed the stop status, so PS5 Debug rows are temporarily omitted from paused snapshots rather than risking a backend-wide debugger stall. The rev9 plugin-private debug-register decoder is retained for future safe event/backend use, but no paused command is sent.
+- A fully successful current PS5 extended snapshot therefore contains **76 rows**: 26 general rows, 48 FPU/SIMD rows, and 2 FS/GS-base rows. The six DR rows from rev9 are not requested in rev10.
+- Kept all PS5 register rows read-only. No SETREGS, SETFPREGS, SETDBREGS, or FS/GS write path was enabled.
+- Retained rev9's proportional Threads/Registers splitter and wide neutral register mapping without host/Core architecture-specific changes.
+
+### Verification coverage added
+
+- Expanded the verification registry from **108 to 110** unique checks.
+- Added a PS5 extended-register capability-gating test that omits the backend capability suffix, verifies a 26-row general-only snapshot, confirms that no optional register probe is sent, and confirms Continue/Detach remain functional.
+- Added a PS5 optional-register timeout-isolation test that intentionally leaves `GETFPREGS` unanswered, requires the register refresh to complete within a bounded interval, verifies that the 26 general rows plus the healthy 2-row FS/GS group remain available, verifies the timed-out FPU/SIMD group is not retried in the same attachment, verifies FS/GS continues to refresh, verifies **zero paused GETDBREGS traffic**, and checks that Continue/Detach on the owner debugger session remain usable.
+- Updated the existing PS5 register-service regression to require a 76-row general/FPU/SIMD/FS-GS snapshot and to reject any paused GETDBREGS request.
+- Extended the deterministic ps5debug-NG protocol fixture so debugger-owner traffic and disposable optional probe connections can be exercised independently, including a deliberately silent optional-register response.
+- The new **110-check** suite is packaged but is not marked passed until it is run in the authoritative Windows environment.
+
+### Documentation
+
+- Recorded the rev9 acceptance result: **108/108 PASS**, focused Mock Gates B-D PASS, and live PS5 Gate E FAIL at the optional extended-register refresh boundary.
+- Added rev10 source-review and verification documents under `docs/testing/`.
+- Added `docs/bug-reports/ps5debug-ng-getdbregs-can-hang-after-pause.md`, a GitHub-issue-ready external backend report that documents the stopped-target `GETDBREGS` wait path without referencing this project.
+- Updated the development plan, Debugger architecture, PS5 plugin README/protocol mapping, Mock README, and root README for the corrected rev10 transport boundary and shifted the remaining `0.1.7` debugger milestones by one revision.
+
+### Unchanged
+
+- Core and the public Plugin SDK are unchanged; Plugin API remains `2.13.0`.
+- Scanner, Saved Addresses, Memory Viewer, Disassembler, export, theme, settings, and normal target-memory behavior are outside this correction and remain unchanged.
+- PS5 individual Thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the already tested ps5debug-NG path and is not reopened by rev10.
+
+## TeeKay87's Memory Engine 0.1.7.rev9 - Extended Register State and Debugger Pane Splitter
+
+### Baseline and Revision Scope
+
+- Advanced the application from `0.1.7.rev8` to `0.1.7.rev9` while remaining inside the active `0.1.7` Debugger feature block.
+- Rev8 is now the verified baseline: the Windows verification suite passed **107/107**, and the complete focused Mock/live-PS5 Registers and Stop Context acceptance passed all **11/11** runtime steps. This includes register presentation/refresh/editing in Mock, live PS5 general-register snapshots, Pause/Continue stop-context refresh, Current Instruction -> Disassembler, PS5 read-only safety, and debugger transport/cleanup regression coverage.
+- Individual PS5 thread Suspend/Resume remains **IMPLEMENTED / BACKEND BLOCKED** on the currently tested ps5debug-NG backend and is intentionally not reopened by rev9.
+- Rev9 implements the next ordered Debugger milestone: backend-provided extended register groups plus the requested resizable Threads/Registers layout. Breakpoints, watchpoints, call stacks, and stepping remain later revisions.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev9 - Extended Register State and Debugger Pane Splitter`.
+
+### Added - Extended Register State
+
+- Reused the existing architecture-neutral `DebuggerRegister` model and Plugin API `2.13.0`; no new public API revision was required because the current model already supports arbitrary bit widths, neutral groups, semantic roles, read-only/writable metadata, and unsigned little-endian values.
+- Advanced the Mock plugin from `1.0.0.rev10` to `1.0.0.rev11`. Its existing deterministic writable 64-bit General/Control rows are unchanged, while the paused-thread snapshot now also exposes deterministic read-only 80-bit floating-point, 128-bit SIMD, 256-bit SIMD, and debug-register fixtures. This exercises wide-value presentation without assigning a real CPU architecture to the Mock backend.
+- Advanced the PS5 plugin from `0.1.0.rev27` to `0.1.0.rev28` and added plugin-private support for the current ps5debug-NG extended register commands:
+  - `CMD_DEBUG_GET_FPREGS` / `0xBDBB000A`: 832-byte FPU/YMM state;
+  - `CMD_DEBUG_GET_DBREGS` / `0xBDBB000C`: 128-byte debug-register state;
+  - `CMD_DEBUG_GET_FSGSBASE` / `0xBDBB000E`: 16-byte FS/GS base state.
+- Added plugin-private decoding for x87 control/state fields, `ST0`-`ST7`, `XMM0`-`XMM15`, reconstructed `YMM0`-`YMM15`, `DR0`-`DR3`, `DR6`, `DR7`, `FSBASE`, and `GSBASE`. Reserved debug-register slots are not exposed.
+- Kept all x86-64/FreeBSD offsets and native wire layouts inside the PS5 plugin. Core, Plugin SDK, and WPF continue to consume only neutral register rows and do not gain architecture-specific register types.
+- PS5 extended-register reads are additive to the already verified 176-byte general-register snapshot. If an optional extended command returns the backend's ordinary error/data-null status, the corresponding group is omitted while the mandatory general-register snapshot remains usable.
+- PS5 register writing remains disabled. Rev9 does not expose SETREGS, SETFPREGS, SETDBREGS, or FS/GS write commands merely because related backend handlers exist.
+
+### Added - Debugger Threads/Registers Splitter
+
+- Replaced the fixed 210-unit Registers-pane height with the existing shared `ProportionalGridSplitter` used elsewhere in the application.
+- Threads and Registers now begin at an equal `*`/`*` **50/50** share of the available left-side Debugger height.
+- The splitter is horizontal, uses the existing theme-aware row-splitter style, and preserves the established visual spacing/handle presentation.
+- Applied relative **20/80 to 80/20** movement limits through the shared proportional splitter, plus minimum usable pane heights. The limits therefore adapt to the actual Debugger window height rather than relying on fixed maximum pixel values.
+- Both panes grow and shrink with the Debugger window after resizing, while the user's current star ratio is retained.
+- When a backend does not advertise `RegisterAccess`, the splitter collapses and the register row contributes no unused height, preserving the existing thread-only layout.
+
+### Verification Coverage
+
+- Expanded the deterministic Mock register verification to require the new 80/128/256-bit fixtures while preserving the established general-register write/read-back test.
+- Expanded the PS5 protocol fixture and register test to validate GETREGS plus GETFPREGS, GETDBREGS, and GETFSGSBASE request routing, exact response sizes, FPU/x87 offsets, XMM/YMM assembly, debug-register slot filtering, FS/GS base mapping, read-only gating, and absence of write-generated backend traffic.
+- Added a dedicated Debugger Threads/Registers splitter source-contract check covering reuse of `ProportionalGridSplitter`, relative 20/80 limits, equal star-sized baseline, capability-driven register-row collapse, and removal of the old fixed `Height="210"` layout.
+- The verification registry now contains **108 unique checks**. No existing check was removed or disabled.
+
+### Documentation
+
+- Synchronized the Debugger architecture document with the current revision order after rev8's corrective source-contract revision shifted the remaining milestones.
+- Updated the full development action plan so rev8 is recorded as fully verified and rev9 is the active Extended Register State / pane-splitter candidate.
+- Updated the PS5 protocol mapping and plugin documentation with the extended register commands, block sizes, plugin-private mappings, optional-group fallback behavior, and continued read-only policy.
+- Updated the Mock plugin documentation with its new neutral wide-register fixtures.
+- Added rev9 source-review and focused verification guidance under `docs/testing/`.
+
+### Verification Boundary
+
+- No Windows/.NET build or runtime result is claimed by this package. The next authoritative automated gate is:
+
+```text
+All 108 checks passed.
+```
+
+- After the Windows gate passes, focused runtime/UI testing should verify the Debugger's default 50/50 split, dragging/resizing limits, Mock wide-register display/selection stability, and live PS5 extended register enumeration/refresh/read-only behavior.
+
+## TeeKay87's Memory Engine 0.1.7.rev8 - Debugger Workspace Source Contract Fix
+
+### Baseline and Revision Scope
+
+- Advanced the application from `0.1.7.rev7` to `0.1.7.rev8` after the packaged rev7 Windows verification repeatedly produced the same single failure: **106/107 checks passed**, with only `Debugger workspace command and event source contract` failing.
+- Traced the failure to the verification source-contract itself rather than to Debugger target-generation behavior. The rev7 production code still captures `plugin.ConnectionGeneration`, passes the captured value into `DebuggerViewModel`, and uses the same captured generation when validating debugger-to-Disassembler navigation.
+- Rev7 changed the constructor expression in `MainWindow.xaml.cs` from explicit `new DebuggerViewModel(...)` syntax to target-typed `new(...)`. The existing source-contract check still required the literal text `new DebuggerViewModel`, so it reported a false regression even though the connection-generation argument remained present and active.
+- Rev8 is intentionally corrective and narrow. No debugger lifecycle behavior, register implementation, plugin transport, Core logic, Plugin SDK contract, Mock backend, PS5 backend, scanner, Memory Viewer, Disassembler, export path, or theme behavior is changed.
+- Updated centralized `AppInfo` metadata to `0.1.7.rev8 - Debugger Workspace Source Contract Fix`.
+
+### Fixed — Debugger Workspace Verification Contract
+
+- Replaced the brittle literal `new DebuggerViewModel` source assertion with a constructor-binding check that accepts both explicit constructor syntax and C# target-typed `new(...)` syntax.
+- Strengthened the same check to require the exact generation capture `long connectionGeneration = plugin.ConnectionGeneration;` and to require that `plugin`, `targetProcess`, and the captured `connectionGeneration` are passed to the `DebuggerViewModel` constructor in order.
+- Kept the failure message and the surrounding target-identity/coordinator assertions intact so the check still fails if the debugger window is actually disconnected from the current target generation.
+- The verification registry remains at **107 unique checks**. No test was removed, skipped, renamed, or weakened to make the Windows gate pass.
+
+### Documentation Corrections
+
+- Added rev8 source-review and verification documents under `docs/testing/`.
+- Recorded rev7 as superseded after its repeatable **106/107** Windows gate result and documented the exact false-negative cause.
+- Corrected stale current-build/current-verification references in `README.md` that still pointed to rev5 despite later debugger revisions.
+- Updated the full development action plan so rev8 is the corrective source-contract revision and the previously planned Extended Register State milestone moves to rev9, with subsequent debugger milestones shifted by one revision.
+- Plugin versions remain unchanged because no plugin source changed: Mock `1.0.0.rev10`, PS5 `0.1.0.rev27`, Plugin API `2.13.0`.
+
+### Verification Boundary
+
+- Rev8 still requires the user's Windows/.NET gate. The expected result remains:
+
+```text
+All 107 checks passed.
+```
+
+- After that gate passes, the focused Registers and Stop Context runtime/hardware acceptance from the rev7 candidate must still be completed against the rev8 package. The corrective revision does not treat the previously failed source-string assertion as runtime verification of the register feature.
+
 ## TeeKay87's Memory Engine 0.1.7.rev7 - Registers and Stop Context
 
 ### Baseline and Revision Scope

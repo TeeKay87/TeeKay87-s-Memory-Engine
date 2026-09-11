@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Diagnostics.CodeAnalysis;
 using System.Linq;
+using System.Threading.Tasks;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
@@ -34,10 +36,13 @@ public partial class MainWindow : Window
     }
 
     private readonly ApplicationSettingsStore _settingsStore;
+    private readonly ToolWindowManager _toolWindowManager = new();
     private readonly ConfirmationDialogService _confirmationDialogService = new();
     private readonly DataExportDialogService _dataExportDialogService = new();
     private readonly ScanResultStorageManager? _scanResultStorageManager;
     private readonly string _storageStartupError;
+    private bool _toolWindowShutdownInProgress;
+    private bool _toolWindowShutdownCompleted;
     private readonly Dictionary<DataGridRow, (PluginViewModel Owner, ScanResultViewModel Result)>
         _visibleScanResultRows = new();
 
@@ -108,6 +113,51 @@ public partial class MainWindow : Window
         return element.ActualWidth + element.Margin.Left + element.Margin.Right;
     }
 
+    protected override void OnClosing(CancelEventArgs e)
+    {
+        if (_toolWindowShutdownCompleted || _toolWindowManager.Count == 0)
+        {
+            base.OnClosing(e);
+            return;
+        }
+
+        e.Cancel = true;
+        base.OnClosing(e);
+
+        if (_toolWindowShutdownInProgress)
+        {
+            return;
+        }
+
+        _toolWindowShutdownInProgress = true;
+        IsEnabled = false;
+        _ = CompleteToolWindowShutdownAsync();
+    }
+
+    private async Task CompleteToolWindowShutdownAsync()
+    {
+        try
+        {
+            await _toolWindowManager.CloseAllAsync().ConfigureAwait(true);
+        }
+        catch (Exception exception)
+        {
+            System.Diagnostics.Trace.TraceError(
+                $"Tool-window shutdown cleanup reported an error: {exception}");
+        }
+        finally
+        {
+            _toolWindowShutdownCompleted = true;
+            _toolWindowShutdownInProgress = false;
+
+            // Always queue the final close. CloseAllAsync can complete synchronously
+            // when every tool is already detached/disposed; calling Close() directly
+            // from the original OnClosing stack would re-enter WPF while the window is
+            // still processing that close request.
+            _ = Dispatcher.BeginInvoke(new Action(Close));
+        }
+    }
+
     protected override void OnClosed(EventArgs e)
     {
         foreach ((PluginViewModel owner, ScanResultViewModel result) in _visibleScanResultRows.Values)
@@ -155,14 +205,27 @@ public partial class MainWindow : Window
             }
         }
 
+        bool CanOpenMemoryViewerFromDebugger()
+        {
+            return plugin.ConnectionGeneration == connectionGeneration &&
+                   plugin.CanOpenMemoryViewerForTarget(targetProcess);
+        }
+
+        void OpenMemoryViewerFromDebugger(ulong address)
+        {
+            if (CanOpenMemoryViewerFromDebugger())
+            {
+                OpenMemoryViewer(plugin, targetProcess, address);
+            }
+        }
+
         DebuggerWindow window = new(
             viewModel,
             CanOpenDisassemblerFromDebugger,
-            OpenDisassemblerFromDebugger)
-        {
-            Owner = this
-        };
-        window.Show();
+            OpenDisassemblerFromDebugger,
+            CanOpenMemoryViewerFromDebugger,
+            OpenMemoryViewerFromDebugger);
+        _toolWindowManager.Show(window, this);
         e.Handled = true;
     }
 
@@ -286,8 +349,9 @@ public partial class MainWindow : Window
     private void ScanResultsDataGrid_ContextMenuOpening(object sender, ContextMenuEventArgs e)
     {
         if (sender is not DataGrid dataGrid ||
-            !TryPrepareRowContextMenu<ScanResultViewModel>(dataGrid, out _) ||
-            !TryGetSelectedPlugin(out PluginViewModel? plugin))
+            !TryPrepareRowContextMenu<ScanResultViewModel>(dataGrid, out ScanResultViewModel? scanResult) ||
+            !TryGetSelectedPlugin(out PluginViewModel? plugin) ||
+            plugin.ActiveProcess is not TargetProcessViewModel activeProcess)
         {
             e.Handled = true;
             return;
@@ -297,6 +361,13 @@ public partial class MainWindow : Window
             dataGrid.ContextMenu,
             "OpenDisassembler",
             plugin.CanOpenDisassembler);
+
+        UpdateDebuggerAddressActionAvailability(
+            dataGrid.ContextMenu,
+            plugin,
+            activeProcess.Process,
+            scanResult.Result.Address,
+            scanResult.Result.CurrentValue.Size);
     }
 
     private void SavedAddressesDataGrid_ContextMenuOpening(object sender, ContextMenuEventArgs e)
@@ -314,6 +385,13 @@ public partial class MainWindow : Window
             dataGrid.ContextMenu,
             "OpenDisassembler",
             plugin.CanOpenDisassemblerForTarget(savedTarget));
+
+        UpdateDebuggerAddressActionAvailability(
+            dataGrid.ContextMenu,
+            plugin,
+            savedTarget,
+            savedAddress.Address,
+            savedAddress.ValueSize);
     }
 
     private static bool TryPrepareRowContextMenu<TItem>(
@@ -407,6 +485,40 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private async void ScanResultAddBreakpointMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ScanResultViewModel scanResult } ||
+            !TryGetSelectedPlugin(out PluginViewModel? plugin) ||
+            plugin.ActiveProcess is not TargetProcessViewModel activeProcess)
+        {
+            return;
+        }
+
+        await AddDebuggerAddressActionAsync(
+                plugin,
+                activeProcess.Process,
+                CreateSoftwareExecuteBreakpointRequest(scanResult.Result.Address))
+            .ConfigureAwait(true);
+        e.Handled = true;
+    }
+
+    private async void ScanResultAddWatchpointMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: ScanResultViewModel scanResult } ||
+            !TryGetSelectedPlugin(out PluginViewModel? plugin) ||
+            plugin.ActiveProcess is not TargetProcessViewModel activeProcess)
+        {
+            return;
+        }
+
+        await AddDebuggerAddressActionAsync(
+                plugin,
+                activeProcess.Process,
+                CreateWriteWatchpointRequest(scanResult.Result.Address, scanResult.Result.CurrentValue.Size))
+            .ConfigureAwait(true);
+        e.Handled = true;
+    }
+
     private void SavedAddressOpenMemoryViewerMenuItem_Click(object sender, RoutedEventArgs e)
     {
         if (sender is not MenuItem { DataContext: SavedAddressViewModel savedAddress } ||
@@ -441,6 +553,99 @@ public partial class MainWindow : Window
         e.Handled = true;
     }
 
+    private async void SavedAddressAddBreakpointMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: SavedAddressViewModel savedAddress } ||
+            !TryGetSelectedPlugin(out PluginViewModel? plugin))
+        {
+            return;
+        }
+
+        await AddDebuggerAddressActionAsync(
+                plugin,
+                CreateSavedAddressTarget(savedAddress),
+                CreateSoftwareExecuteBreakpointRequest(savedAddress.Address))
+            .ConfigureAwait(true);
+        e.Handled = true;
+    }
+
+    private async void SavedAddressAddWatchpointMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is not MenuItem { DataContext: SavedAddressViewModel savedAddress } ||
+            !TryGetSelectedPlugin(out PluginViewModel? plugin))
+        {
+            return;
+        }
+
+        await AddDebuggerAddressActionAsync(
+                plugin,
+                CreateSavedAddressTarget(savedAddress),
+                CreateWriteWatchpointRequest(savedAddress.Address, savedAddress.ValueSize))
+            .ConfigureAwait(true);
+        e.Handled = true;
+    }
+
+    private void UpdateDebuggerAddressActionAvailability(
+        ContextMenu? contextMenu,
+        PluginViewModel plugin,
+        TargetProcess targetProcess,
+        ulong address,
+        int valueSize)
+    {
+        DebuggerViewModel? debugger = FindAttachedDebugger(plugin, targetProcess);
+        bool canAddBreakpoint = debugger?.ValidateAddressActionRequest(
+            CreateSoftwareExecuteBreakpointRequest(address)).IsValid == true;
+        bool canAddWatchpoint = debugger?.ValidateAddressActionRequest(
+            CreateWriteWatchpointRequest(address, valueSize)).IsValid == true;
+
+        ContextMenuUtilities.SetItemEnabled(contextMenu, "AddBreakpoint", canAddBreakpoint);
+        ContextMenuUtilities.SetItemEnabled(contextMenu, "AddWatchpoint", canAddWatchpoint);
+    }
+
+    private async Task AddDebuggerAddressActionAsync(
+        PluginViewModel plugin,
+        TargetProcess targetProcess,
+        DebuggerBreakpointRequest request)
+    {
+        DebuggerViewModel? debugger = FindAttachedDebugger(plugin, targetProcess);
+        if (debugger is null || !debugger.ValidateAddressActionRequest(request).IsValid)
+        {
+            return;
+        }
+
+        await debugger.AddBreakpointAsync(request).ConfigureAwait(true);
+    }
+
+    private DebuggerViewModel? FindAttachedDebugger(
+        PluginViewModel plugin,
+        TargetProcess targetProcess)
+    {
+        ArgumentNullException.ThrowIfNull(plugin);
+        ArgumentNullException.ThrowIfNull(targetProcess);
+
+        long connectionGeneration = plugin.ConnectionGeneration;
+        return _toolWindowManager.FindDataContext<DebuggerViewModel>(debugger =>
+            debugger.IsAttachedTo(plugin, targetProcess, connectionGeneration));
+    }
+
+    private static DebuggerBreakpointRequest CreateSoftwareExecuteBreakpointRequest(ulong address)
+    {
+        return new DebuggerBreakpointRequest(
+            address,
+            1,
+            DebuggerBreakpointKind.Software,
+            DebuggerBreakpointAccess.Execute);
+    }
+
+    private static DebuggerBreakpointRequest CreateWriteWatchpointRequest(ulong address, int size)
+    {
+        return new DebuggerBreakpointRequest(
+            address,
+            size,
+            DebuggerBreakpointKind.Hardware,
+            DebuggerBreakpointAccess.Write);
+    }
+
     private static TargetProcess CreateSavedAddressTarget(SavedAddressViewModel savedAddress)
     {
         ArgumentNullException.ThrowIfNull(savedAddress);
@@ -463,11 +668,8 @@ public partial class MainWindow : Window
             plugin,
             targetProcess,
             plugin.ConnectionGeneration,
-            address))
-        {
-            Owner = this
-        };
-        window.Show();
+            address));
+        _toolWindowManager.Show(window, this);
     }
 
     private void OpenMemoryViewer(
@@ -504,11 +706,8 @@ public partial class MainWindow : Window
         MemoryViewerWindow window = new(
             viewModel,
             CanOpenDisassemblerFromViewer,
-            OpenDisassemblerFromViewer)
-        {
-            Owner = this
-        };
-        window.Show();
+            OpenDisassemblerFromViewer);
+        _toolWindowManager.Show(window, this);
     }
 
     private async void SavedAddressFrozenCheckBox_Click(object sender, RoutedEventArgs e)

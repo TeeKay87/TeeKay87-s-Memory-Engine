@@ -47,8 +47,6 @@
                     <RowDefinition Height="Auto" />
                     <RowDefinition Height="12" />
                     <RowDefinition Height="Auto" />
-                    <RowDefinition Height="10" />
-                    <RowDefinition Height="Auto" />
                 </Grid.RowDefinitions>
 
                 <Grid Grid.Row="0">
@@ -193,10 +191,6 @@
                     </StackPanel>
                 </Grid>
 
-                <TextBlock Grid.Row="6"
-                           Text="The visible range is decoded as one continuous stream. The origin highlights the decoded instruction that contains the requested address. On variable-length architectures, the first rows may still be best-effort because the context window can begin in the middle of an instruction."
-                           TextWrapping="Wrap"
-                           Style="{StaticResource MutedTextStyle}" />
             </Grid>
         </Border>
 
@@ -279,6 +273,7 @@
                             </Style>
                         </DataGridTextColumn.ElementStyle>
                     </DataGridTextColumn>
+                    <DataGridTextColumn Header="Markers" Width="170" Binding="{Binding Markers}" />
                     <DataGridTemplateColumn Header="Instruction" Width="*" SortMemberPath="Instruction">
                         <DataGridTemplateColumn.CellTemplate>
                             <DataTemplate>

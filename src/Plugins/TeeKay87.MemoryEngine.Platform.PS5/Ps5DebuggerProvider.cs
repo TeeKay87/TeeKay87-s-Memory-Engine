@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using TeeKay87.MemoryEngine.PluginSdk.Contracts;
@@ -11,18 +12,28 @@ internal sealed class Ps5DebuggerProvider : IDebuggerProvider, IAsyncDisposable
     private readonly object _gate = new();
     private readonly string _host;
     private readonly int _port;
+    private readonly bool _supportsExtendedRegisterReads;
+    private readonly Func<TargetProcess, IReadOnlyList<MemoryRegion>?> _getCachedMemoryRegions;
     private Ps5DebuggerSession? _activeSession;
     private bool _attachInProgress;
     private bool _disposed;
 
-    public Ps5DebuggerProvider(string host, int port)
+    public Ps5DebuggerProvider(
+        string host,
+        int port,
+        Ps5DebugConnectionInfo connectionInfo,
+        Func<TargetProcess, IReadOnlyList<MemoryRegion>?> getCachedMemoryRegions)
     {
+        ArgumentNullException.ThrowIfNull(connectionInfo);
+        ArgumentNullException.ThrowIfNull(getCachedMemoryRegions);
         _host = string.IsNullOrWhiteSpace(host)
             ? throw new ArgumentException("A debugger host is required.", nameof(host))
             : host;
         _port = port is >= 1 and <= 65535
             ? port
             : throw new ArgumentOutOfRangeException(nameof(port));
+        _supportsExtendedRegisterReads = connectionInfo.SupportsExtendedDebuggerRegisterReads;
+        _getCachedMemoryRegions = getCachedMemoryRegions;
     }
 
     public async Task<IDebuggerSession> AttachAsync(
@@ -47,7 +58,14 @@ internal sealed class Ps5DebuggerProvider : IDebuggerProvider, IAsyncDisposable
         try
         {
             Ps5DebuggerSession session = await Ps5DebuggerSession
-                .AttachAsync(_host, _port, process, ReleaseSession, cancellationToken)
+                .AttachAsync(
+                    _host,
+                    _port,
+                    process,
+                    _supportsExtendedRegisterReads,
+                    _getCachedMemoryRegions,
+                    ReleaseSession,
+                    cancellationToken)
                 .ConfigureAwait(false);
 
             bool providerDisposed;

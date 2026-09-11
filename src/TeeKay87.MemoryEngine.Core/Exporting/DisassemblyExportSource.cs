@@ -6,6 +6,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using TeeKay87.MemoryEngine.Core.Disassembly;
 using TeeKay87.MemoryEngine.PluginSdk.Models;
 
 namespace TeeKay87.MemoryEngine.Core.Exporting;
@@ -14,6 +15,7 @@ public static class DisassemblyExportColumnIds
 {
     public const string Address = "address";
     public const string Bytes = "bytes";
+    public const string Markers = "markers";
     public const string Instruction = "instruction";
     public const string Mnemonic = "mnemonic";
     public const string Operands = "operands";
@@ -32,6 +34,7 @@ public sealed class DisassemblyExportSource : IExportDataSource
     {
         new(DisassemblyExportColumnIds.Address, "Address"),
         new(DisassemblyExportColumnIds.Bytes, "Bytes"),
+        new(DisassemblyExportColumnIds.Markers, "Markers"),
         new(DisassemblyExportColumnIds.Instruction, "Instruction"),
         new(DisassemblyExportColumnIds.Mnemonic, "Mnemonic"),
         new(DisassemblyExportColumnIds.Operands, "Operands"),
@@ -50,17 +53,31 @@ public sealed class DisassemblyExportSource : IExportDataSource
         IEnumerable<DisassembledInstruction> instructions,
         MemoryRegion region,
         ulong? moduleBaseAddress,
-        IReadOnlyDictionary<string, ExportCellValue> metadata)
+        IReadOnlyDictionary<string, ExportCellValue> metadata,
+        IEnumerable<DisassemblyMarker>? markers = null)
     {
         ArgumentNullException.ThrowIfNull(instructions);
         ArgumentNullException.ThrowIfNull(region);
         Metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
 
+        IReadOnlyDictionary<ulong, string> markersByAddress = (markers ?? Enumerable.Empty<DisassemblyMarker>())
+            .GroupBy(marker => marker.Address)
+            .ToDictionary(
+                group => group.Key,
+                group => string.Join(
+                    " · ",
+                    group.Select(marker => marker.Text)
+                        .Where(text => !string.IsNullOrWhiteSpace(text))
+                        .Distinct(StringComparer.Ordinal)));
+
         _rows = instructions
             .Select(instruction => DisassemblyExportRow.FromInstruction(
                 instruction,
                 region,
-                moduleBaseAddress))
+                moduleBaseAddress,
+                markersByAddress.TryGetValue(instruction.Address, out string? markerText)
+                    ? markerText
+                    : null))
             .ToArray();
     }
 
@@ -121,6 +138,7 @@ public sealed class DisassemblyExportSource : IExportDataSource
     private sealed record DisassemblyExportRow(
         string Address,
         string Bytes,
+        string? Markers,
         string Instruction,
         string Mnemonic,
         string Operands,
@@ -135,7 +153,8 @@ public sealed class DisassemblyExportSource : IExportDataSource
         public static DisassemblyExportRow FromInstruction(
             DisassembledInstruction instruction,
             MemoryRegion region,
-            ulong? moduleBaseAddress)
+            ulong? moduleBaseAddress,
+            string? markers)
         {
             ArgumentNullException.ThrowIfNull(instruction);
             ArgumentNullException.ThrowIfNull(region);
@@ -157,6 +176,7 @@ public sealed class DisassemblyExportSource : IExportDataSource
             return new DisassemblyExportRow(
                 $"0x{instruction.Address:X}",
                 FormatHex(instruction.RawBytes.Span),
+                markers,
                 instructionText,
                 instruction.Mnemonic,
                 instruction.Operands,
@@ -175,6 +195,7 @@ public sealed class DisassemblyExportSource : IExportDataSource
             {
                 DisassemblyExportColumnIds.Address => ExportCellValue.FromString(Address),
                 DisassemblyExportColumnIds.Bytes => ExportCellValue.FromString(Bytes),
+                DisassemblyExportColumnIds.Markers => ExportCellValue.FromString(Markers),
                 DisassemblyExportColumnIds.Instruction => ExportCellValue.FromString(Instruction),
                 DisassemblyExportColumnIds.Mnemonic => ExportCellValue.FromString(Mnemonic),
                 DisassemblyExportColumnIds.Operands => ExportCellValue.FromString(Operands),

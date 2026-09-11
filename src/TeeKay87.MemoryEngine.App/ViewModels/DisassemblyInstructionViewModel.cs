@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Text;
+using TeeKay87.MemoryEngine.Core.Disassembly;
 using TeeKay87.MemoryEngine.PluginSdk.Models;
 
 namespace TeeKay87.MemoryEngine.App.ViewModels;
@@ -10,7 +12,8 @@ public sealed class DisassemblyInstructionViewModel
 {
     public DisassemblyInstructionViewModel(
         DisassembledInstruction instruction,
-        ulong requestedAddress)
+        ulong requestedAddress,
+        IEnumerable<DisassemblyMarker>? markers = null)
     {
         ArgumentNullException.ThrowIfNull(instruction);
 
@@ -19,6 +22,12 @@ public sealed class DisassemblyInstructionViewModel
         Address = $"0x{instruction.Address:X}";
         RawBytes = instruction.RawBytes;
         Bytes = FormatHex(instruction.RawBytes.Span);
+        Markers = string.Join(
+            " · ",
+            (markers ?? Enumerable.Empty<DisassemblyMarker>())
+                .Select(marker => marker.Text)
+                .Where(text => !string.IsNullOrWhiteSpace(text))
+                .Distinct(StringComparer.Ordinal));
         Mnemonic = instruction.Mnemonic;
         Operands = instruction.Operands;
         Instruction = string.IsNullOrWhiteSpace(instruction.Operands)
@@ -45,6 +54,8 @@ public sealed class DisassemblyInstructionViewModel
     public ReadOnlyMemory<byte> RawBytes { get; }
 
     public string Bytes { get; }
+
+    public string Markers { get; }
 
     public string Mnemonic { get; }
 

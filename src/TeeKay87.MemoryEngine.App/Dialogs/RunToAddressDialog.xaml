@@ -1,0 +1,60 @@
+<Window x:Class="TeeKay87.MemoryEngine.App.Dialogs.RunToAddressDialog"
+        x:ClassModifier="internal"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        xmlns:input="clr-namespace:TeeKay87.MemoryEngine.App.Input"
+        Title="Run to Address"
+        Width="500"
+        MinWidth="460"
+        SizeToContent="Height"
+        ResizeMode="NoResize"
+        WindowStartupLocation="CenterOwner"
+        ShowInTaskbar="False"
+        Background="{DynamicResource WindowBackgroundBrush}"
+        Foreground="{DynamicResource PrimaryTextBrush}"
+        Loaded="RunToAddressDialog_Loaded">
+    <Grid Margin="18">
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="8" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="12" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="6" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="18" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <TextBlock Grid.Row="0"
+                   Text="Run to Address"
+                   Style="{StaticResource SectionTitleTextStyle}" />
+        <TextBlock Grid.Row="2"
+                   Text="Enter the hexadecimal instruction address where execution should stop."
+                   TextWrapping="Wrap"
+                   Style="{StaticResource MutedTextStyle}" />
+        <TextBox x:Name="AddressTextBox"
+                 Grid.Row="4"
+                 FontFamily="Consolas"
+                 input:TextBoxInputFilter.Mode="HexAddress" />
+        <TextBlock x:Name="ValidationTextBlock"
+                   Grid.Row="6"
+                   Foreground="{DynamicResource ErrorTextBrush}"
+                   TextWrapping="Wrap" />
+
+        <StackPanel Grid.Row="8"
+                    Orientation="Horizontal"
+                    HorizontalAlignment="Right">
+            <Button MinWidth="86"
+                    Margin="0,0,8,0"
+                    IsCancel="True"
+                    Style="{StaticResource DangerButtonStyle}"
+                    Content="Cancel" />
+            <Button MinWidth="86"
+                    IsDefault="True"
+                    Style="{StaticResource PrimaryButtonStyle}"
+                    Click="RunButton_Click"
+                    Content="Run" />
+        </StackPanel>
+    </Grid>
+</Window>

@@ -131,6 +131,36 @@
         <Setter Property="BorderBrush" Value="{DynamicResource SecondaryButtonBorderBrush}" />
     </Style>
 
+    <Style x:Key="DebuggerWorkspaceSwitchButtonStyle"
+           TargetType="{x:Type Button}"
+           BasedOn="{StaticResource SecondaryButtonStyle}">
+        <Setter Property="Height" Value="28" />
+        <Setter Property="Padding" Value="11,1" />
+        <Setter Property="FontSize" Value="12" />
+    </Style>
+
+    <Style x:Key="DebuggerBreakpointsSwitchButtonStyle"
+           TargetType="{x:Type Button}"
+           BasedOn="{StaticResource DebuggerWorkspaceSwitchButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsBreakpointsWorkspaceSelected}" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                <Setter Property="BorderThickness" Value="2" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
+    <Style x:Key="DebuggerCallStackSwitchButtonStyle"
+           TargetType="{x:Type Button}"
+           BasedOn="{StaticResource DebuggerWorkspaceSwitchButtonStyle}">
+        <Style.Triggers>
+            <DataTrigger Binding="{Binding IsCallStackWorkspaceSelected}" Value="True">
+                <Setter Property="BorderBrush" Value="{DynamicResource AccentBrush}" />
+                <Setter Property="BorderThickness" Value="2" />
+            </DataTrigger>
+        </Style.Triggers>
+    </Style>
+
     <Style x:Key="DangerButtonStyle"
            TargetType="{x:Type Button}"
            BasedOn="{StaticResource ButtonBaseStyle}">

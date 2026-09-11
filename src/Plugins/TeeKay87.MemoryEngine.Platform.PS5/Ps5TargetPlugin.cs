@@ -23,7 +23,7 @@ public sealed class Ps5TargetPlugin : ITargetPlugin, IPluginSettingsConsumer
         Version: Ps5PluginInfo.SemanticVersion,
         Revision: Ps5PluginInfo.Revision,
         ApiVersion: Ps5PluginInfo.TargetApiVersion,
-        Description: "Connects TeeKay87's Memory Engine to a PlayStation 5 running ps5debug-NG and exposes process enumeration, preferred game-process selection, memory maps, raw memory access, plugin-driven scan options, semantic native Scan Type acceleration with Core fallback, process pause/resume, x86-64 disassembly, debugger attach/pause/continue/detach, thread enumeration/control, and read-only general-purpose register snapshots through a dedicated ps5debug-NG debugger transport.",
+        Description: "Connects TeeKay87's Memory Engine to a PlayStation 5 running ps5debug-NG and exposes process enumeration, preferred game-process selection, memory maps, raw memory access, plugin-driven scan options, semantic native Scan Type acceleration with Core fallback, process pause/resume, x86-64 disassembly, debugger attach/pause/continue/detach, thread enumeration/control, read-only general plus guarded FPU/SIMD and FS/GS register snapshots, managed software execute breakpoints and hardware data watchpoints, server-side call-stack access, and native Step Into through dedicated ps5debug-NG debugger connections.",
         Architecture: new TargetArchitecture(
             CpuArchitecture.X64,
             pointerWidthBits: 64,
@@ -42,9 +42,13 @@ public sealed class Ps5TargetPlugin : ITargetPlugin, IPluginSettingsConsumer
         TargetCapabilities.NativeValueScanning |
         TargetCapabilities.Disassembly |
         TargetCapabilities.Debugger |
+        TargetCapabilities.Breakpoints |
+        TargetCapabilities.Watchpoints |
         TargetCapabilities.ThreadEnumeration |
         TargetCapabilities.ThreadControl |
-        TargetCapabilities.RegisterAccess;
+        TargetCapabilities.RegisterAccess |
+        TargetCapabilities.CallStack |
+        TargetCapabilities.StepExecution;
 
     public IReadOnlyList<TargetConnectionSettingDefinition> ConnectionSettings => _connectionSettings;
 
