@@ -4,8 +4,8 @@ public static class AppInfo
 {
     public const string Title = "TeeKay87's Memory Engine";
     public const string Version = "0.1.7";
-    public const int Revision = 31;
-    public const string FeatureTitle = "Safe PS5 Watchpoint Detach Cleanup";
+    public const int Revision = 48;
+    public const string FeatureTitle = "Comparer No Group Selection Reset Fix";
 
     public static string DisplayVersion => $"{Version}.rev{Revision}";
 

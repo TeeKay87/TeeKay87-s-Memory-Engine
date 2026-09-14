@@ -42,6 +42,22 @@ internal sealed class ToolWindowManager
         window.Owner = null;
     }
 
+    public bool TryActivateDataContext<TDataContext>(Func<TDataContext, bool> predicate)
+        where TDataContext : class
+    {
+        ArgumentNullException.ThrowIfNull(predicate);
+        foreach (Window window in _windows)
+        {
+            if (window.DataContext is TDataContext candidate && predicate(candidate))
+            {
+                if (window.WindowState == WindowState.Minimized) window.WindowState = WindowState.Normal;
+                window.Activate();
+                return true;
+            }
+        }
+        return false;
+    }
+
     public TDataContext? FindDataContext<TDataContext>(Func<TDataContext, bool> predicate)
         where TDataContext : class
     {

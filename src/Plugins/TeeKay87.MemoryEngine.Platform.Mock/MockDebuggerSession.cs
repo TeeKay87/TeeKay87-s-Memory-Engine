@@ -540,7 +540,7 @@ internal sealed class MockDebuggerSession :
                 _state = DebuggerExecutionState.Paused;
                 ulong instructionPointer = hit.Request.Kind == DebuggerBreakpointKind.Software
                     ? hit.Request.Address
-                    : MockTargetLayout.CodeAddress + 4;
+                    : MockTargetLayout.CodeAddress + 6;
                 _registerValues[MainThreadId]["rip"] = instructionPointer;
                 if (hit.Request.IsTemporary)
                 {
@@ -550,19 +550,31 @@ internal sealed class MockDebuggerSession :
 
             ulong eventInstructionPointer = hit.Request.Kind == DebuggerBreakpointKind.Software
                 ? hit.Request.Address
-                : MockTargetLayout.CodeAddress + 4;
+                : MockTargetLayout.CodeAddress + 6;
             bool isWatchpoint = hit.Request.Kind == DebuggerBreakpointKind.Hardware;
             string message = isWatchpoint
-                ? $"Mock {FormatAccess(hit.Request.Access)} watchpoint hit at 0x{hit.Request.Address:X} from instruction 0x{eventInstructionPointer:X}."
+                ? $"Mock {FormatAccess(hit.Request.Access)} watchpoint at 0x{hit.Request.Address:X} stopped execution at 0x{eventInstructionPointer:X}."
                 : $"Mock software breakpoint hit at 0x{hit.Request.Address:X}.";
-            RaiseEvent(new DebuggerEvent(
-                isWatchpoint ? DebuggerEventKind.Watchpoint : DebuggerEventKind.Breakpoint,
-                DebuggerExecutionState.Paused,
-                isWatchpoint ? DebuggerStopReason.Watchpoint : DebuggerStopReason.Breakpoint,
-                MainThreadId,
-                eventInstructionPointer,
-                hit,
-                message));
+            DebuggerEvent debugEvent = isWatchpoint
+                ? new DebuggerEvent(
+                    DebuggerEventKind.Watchpoint,
+                    DebuggerExecutionState.Paused,
+                    DebuggerStopReason.Watchpoint,
+                    MainThreadId,
+                    eventInstructionPointer,
+                    hit,
+                    MockTargetLayout.CodeAddress + 4,
+                    DebuggerTriggerResolution.BackendExact,
+                    message)
+                : new DebuggerEvent(
+                    DebuggerEventKind.Breakpoint,
+                    DebuggerExecutionState.Paused,
+                    DebuggerStopReason.Breakpoint,
+                    MainThreadId,
+                    eventInstructionPointer,
+                    hit,
+                    message);
+            RaiseEvent(debugEvent);
         });
     }
 

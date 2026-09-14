@@ -2,7 +2,7 @@
 
 ## Purpose
 
-This document describes the PlayStation 5-specific native scanner and process-control implementation established by TeeKay87's Memory Engine `0.1.3.rev32` / PS5 plugin `0.1.0.rev22`. The same verified scanner/process-control behavior remains active unchanged in current host `0.1.7.rev31` / PS5 plugin `0.1.0.rev38`; later plugin revisions target newer compatible Plugin API minors for Disassembler/Debugger work, but those additions do not redesign this scanner/process-control subsystem.
+This document describes the PlayStation 5-specific native scanner and process-control implementation established by TeeKay87's Memory Engine `0.1.3.rev32` / PS5 plugin `0.1.0.rev22`. The same verified scanner/process-control behavior remains active unchanged in current host `0.1.7.rev36` / PS5 plugin `0.1.2.rev39`; later plugin revisions target newer compatible Plugin API minors for Disassembler/Debugger work, but those additions do not redesign this scanner/process-control subsystem.
 
 Core owns the user-facing Scan Type catalog and comparison semantics. The PS5 plugin owns ps5debug-NG protocol details, native capability negotiation, the Core-to-native mapping table, request translation, resident-session management, and process suspend/resume. The host does not contain ps5debug-NG compare ids or command constants.
 
@@ -22,11 +22,11 @@ The generic mapping contract is documented in [`../../architecture/NATIVE_SCAN_T
 ## Version Boundaries
 
 ```text
-Current host application:     0.1.7.rev31
-Host Plugin API:              2.16.0
-PS5 target Plugin API:        2.16.0
-PlayStation 5 plugin:         0.1.0.rev38 (targets API 2.16.0)
-In-Memory Test Target plugin: 1.0.0.rev16 (targets API 2.16.0)
+Current host application:     0.1.7.rev36
+Host Plugin API:              2.18.0
+PS5 target Plugin API:        2.18.0
+PlayStation 5 plugin:         0.1.2.rev39 (targets API 2.18.0)
+In-Memory Test Target plugin: 1.0.1.rev17 (targets API 2.18.0)
 Scanner baseline verified at:  host 0.1.3.rev32 / PS5 0.1.0.rev22 / API 2.9.0
 ```
 

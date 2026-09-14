@@ -132,6 +132,7 @@ The current main workspace uses the shared styles for every standard button:
 - `DangerButtonStyle` for **Disconnect** and **Cancel Scan**;
 - `SecondaryButtonStyle` for **Reload Plugins** and process **Refresh**;
 - workflow-aware Primary/Secondary styling for **First Scan** and **Next Scan**: before a scan session exists First Scan uses the active theme's Primary palette, while a successful First Scan transfers that emphasis to Next Scan;
+- from `0.1.7.rev43`, the permanent Main Window **Disassembler...** and **Debugger...** tool-entry actions use `PrimaryButtonStyle`, matching the active First Scan visual role and automatically following Light, Dimmed, and Dark theme palettes;
 - `SecondaryButtonStyle` for **New Scan** and the active Scan Results / Saved Addresses **Export...** actions;
 - `DangerButtonStyle` for Saved Addresses **Remove/Remove All**, Memory Viewer bookmark **Remove**, **Disconnect**, **Cancel Scan**, and all application-owned **Cancel** dialog actions.
 

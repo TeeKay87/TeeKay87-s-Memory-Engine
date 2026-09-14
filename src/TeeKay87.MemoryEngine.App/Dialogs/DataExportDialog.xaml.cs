@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.ComponentModel;
 using System.Linq;
 using System.Windows;
 using System.Windows.Controls;
@@ -40,6 +41,16 @@ internal partial class DataExportDialog : Window
         RefreshScope();
     }
 
+    private void SelectNoColumnsButton_Click(object sender, RoutedEventArgs e)
+    {
+        foreach (ColumnChoice choice in _columnChoices)
+        {
+            choice.IsSelected = false;
+        }
+
+        RefreshColumnSelectionState();
+    }
+
     private void SelectAllColumnsButton_Click(object sender, RoutedEventArgs e)
     {
         foreach (ColumnChoice choice in _columnChoices)
@@ -47,8 +58,7 @@ internal partial class DataExportDialog : Window
             choice.IsSelected = true;
         }
 
-        ColumnsItemsControl.Items.Refresh();
-        ValidationTextBlock.Text = string.Empty;
+        RefreshColumnSelectionState();
     }
 
     private void ExportButton_Click(object sender, RoutedEventArgs e)
@@ -88,27 +98,69 @@ internal partial class DataExportDialog : Window
             return;
         }
 
+        foreach (ColumnChoice choice in _columnChoices)
+        {
+            choice.PropertyChanged -= ColumnChoice_PropertyChanged;
+        }
+
         _columnChoices = scope.Source.Columns
             .Select(column => new ColumnChoice(column.Id, column.Header))
             .ToArray();
+        foreach (ColumnChoice choice in _columnChoices)
+        {
+            choice.PropertyChanged += ColumnChoice_PropertyChanged;
+        }
+
         ColumnsItemsControl.ItemsSource = _columnChoices;
         ScopeDescriptionTextBlock.Text = scope.Description;
-        ValidationTextBlock.Text = string.Empty;
+        RefreshColumnSelectionState();
     }
 
-    private sealed class ColumnChoice
+    private void ColumnChoice_PropertyChanged(object? sender, PropertyChangedEventArgs e)
     {
+        if (e.PropertyName is null || e.PropertyName == nameof(ColumnChoice.IsSelected))
+        {
+            RefreshColumnSelectionState();
+        }
+    }
+
+    private void RefreshColumnSelectionState()
+    {
+        bool hasSelectedColumn = _columnChoices.Any(choice => choice.IsSelected);
+        ContinueButton.IsEnabled = hasSelectedColumn;
+        ValidationTextBlock.Text = hasSelectedColumn ? string.Empty : "Select at least one column.";
+    }
+
+    private sealed class ColumnChoice : INotifyPropertyChanged
+    {
+        private bool _isSelected = true;
+
         public ColumnChoice(string id, string header)
         {
             Id = id;
             Header = header;
         }
 
+        public event PropertyChangedEventHandler? PropertyChanged;
+
         public string Id { get; }
 
         public string Header { get; }
 
-        public bool IsSelected { get; set; } = true;
+        public bool IsSelected
+        {
+            get => _isSelected;
+            set
+            {
+                if (_isSelected == value)
+                {
+                    return;
+                }
+
+                _isSelected = value;
+                PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsSelected)));
+            }
+        }
     }
 
     internal sealed record ExportFormatOption(TabularExportFormat Format, string DisplayName)

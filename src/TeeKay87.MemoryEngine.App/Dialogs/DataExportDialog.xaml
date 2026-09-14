@@ -1,4 +1,5 @@
 <Window x:Class="TeeKay87.MemoryEngine.App.Dialogs.DataExportDialog"
+        Icon="/TeeKay87.MemoryEngine;component/Assets/TK87ME.ico"
         x:ClassModifier="internal"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
@@ -39,8 +40,13 @@
                        FontWeight="SemiBold" />
             <ComboBox x:Name="ScopeComboBox"
                       Grid.Row="2"
-                      SelectionChanged="ScopeComboBox_SelectionChanged"
-                      DisplayMemberPath="DisplayName" />
+                      SelectionChanged="ScopeComboBox_SelectionChanged">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
 
             <TextBlock x:Name="ScopeDescriptionTextBlock"
                        Grid.Row="4"
@@ -51,8 +57,13 @@
                        Text="Format"
                        FontWeight="SemiBold" />
             <ComboBox x:Name="FormatComboBox"
-                      Grid.Row="8"
-                      DisplayMemberPath="DisplayName" />
+                      Grid.Row="8">
+                <ComboBox.ItemTemplate>
+                    <DataTemplate>
+                        <TextBlock Text="{Binding DisplayName}" />
+                    </DataTemplate>
+                </ComboBox.ItemTemplate>
+            </ComboBox>
 
             <Grid Grid.Row="10">
                 <Grid.ColumnDefinitions>
@@ -63,12 +74,19 @@
                 <TextBlock Text="Columns"
                            VerticalAlignment="Center"
                            FontWeight="SemiBold" />
-                <Button Grid.Column="2"
-                        MinWidth="86"
-                        Padding="8,2"
-                        Style="{StaticResource SecondaryButtonStyle}"
-                        Click="SelectAllColumnsButton_Click"
-                        Content="Select All" />
+                <WrapPanel Grid.Column="2">
+                    <Button MinWidth="86"
+                            Margin="0,0,8,0"
+                            Padding="8,2"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="SelectNoColumnsButton_Click"
+                            Content="Select None" />
+                    <Button MinWidth="86"
+                            Padding="8,2"
+                            Style="{StaticResource SecondaryButtonStyle}"
+                            Click="SelectAllColumnsButton_Click"
+                            Content="Select All" />
+                </WrapPanel>
             </Grid>
 
             <Border Grid.Row="12"
@@ -82,7 +100,7 @@
                         <ItemsControl.ItemTemplate>
                             <DataTemplate>
                                 <CheckBox Margin="0,3"
-                                          IsChecked="{Binding IsSelected, Mode=TwoWay}"
+                                          IsChecked="{Binding IsSelected, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
                                           Content="{Binding Header}" />
                             </DataTemplate>
                         </ItemsControl.ItemTemplate>
@@ -111,7 +129,8 @@
                         IsCancel="True"
                         Click="CancelButton_Click"
                         Content="Cancel" />
-                <Button Grid.Column="2"
+                <Button x:Name="ContinueButton"
+                        Grid.Column="2"
                         MinWidth="104"
                         Margin="8,0,0,0"
                         Style="{StaticResource PrimaryButtonStyle}"

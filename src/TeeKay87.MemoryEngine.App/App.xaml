@@ -38,6 +38,7 @@
             <SolidColorBrush x:Key="SuccessTextBrush" Color="#86EFAC" />
             <SolidColorBrush x:Key="SuccessMutedBrush" Color="#3886EFAC" />
             <SolidColorBrush x:Key="WarningTextBrush" Color="#FCD34D" />
+            <SolidColorBrush x:Key="WarningMutedBrush" Color="#38FCD34D" />
             <SolidColorBrush x:Key="DisassemblyMnemonicBrush" Color="#7DD3FC" />
             <SolidColorBrush x:Key="DisassemblyFlowControlBrush" Color="#FDA4AF" />
             <SolidColorBrush x:Key="DisassemblyRegisterBrush" Color="#C4B5FD" />

@@ -35,6 +35,12 @@
     <None Include="..\..\src\TeeKay87.MemoryEngine.App\Application\UiMetrics.cs"
           Link="Fixtures\UiMetrics.cs"
           CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\TeeKay87.MemoryEngine.App\Dialogs\DataExportDialog.xaml"
+          Link="Fixtures\DataExportDialog.xaml"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\TeeKay87.MemoryEngine.App\Dialogs\DataExportDialog.xaml.cs"
+          Link="Fixtures\DataExportDialog.xaml.cs"
+          CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\TeeKay87.MemoryEngine.App\Dialogs\ManualSavedAddressDialog.xaml"
           Link="Fixtures\ManualSavedAddressDialog.xaml"
           CopyToOutputDirectory="PreserveNewest" />
@@ -97,6 +103,15 @@
           CopyToOutputDirectory="PreserveNewest" />
     <None Include="..\..\src\TeeKay87.MemoryEngine.App\ViewModels\DisassemblyInstructionViewModel.cs"
           Link="Fixtures\DisassemblyInstructionViewModel.cs"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\TeeKay87.MemoryEngine.App\CallStackComparerWindow.xaml"
+          Link="Fixtures\CallStackComparerWindow.xaml"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\TeeKay87.MemoryEngine.App\CallStackComparerWindow.xaml.cs"
+          Link="Fixtures\CallStackComparerWindow.xaml.cs"
+          CopyToOutputDirectory="PreserveNewest" />
+    <None Include="..\..\src\TeeKay87.MemoryEngine.App\ViewModels\CallStackComparerViewModel.cs"
+          Link="Fixtures\CallStackComparerViewModel.cs"
           CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 </Project>

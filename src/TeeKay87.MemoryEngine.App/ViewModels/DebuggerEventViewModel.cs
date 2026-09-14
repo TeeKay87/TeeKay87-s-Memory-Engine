@@ -36,5 +36,17 @@ public sealed class DebuggerEventViewModel
         ? $"0x{address:X}"
         : string.Empty;
 
+    public string TriggerInstruction => Context.Event.TriggerInstructionAddress is ulong address
+        ? $"0x{address:X}"
+        : string.Empty;
+
+    public string WatchedAddress => Context.Event.WatchedAddress is ulong address
+        ? $"0x{address:X}"
+        : string.Empty;
+
+    public string TriggerResolution => Context.Event.Kind == DebuggerEventKind.Watchpoint
+        ? Context.Event.TriggerResolution.ToString()
+        : string.Empty;
+
     public string Message => Context.Event.Message ?? string.Empty;
 }

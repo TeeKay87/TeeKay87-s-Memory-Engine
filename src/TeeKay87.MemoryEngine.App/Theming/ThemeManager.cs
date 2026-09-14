@@ -249,6 +249,15 @@ public sealed class ThemeManager
         successMutedBrush.Freeze();
         _applicationResources["SuccessMutedBrush"] = successMutedBrush;
 
+        Color warningColor = theme.Colors["WarningText"];
+        SolidColorBrush warningMutedBrush = new(Color.FromArgb(
+            0x38,
+            warningColor.R,
+            warningColor.G,
+            warningColor.B));
+        warningMutedBrush.Freeze();
+        _applicationResources["WarningMutedBrush"] = warningMutedBrush;
+
         ActiveTheme = theme.Descriptor;
 
         if (persistSelection)

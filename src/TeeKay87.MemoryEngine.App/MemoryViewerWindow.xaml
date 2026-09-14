@@ -1,4 +1,5 @@
 <Window x:Class="TeeKay87.MemoryEngine.App.MemoryViewerWindow"
+        Icon="/TeeKay87.MemoryEngine;component/Assets/TK87ME.ico"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:input="clr-namespace:TeeKay87.MemoryEngine.App.Input"

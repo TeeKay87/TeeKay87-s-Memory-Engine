@@ -12,6 +12,7 @@ using TeeKay87.MemoryEngine.App.Dialogs;
 using TeeKay87.MemoryEngine.App.Exporting;
 using TeeKay87.MemoryEngine.App.ViewModels;
 using TeeKay87.MemoryEngine.Core.Exporting;
+using TeeKay87.MemoryEngine.PluginSdk.Models;
 
 namespace TeeKay87.MemoryEngine.App;
 
@@ -20,10 +21,23 @@ public partial class DisassemblerWindow : Window
     private readonly DataExportDialogService _dataExportDialogService = new();
     private readonly OperationProgressDialogService _operationProgressDialogService = new();
     private readonly TabularExportService _tabularExportService = new();
+    private readonly Func<ulong, bool>? _canAddBreakpoint;
+    private readonly Func<DisassembledInstruction, bool>? _canAddWatchpoint;
+    private readonly Func<ulong, Task>? _addBreakpoint;
+    private readonly Func<DisassembledInstruction, Task>? _addWatchpoint;
 
-    public DisassemblerWindow(DisassemblerViewModel viewModel)
+    public DisassemblerWindow(
+        DisassemblerViewModel viewModel,
+        Func<ulong, bool>? canAddBreakpoint = null,
+        Func<DisassembledInstruction, bool>? canAddWatchpoint = null,
+        Func<ulong, Task>? addBreakpoint = null,
+        Func<DisassembledInstruction, Task>? addWatchpoint = null)
     {
         DataContext = viewModel ?? throw new ArgumentNullException(nameof(viewModel));
+        _canAddBreakpoint = canAddBreakpoint;
+        _canAddWatchpoint = canAddWatchpoint;
+        _addBreakpoint = addBreakpoint;
+        _addWatchpoint = addWatchpoint;
         InitializeComponent();
     }
 
@@ -96,13 +110,26 @@ public partial class DisassemblerWindow : Window
 
         bool canFollow = false;
         bool canExport = false;
+        bool isExecutableRegion = false;
         if (DataContext is DisassemblerViewModel viewModel)
         {
             canFollow = viewModel.CanFollowTarget(contextInstruction);
             canExport = viewModel.CanExport;
+            isExecutableRegion = viewModel.IsCurrentRegionExecutable;
         }
 
         ContextMenuUtilities.SetItemEnabled(contextMenu, "FollowTarget", canFollow);
+        bool hasSingleSelection = dataGrid.SelectedItems.Count == 1;
+        bool canAddBreakpoint = hasSingleSelection &&
+                                contextInstruction.IsValid &&
+                                isExecutableRegion &&
+                                _addBreakpoint is not null &&
+                                (_canAddBreakpoint?.Invoke(contextInstruction.AddressValue) ?? true);
+        bool canAddWatchpoint = hasSingleSelection &&
+                                _addWatchpoint is not null &&
+                                (_canAddWatchpoint?.Invoke(contextInstruction.SourceInstruction) ?? true);
+        ContextMenuUtilities.SetItemEnabled(contextMenu, "AddBreakpoint", canAddBreakpoint);
+        ContextMenuUtilities.SetItemEnabled(contextMenu, "AddWatchpoint", canAddWatchpoint);
         ContextMenuUtilities.SetItemEnabled(contextMenu, "CopyAddress", true);
         ContextMenuUtilities.SetItemEnabled(contextMenu, "CopyBytes", true);
         ContextMenuUtilities.SetItemEnabled(contextMenu, "CopyInstruction", true);
@@ -121,6 +148,35 @@ public partial class DisassemblerWindow : Window
 
         viewModel.SelectedInstruction = instruction;
         e.Handled = TryExecuteFollowTarget(viewModel);
+    }
+
+
+    private async void AddBreakpointMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_addBreakpoint is null ||
+            DisassemblyDataGrid.SelectedItems.Count != 1 ||
+            sender is not MenuItem { DataContext: DisassemblyInstructionViewModel instruction } ||
+            (_canAddBreakpoint is not null && !_canAddBreakpoint(instruction.AddressValue)))
+        {
+            return;
+        }
+
+        await _addBreakpoint(instruction.AddressValue).ConfigureAwait(true);
+        e.Handled = true;
+    }
+
+    private async void AddWatchpointMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (_addWatchpoint is null ||
+            DisassemblyDataGrid.SelectedItems.Count != 1 ||
+            sender is not MenuItem { DataContext: DisassemblyInstructionViewModel instruction } ||
+            (_canAddWatchpoint is not null && !_canAddWatchpoint(instruction.SourceInstruction)))
+        {
+            return;
+        }
+
+        await _addWatchpoint(instruction.SourceInstruction).ConfigureAwait(true);
+        e.Handled = true;
     }
 
     private void CopyAddressMenuItem_Click(object sender, RoutedEventArgs e)

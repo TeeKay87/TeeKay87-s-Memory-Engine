@@ -1,5 +1,621 @@
 # Changelog
 
+## TeeKay87's Memory Engine 0.1.7.rev48 - Comparer No Group Selection Reset Fix
+
+### Status
+
+Rev48 is built directly from the user-supplied `0.1.7.rev47` package after focused runtime verification proved that rev47's binding-target refresh did not clear the visible Group value. The underlying snapshot membership was already correct and persisted as ungrouped after reopening the comparer; only the active ComboBox selection box remained stale.
+
+### Fixed — Call Stack Comparer No group live selection
+
+- Removed the ineffective rev47 `SelectedItem` binding-target refresh from the `No group` action.
+- After clearing the snapshot model membership, the row ComboBox now clears its live selection with `SelectedIndex = -1`.
+- This is the correct WPF state transition because the empty/ungrouped value is deliberately not an item in `AvailableGroups`; attempting to push an empty string through `SelectedItem` cannot select a matching item and allowed the previous selection box content to remain visible.
+- `SelectedIndex` is not data-bound in this control, so clearing it preserves the existing two-way `SelectedItem` binding for future normal group assignments.
+- Existing model behavior remains unchanged: the snapshot is stored with an empty group, the old group name remains registered in the session catalog, affected Group Comparison results are invalidated through the existing group-change callback, and reopening the comparer continues to show the persisted ungrouped state.
+
+### Verification coverage
+
+- Replaced the rev47 source contract with a requirement for explicit live selection clearing through `comboBox.SelectedIndex = -1`.
+- Added a regression assertion that rejects the ineffective rev47 `UpdateTarget()` workaround.
+- Automated registry remains **152 checks**; no existing verification case was removed or bypassed.
+- A clean Windows build and the focused live `No group` UI check remain the authoritative gates for this revision.
+
+### Version and documentation
+
+- Advanced centralized application metadata to `0.1.7.rev48` with feature title `Comparer No Group Selection Reset Fix`.
+- Updated README, development plan, source review, and verification notes to reflect the corrected WPF selection-state behavior.
+- Plugin API remains `2.18.0`; Mock remains `1.0.1.rev17`; PS5 remains `0.1.2.rev39`; snapshot schema remains version 1.
+
+## TeeKay87's Memory Engine 0.1.7.rev47 - Comparer No Group Live UI Synchronization
+
+### Status
+
+Rev47 is built directly from the user-supplied `0.1.7.rev46` package after the focused rev46 runtime pass completed with 152/152 automated checks and four of five focused runtime checks fully passing. The remaining issue was limited to the Call Stack Comparer row display after selecting `No group`: the snapshot model was cleared correctly, but the ComboBox continued to display the previous group until the window was reopened.
+
+### Fixed — Call Stack Comparer No group live display
+
+- Kept the verified rev46 ungroup model behavior unchanged.
+- After the `No group` action clears the snapshot membership, the row Group ComboBox now explicitly refreshes its `SelectedItem` binding target before the dropdown closes.
+- The row therefore reflects the empty group immediately instead of retaining the previous selection visually until the comparer is reopened.
+- Group catalog retention, comparison invalidation, status reporting, snapshot persistence, and group membership semantics are unchanged.
+
+### Verification coverage
+
+- Extended the existing Call Stack Comparer source contract to require the immediate Group ComboBox binding refresh.
+- Automated registry remains **152 checks**.
+- Rev46's Windows automated gate passed **152/152** before this focused UI correction.
+
+### Version and documentation
+
+- Advanced centralized application metadata to `0.1.7.rev47` with feature title `Comparer No Group Live UI Synchronization`.
+- Updated README, development plan, source review, and verification notes for the focused UI synchronization correction.
+- Plugin API remains `2.18.0`; Mock remains `1.0.1.rev17`; PS5 remains `0.1.2.rev39`; snapshot schema remains version 1.
+
+## TeeKay87's Memory Engine 0.1.7.rev46 - Rev45 Verification Compile Fix
+
+### Status
+
+Rev46 is built directly from the user-supplied `0.1.7.rev45` package after the first Windows build attempt exposed a `CS0103` error in the automated verification project. The rev45 application changes are retained unchanged.
+
+### Fixed — automated verification compile failure
+
+- Corrected `VerifyCallStackComparerWorkspaceSourceAsync` to use its existing `comparerViewModel` fixture-source local when validating the rev45 `No group` setter contract.
+- Removed the invalid reference to the undeclared `comparerViewModelSource` identifier that caused `CS0103` at `Program.cs` line 8916.
+- No application UI, comparer runtime behavior, debugger export gating, Saved Addresses removal behavior, Plugin API contract, plugin implementation, snapshot schema, or transport behavior was changed.
+
+### Version and documentation
+
+- Advanced centralized application metadata to `0.1.7.rev46` with feature title `Rev45 Verification Compile Fix`.
+- Updated README, development plan, source review, and verification notes for the compile-only correction.
+- Plugin API remains `2.18.0`; Mock remains `1.0.1.rev17`; PS5 remains `0.1.2.rev39`; snapshot schema remains version 1; automated registry remains **152 checks**.
+
+## TeeKay87's Memory Engine 0.1.7.rev45 - Runtime State and Removal Confirmation Fixes
+
+### Status
+
+Rev45 is built directly from the user-supplied `0.1.7.rev44` package after focused runtime verification identified two remaining state defects and one Saved Addresses removal-safety improvement. The rev43/rev44 functional changes remain intact.
+
+### Fixed — Debugger export state
+
+- Added `CanExportDebuggerData` to the Debugger view model and bound the Debugger **Export...** action to it.
+- Debugger Export is disabled before a successful Attach, enabled only while the debugger is in an attached session state, and disabled again during/after detach or fault cleanup.
+- The state follows the existing debugger session state machine rather than a window-local flag.
+
+### Fixed — Call Stack Comparer No group
+
+- Corrected the snapshot Group setter so an empty group value bypasses group-name registration and is stored as an actual empty membership.
+- **No group** now clears the row's group immediately while retaining the registered group name in the session catalog.
+- Existing group-membership notifications continue to update Compare Groups gating and invalidate an affected Group Comparison.
+- The existing success status is now reached only after the model can perform the real clear operation.
+
+### Added — Saved Addresses single-remove confirmation
+
+- Single-row **Remove** now uses the application confirmation dialog when the Saved Address has a non-empty Description.
+- The dialog identifies the address by its trimmed Description and uses the existing Danger confirmation semantics.
+- Addresses with an empty or whitespace-only Description are removed immediately without an extra confirmation.
+- The same behavior is used by both the row Remove button and the context-menu **Remove address** action.
+- Existing **Remove All** confirmation behavior is unchanged.
+
+### Version and documentation
+
+- Advanced centralized application metadata to `0.1.7.rev45` with feature title `Runtime State and Removal Confirmation Fixes`.
+- Updated README, development plan, source review, and verification notes for the focused rev45 changes.
+- Plugin API remains `2.18.0`; Mock remains `1.0.1.rev17`; PS5 remains `0.1.2.rev39`; snapshot schema remains version 1; automated registry remains **152 checks**.
+
+## TeeKay87's Memory Engine 0.1.7.rev44 - Rev43 Verification Compile Fix
+
+### Status
+
+Rev44 is built directly from the user-supplied `0.1.7.rev43` package after the first Windows build attempt exposed two `CS0103` errors in the automated verification project. The rev43 application changes are retained unchanged. This revision only repairs the test-source scope error and advances application revision metadata/documentation so the corrected package can be built and verified cleanly.
+
+### Fixed — automated verification compile failure
+
+- Corrected `VerifyDisassemblerSelectionCopyExportSourceAsync` so its `PluginViewModel.cs` and `MainWindow.xaml` fixture paths are declared inside the method that reads them.
+- Removed the misplaced declarations from `VerifyDisassemblerFollowTargetSourceAsync`, where they were outside the consuming method's scope.
+- Added fixture-existence assertions for all five files consumed by the combined Disassembler/export UI source-contract check, so a missing copied fixture reports a focused verification failure instead of failing later during `File.ReadAllText`.
+- The two reported `CS0103` errors for `pluginViewModelSourcePath` and `mainWindowXamlPath` are therefore resolved at source level.
+- No application UI, comparer behavior, export behavior, debugger logic, Plugin API contract, plugin implementation, snapshot schema, or transport behavior was changed.
+
+### Version and documentation
+
+- Advanced centralized application metadata from `0.1.7.rev43` to `0.1.7.rev44` and set the feature title to `Rev43 Verification Compile Fix`.
+- Updated the README and full development action plan to identify rev44 as the current build while retaining rev43 as the functional change set under verification.
+- Added the rev44 source review and verification notes under `docs/testing/`.
+- Plugin API remains `2.18.0`; Mock remains `1.0.1.rev17`; PS5 remains `0.1.2.rev39`; snapshot schema remains version 1; the automated registry remains **152 checks**.
+
+## TeeKay87's Memory Engine 0.1.7.rev43 - Comparer State and Export UI Consistency
+
+### Status
+
+Rev43 is built directly from the user-supplied `0.1.7.rev42` package after the rev42 Windows automated suite passed **152/152** and the focused runtime/UI verification completed. Rev42's grouping, snapshot persistence/import, Universal Export data semantics, application icon, and comparison engine all worked, but runtime testing identified several state-gating and stale-result issues in Call Stack Comparer plus one shared Universal Export column-selection UX issue. Rev43 corrects those focused defects without changing debugger capture, comparison algorithms, snapshot schema, Plugin API, platform plugins, or target transport.
+
+### Fixed — Call Stack Comparer action state
+
+- Removed the redundant panel-level **Remove** button. Snapshot removal now has one clear per-row action plus **Remove All**.
+- Added themed confirmation dialogs for per-row snapshot **Remove** and comparer **Remove All**, reusing the existing application-owned `ConfirmationDialogService` and Danger semantic role. Destructive confirmation is not the Enter-key default.
+- **Remove All** is disabled while the snapshot list is empty.
+- Added an explicit **No group** action at the top of every snapshot Group dropdown. It removes that snapshot's membership while leaving the session-local group name registered for later reuse and Group A/Group B selection.
+- **Compare 2** is enabled only when exactly two snapshots are selected.
+- Complete-snapshot **Export...** is enabled only when exactly one snapshot is selected.
+- **Compare Groups** is enabled only when Group A and Group B are both selected, are different names, and both currently contain at least one snapshot.
+- **Export Results...** is enabled only while a current comparison result exists.
+- Existing click-time validation remains as a defensive fallback rather than being the primary UX state mechanism.
+
+### Fixed — stale comparison results
+
+- Added explicit comparison-input tracking so retained results can distinguish pairwise and grouped comparisons.
+- Pairwise results are now invalidated immediately if either of the two compared snapshots is removed.
+- Pairwise results intentionally remain valid when only Label, Notes, or Group metadata changes because those fields are not pairwise comparison inputs.
+- Group Comparison results are now invalidated when a snapshot moves into or out of either compared group, when an involved snapshot is ungrouped, or when an involved snapshot is removed.
+- Group Comparison results are also invalidated when Group A or Group B selection changes away from the pair that produced the current result.
+- **Remove All** continues to clear snapshots and results while preserving the comparer-session group-name catalog.
+- Closing and reopening Call Stack Comparer in the same Debugger session continues to preserve a result when its inputs remain valid.
+- Result invalidation automatically disables **Export Results...** through the shared `HasResults` state.
+
+### Fixed — shared Universal Export column selection
+
+- Added **Select None** next to the existing **Select All** action in the shared `DataExportDialog`.
+- Column choices now publish selection changes through `INotifyPropertyChanged` so dialog state updates immediately.
+- **Continue** is disabled as soon as zero columns are selected and re-enabled as soon as at least one column is selected.
+- The validation text is synchronized live: zero selected columns shows `Select at least one column.`, while selecting any column clears the message immediately.
+- Scope/Format `DisplayName` rendering from rev40, destination selection, schemas, data sources, writers, cancellation, and transactional publication are unchanged.
+
+### Changed — Main Window tool action styling
+
+- Changed **Disassembler...** and **Debugger...** on the permanent second target row from `SecondaryButtonStyle` to the theme-driven `PrimaryButtonStyle`.
+- The two tool-entry actions now use the same primary visual role seen on the active **First Scan** action and automatically follow Light, Dimmed, and Dark themes.
+- Their placement, visibility/capability gating, enabled state, click behavior, and target/session safety are unchanged.
+
+### Verified existing empty-state gating retained
+
+- Scan Results **Export...** already requires `HasVisibleScanResults`; rev43 preserves that behavior and adds source-contract coverage.
+- Saved Addresses **Export** already requires `HasSavedAddresses`; rev43 preserves that behavior and adds source-contract coverage.
+- Saved Addresses **Remove All** already binds to `HasSavedAddresses`; rev43 preserves that behavior and adds source-contract coverage.
+- Disassembler **Export** already requires at least one displayed instruction; rev43 preserves that behavior and adds source-contract coverage.
+
+### Verification coverage
+
+- Strengthened the existing Call Stack Comparer source-contract check in place for No group, exact-selection button gating, result gating, confirmation-dialog reuse, stale-result tracking, and removal of the redundant panel Remove action.
+- Strengthened the existing Universal Export/Disassembler source-contract check in place for **Select None**, live Continue/validation gating, and empty-data Export gating across Scan Results, Saved Addresses, and Disassembler.
+- Strengthened the existing Main Workspace layout check in place so **Disassembler...** and **Debugger...** must use `PrimaryButtonStyle`.
+- Added `DataExportDialog.xaml.cs` as a test fixture so the shared live column-selection state is covered without adding a new registry entry.
+- Automated registry remains **152 checks**.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev42` to **`0.1.7.rev43`** with feature title `Comparer State and Export UI Consistency`.
+- Plugin API remains **`2.18.0`**.
+- PS5 remains **`0.1.2.rev39`** because no PS5 plugin source changed.
+- Mock remains **`1.0.1.rev17`** because no Mock plugin source changed.
+- Snapshot schema remains `teekay87-memory-engine-debugger-snapshot` version `1`.
+
+### Verification requirement
+
+Rev43 must pass a clean Windows build and **152/152**. Focused runtime verification must confirm comparer confirmation dialogs, No group behavior, exact action-state gating, pair/group stale-result invalidation, retained valid-result reopen behavior, shared Universal Export Select None/live Continue state, and theme-aware Primary styling for Main Window Disassembler/Debugger. Existing Scan Results/Saved Addresses/Disassembler empty-state export gating should be spot-checked as regression coverage.
+
+## TeeKay87's Memory Engine 0.1.7.rev42 - Call Stack Group Creation and Application Icon
+
+### Status
+
+Rev42 is built directly from the user-supplied `0.1.7.rev41` package. Rev41 passed the complete Windows automated suite at **152/152**. Its first runtime Call Stack Comparer UI check then showed that the Group control looked like a normal dropdown with no discoverable way to create a new group, even though the underlying editable ComboBox path technically accepted text. Rev42 corrects that interaction without changing the session-local group model or comparison engine, and also adds the user-supplied TK artwork as the official application icon.
+
+### Fixed — snapshot group creation
+
+- Replaced the snapshot row Group control's implicit editable-ComboBox creation path with a dedicated Group dropdown template.
+- Opening a snapshot Group dropdown now shows a real `TextBox` as the first row of the popup. This field is exclusively for creating a new session-local group.
+- Pressing Enter with a non-empty name registers the group through the existing central, case-insensitive session catalog and immediately assigns that group to the snapshot row from which it was created.
+- The new-group field is cleared after a successful assignment and the dropdown closes, leaving the newly assigned group visible in the row.
+- Existing session groups remain normal dropdown choices below the creation field and selecting one assigns only that snapshot to the selected group.
+- Group A and Group B remain non-editable ComboBoxes and still cannot create new group names. They continue to consume the same session-local group catalog.
+- The immutable `DebuggerSnapshot.WithMetadata` update path and `DebuggerSnapshotComparer.CompareGroups` engine remain unchanged. Multiple snapshots assigned the same group still form one comparison set.
+
+### Changed — application icon
+
+- Added the supplied TK artwork to `src/TeeKay87.MemoryEngine.App/Assets/` as the source PNG and a generated multi-size Windows ICO.
+- Configured the WPF application project `ApplicationIcon` to embed `Assets\TK87ME.ico` into the executable.
+- Added the ICO as a WPF resource and assigned it to every application window so the same branding is used consistently in window title bars and shell/task-switcher presentation.
+- No theme colors, control styles, layout metrics, or runtime behavior were changed by the icon integration.
+
+### Verification coverage
+
+- Strengthened the existing Call Stack Comparer source-contract check without increasing the registry count. The check now requires the dedicated first-row new-group `TextBox`, its Enter handler, direct existing-group selection binding, and explicit create-and-assign view-model path.
+- Automated registry remains **152 checks**.
+- Rev41's runtime result is recorded as **152/152 automated PASS; first group-creation UI gate FAIL due to discoverability**. Rev42 replaces that failed UI path and must restart the focused comparer group runtime gate before carried export/debugger testing resumes.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev41` to **`0.1.7.rev42`** with feature title `Call Stack Group Creation and Application Icon`.
+- Plugin API remains **`2.18.0`**.
+- PS5 remains **`0.1.2.rev39`** because no PS5 plugin source changed.
+- Mock remains **`1.0.1.rev17`** because no Mock plugin source changed.
+- Snapshot schema remains `teekay87-memory-engine-debugger-snapshot` version `1`.
+
+### Verification requirement
+
+Rev42 must pass a clean Windows build and **152/152**. Runtime/UI verification must first confirm the dedicated new-group input, group reuse across snapshot rows, Group A/B population and restriction, multi-snapshot membership, and application icon presentation. After that, resume the carried rev40 shared Export-dialog presentation gate and Debugger Universal Export verification.
+
+## TeeKay87's Memory Engine 0.1.7.rev41 - Call Stack Comparer Snapshot Group Assignment
+
+### Status
+
+Rev41 is built directly from `0.1.7.rev40` after the rev40 clean Windows automated suite passed **152/152**. The shared Export-dialog presentation fix from rev40 is retained unchanged; its cross-consumer runtime/UI verification had not yet been completed when this requested Call Stack Comparer usability revision was started.
+
+### Changed
+
+- Reworked the Call Stack Comparer snapshot table to use the same always-visible template-control row style used by Saved Addresses where that interaction is relevant to snapshots.
+- **Label** and **Notes** are now rendered as in-row `TextBox` editors instead of `DataGridTextColumn` edit mode.
+- **Group** is now an in-row editable `ComboBox`. Each snapshot can select an existing comparer-session group or type a new group name directly in its row.
+- Added a per-row **Remove** Danger button using the same height, margin, padding, and semantic button style as Saved Addresses. Existing multi-select **Remove** and **Remove All** controls remain available.
+- Added the same empty-list overlay pattern used by Saved Addresses; the comparer now shows **No snapshots.** when its snapshot collection is empty.
+- Read-only snapshot metadata remains read-only and is presented through centered row content: Captured, Source, Event, Trigger, Stop IP, and Process.
+- Replaced free-form Group A and Group B text boxes with non-editable `ComboBox` selectors. They contain only session group names that have already been created or discovered through snapshot Group assignments. New group names cannot be created from Group A or Group B.
+
+### Group assignment behavior
+
+- A newly captured or imported snapshot still enters the snapshot list as one independent row.
+- Assigning a group affects only that snapshot row.
+- Typing a new non-empty group name in a row registers it once for the current comparer session and assigns the snapshot to it.
+- Selecting an existing name assigns the snapshot to that same group.
+- Group-name reuse is case-insensitive, so `Boss` and `boss` resolve to the same session group instead of creating duplicate logical groups.
+- Multiple snapshots assigned to the same group name are passed together to the existing `DebuggerSnapshotComparer.CompareGroups` pipeline when that name is selected as Group A or Group B.
+- A snapshot can be reassigned to another group or unassigned without recapturing or reimporting it.
+- Session group names remain local to the retained comparer workspace and are not written to application settings. A new Debugger/comparer session starts with a new group-name collection.
+- Imported snapshots that already contain non-empty Group metadata register that name into the current session list, preserving the imported metadata while making it selectable for other rows.
+- **Remove All** removes snapshots/results but does not erase the comparer-session group-name catalog; the catalog ends with the comparer session itself.
+
+### Verification coverage
+
+- Strengthened the existing Call Stack Comparer source-contract check without increasing the registry count.
+- The contract now requires Saved-Addresses-style template rows, editable row Group assignment, session-local group-name storage, non-editable Group A/B selectors, explicit group commit handling, per-row Remove, and removal of the old Group A/B free-form text boxes.
+- Automated registry remains **152 checks**.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev40` to **`0.1.7.rev41`** with feature title `Call Stack Comparer Snapshot Group Assignment`.
+- Plugin API remains **`2.18.0`**.
+- PS5 remains **`0.1.2.rev39`** because no PS5 plugin source changed.
+- Mock remains **`1.0.1.rev17`** because no Mock plugin source changed.
+- Snapshot schema remains `teekay87-memory-engine-debugger-snapshot` version `1`; Group remains snapshot metadata and no schema migration is required.
+
+### Verification requirement
+
+Rev41 must pass a clean Windows build and **152/152**. Runtime/UI verification must confirm the new snapshot-row layout and session group workflow, then verify the carried rev40 shared Export-dialog presentation before debugger Universal Export verification resumes.
+
+## TeeKay87's Memory Engine 0.1.7.rev40 - Universal Export Option Display Fix
+
+### Status
+
+Rev40 is a focused shared-UI correction built directly from the user-supplied `0.1.7.rev39` package. Rev39 passed **152/152** and the live snapshot/comparer gates through JSON round-trip, offline ownership, and invalid schema/version rejection. At the start of debugger Universal Export verification, the shared export dialog exposed record diagnostic text for Scope and Format instead of the intended user-facing names. The same defect was confirmed across all consumers of the shared export dialog.
+
+### Fixed
+
+- Replaced the shared export dialog's `DisplayMemberPath` presentation with explicit `ComboBox.ItemTemplate` bindings to `DisplayName` for both Scope and Format.
+- Scope choices now render names such as **Threads**, **Registers**, **All Results**, or the consumer-specific scope label instead of `ExportScopeOption { ... }`.
+- Format choices now render **JSON**, **CSV**, **TSV**, and **Markdown table** instead of `ExportFormatOption { ... }`.
+- The fix is centralized in `DataExportDialog.xaml`, so Scan Results, Saved Addresses, Disassembler, Debugger, and Call Stack Comparer result export all use the corrected presentation without per-consumer duplication.
+- Export selection objects, scope descriptions, column selection, destination handling, writers, schemas, and transactional publication are unchanged.
+
+### Verification coverage
+
+- Added the shared export-dialog XAML to the automated source fixtures.
+- Strengthened the existing universal-export source-contract coverage to require explicit `DisplayName` item templates and reject the previous `DisplayMemberPath="DisplayName"` presentation path.
+- Automated registry remains **152 checks**.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev39` to **`0.1.7.rev40`** with feature title `Universal Export Option Display Fix`.
+- Plugin API remains **`2.18.0`**.
+- PS5 remains **`0.1.2.rev39`** because no PS5 plugin source changed.
+- Mock remains **`1.0.1.rev17`** because no Mock plugin source changed.
+- Snapshot schema remains `teekay87-memory-engine-debugger-snapshot` version `1`.
+
+### Verification requirement
+
+Rev40 must pass a clean Windows build and **152/152**. Visually verify the shared export dialog from Scan Results, Saved Addresses, Disassembler, Debugger, and Call Stack Comparer result export: Scope and Format must show only their user-facing names. After that focused regression passes, resume debugger Universal Export verification where rev39 Gate 7 was blocked.
+
+## TeeKay87's Memory Engine 0.1.7.rev39 - Call Stack Comparer Session Persistence and Explicit Capture
+
+### Status
+
+Rev39 is a focused debugger-finalization correction built directly from the user-supplied `0.1.7.rev38` package after rev38 passed the clean Windows gate at **152/152** and the focused live PS5 Disassembler action checks. Snapshot verification then exposed two Call Stack Comparer lifecycle defects: closing the comparer discarded its in-memory snapshot collection even though the same Debugger session remained alive, and **Capture Current** could remain disabled after Continue -> new Pause because the comparer was not notified when a fresh paused stop context became available. The same review also established a clearer capture workflow: opening the comparer should never create evidence implicitly.
+
+Rev39 fixes those lifecycle issues without changing the snapshot schema, comparison engine, Plugin API, Core debugger contracts, Mock plugin, or PS5 plugin.
+
+### Changed
+
+- The Debugger now retains one `CallStackComparerViewModel` workspace for the lifetime of that Debugger window/session instead of creating a new workspace whenever the comparer window is recreated.
+- Closing and reopening the modeless Call Stack Comparer therefore preserves captured/imported snapshots, editable metadata, and current comparison results while the same Debugger session remains alive.
+- Opening or reactivating the comparer is now inspection-only. `OpenComparerFromDebuggerAsync()` no longer calls `CaptureSnapshotAsync()` or inserts a snapshot automatically.
+- New live evidence is added only through the explicit **Capture Current** button.
+- If the comparer window is already open, **Compare...** activates that window without mutating its snapshot collection.
+- When the Debugger window closes, the retained comparer workspace detaches from that disposed live Debugger. If the comparer remains open, its existing snapshots remain offline analysis data and cannot control or capture from a later debugger session.
+
+### Fixed
+
+- Fixed snapshot collection loss when the Call Stack Comparer window was closed and reopened during the same live Debugger session.
+- Fixed **Capture Current** remaining disabled after a Running -> Paused transition. `DebuggerViewModel` now raises `CanCaptureSnapshot` change notification when a running event clears the stop context and when a new paused event installs `_latestStopContext`; the existing `IsBusy` notification continues to cover the final transition after deferred stop refresh work completes.
+- Removed the comparer-window `Closed` handler that detached `LiveDebugger` merely because the presentation window was closed. Live authority now follows the Debugger session lifecycle rather than the comparer window lifetime.
+- Extended the existing Call Stack Comparer source-contract verification to require same-session workspace persistence, explicit-only capture, debugger-close detachment, and paused-stop capture-state refresh.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev38` to **`0.1.7.rev39`** with feature title `Call Stack Comparer Session Persistence and Explicit Capture`.
+- Plugin API remains **`2.18.0`** because no public contract changed.
+- PS5 remains **`0.1.2.rev39`** because no PS5 plugin source changed.
+- Mock remains **`1.0.1.rev17`** because no Mock plugin source changed.
+- Snapshot schema remains `teekay87-memory-engine-debugger-snapshot` version `1`.
+- Automated registry remains **152 checks**; one existing source-contract check is strengthened rather than adding another registry entry.
+
+### Verification requirement
+
+Rev39 must restart Gate 1 from a clean Windows extraction/build and require **152/152 PASS**. Runtime verification should then resume at the Call Stack Comparer snapshot gates: confirm opening the comparer adds no snapshot, explicit **Capture Current** adds exactly one snapshot, close/reopen during the same Debugger session preserves the collection, Continue disables capture, the next real Pause re-enables it, and closing the Debugger removes live capture authority without deleting snapshots from an already-open comparer. After those focused checks pass, continue JSON round-trip, debugger list export, pairwise/group comparison, teardown safety, and the final debugger regression.
+
+## TeeKay87's Memory Engine 0.1.7.rev38 - Disassembler Arbitrary-Row Watchpoint Resolution
+
+### Status
+
+Rev38 is a focused usability correction built directly from the user-supplied `0.1.7.rev37` package after rev37 passed the complete Windows automated gate at **152/152**. During live PS5 verification of the rev35 Disassembler debugger actions, the new **Add Watchpoint** command was found to be unnecessarily limited to the exact current Stop/Current-IP row or resolved Watchpoint Hit/Trigger row. Valid memory-access instructions elsewhere in the same Disassembler view remained disabled even though the attached debugger was safely Paused and its current register snapshot was available.
+
+Rev38 removes only that row-identity restriction. The current paused register snapshot may now be used to evaluate any single selected instruction in the same target/session. The plugin-owned resolver and existing debugger validator remain authoritative, so non-memory instructions, `LEA`, ambiguous/multiple memory operands, unsupported sizes, unavailable registers, unsupported addressing forms, invalid mappings/alignment, exhausted watchpoint slots, stale sessions, Running state, and multi-selection still disable the action rather than guessing.
+
+### Changed
+
+- Replaced the address-specific host gate `CanResolveDisassemblyWatchpointAt(instruction.Address)` with a paused-session gate that requires the matching Debugger to be current, not busy, Paused, and to expose a non-empty current register snapshot.
+- **Add Watchpoint** can now resolve an arbitrary single selected memory-access instruction in the current Disassembler view instead of only the current stop/trigger instruction.
+- The selected instruction is still passed unchanged to the platform-owned `IDisassemblyWatchpointResolver`; Core/WPF still does not parse x86 operands or duplicate PS5-specific address rules.
+- The resulting `DisassemblyWatchpointTarget` still passes the existing `ValidateAddressActionRequest(...)` path before the hardware watchpoint is created.
+- RIP-relative instructions can continue to resolve directly from instruction metadata, while base/index forms use the current paused register snapshot. This represents the effective address implied by the **current paused register state**; it is not a claim that an unrelated instruction previously or subsequently executed with those same register values.
+- Green Watchpoint Hit / yellow Stop-Current-IP presentation, rev32 trigger semantics, snapshot/export/import/comparer work, and rev31 teardown safety are unchanged.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev37` to **`0.1.7.rev38`** with feature title `Disassembler Arbitrary-Row Watchpoint Resolution`.
+- Plugin API remains **`2.18.0`** because no public contract changed.
+- PS5 remains **`0.1.2.rev39`** because no PS5 plugin source changed.
+- Mock remains **`1.0.1.rev17`** because no Mock source changed.
+- Automated registry remains **152 checks**; the existing Disassembler action source-contract test now explicitly requires the generalized paused-session gate.
+
+### Verification requirement
+
+Rev38 must restart Gate 1 from a clean extraction/build and require **152/152 PASS**. Focused runtime verification should then return to Gate 3: confirm **Add Watchpoint** is enabled for safely resolvable memory-access rows away from the current Hit/Stop pair, confirm it derives the expected address/size/access from the current paused register context, and recheck multi-selection, non-memory/`LEA`, detach, and validator rejection cases before continuing snapshots/export/import/comparer verification.
+
+## TeeKay87's Memory Engine 0.1.7.rev37 - PS5 Watchpoint Access Verification Correction
+
+### Status
+
+Rev37 is a narrow verification correction built directly from `0.1.7.rev36` after the clean Windows build succeeded and the automated suite reached **151/152 PASS**. The sole failure was the PS5 x86-64 disassembly decoding check expecting a `Write` watchpoint access mode for `add [rax+40h],esi`, while the resolver returned `ReadWrite`.
+
+The resolver behavior is correct. `add [rax+40h],esi` is a read-modify-write instruction: the existing destination value is read from memory, the addition is performed, and the result is written back. Iced therefore reports the memory operand as `ReadWrite`. The PS5 resolver intentionally maps read/write memory access to neutral `DebuggerBreakpointAccess.ReadWrite`, which matches the documented amd64 DR7 behavior and the rev35/rev36 design. Rev37 corrects the test expectation instead of weakening runtime semantics.
+
+### Fixed
+
+- Corrected the PS5 x86-64 disassembly verification assertion for `add [rax+40h],esi` from `DebuggerBreakpointAccess.Write` to **`DebuggerBreakpointAccess.ReadWrite`**.
+- Updated the assertion message to state explicitly that the expected mode belongs to a read-modify-write instruction.
+- Kept the existing effective-address expectation (`RAX + 0x40`) and four-byte width expectation unchanged.
+- No PS5 resolver/runtime implementation was changed. Definite write-only memory operands still map to `Write`; read-only and read/write operands still map to `ReadWrite`; `LEA` and other non-memory/unsafe cases remain rejected.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev36` to **`0.1.7.rev37`** with feature title `PS5 Watchpoint Access Verification Correction`.
+- Plugin API remains **`2.18.0`**.
+- PS5 remains **`0.1.2.rev39`** because no plugin source changed.
+- Mock remains **`1.0.1.rev17`** because no Mock source changed.
+- Automated registry remains **152 checks**.
+
+### Verification requirement
+
+Rev37 restarts Gate 1 from a clean extraction/build and requires **152/152 PASS**. Once Gate 1 is green, continue the existing ordered runtime verification from the rev35/rev36 finalization sequence: first verify the separate Disassembler Add Breakpoint/Add Watchpoint actions and green Hit/yellow Stop presentation, then proceed through snapshot capture/export/import, debugger list export, Call Stack Comparer, offline/modeless lifecycle, teardown safety, and full debugger regression.
+
+## TeeKay87's Memory Engine 0.1.7.rev36 - PS5 Disassembly Watchpoint Resolver Compile Fix
+
+### Status
+
+Rev36 is a narrow corrective revision built directly from the user-supplied `0.1.7.rev35` package after the first clean Windows build failed before the automated verification suite could start. The primary compiler failure was `CS0177` in `Ps5DisassemblyWatchpointResolver.TryReadAddressRegister`: the expression-bodied short-circuit return could exit when an unsupported Iced address register mapped to `null` without assigning the required `out ulong value` parameter. The accompanying XAML `System.Object` and missing PS5 plugin metadata-file errors were downstream build failures caused by the PS5 project not producing its assembly. No XAML/project-reference workaround is introduced.
+
+Rev36 changes only the definite-assignment path in the PS5 Disassembler watchpoint resolver plus version/documentation metadata. The rev35 debugger action/highlight design, Plugin API `2.18.0`, Core/WPF behavior, watchpoint teardown safety, snapshots, exports, importer, and comparer remain unchanged.
+
+### Fixed
+
+- Corrected `Ps5DisassemblyWatchpointResolver.TryReadAddressRegister(...)` so unsupported/non-GPR Iced register kinds explicitly assign `value = 0` and return `false` before control leaves the method. Supported x64 GPR mappings still delegate to the existing `TryReadRegister(...)` implementation without changing effective-address semantics.
+- Removed the compiler path that produced `CS0177: The out parameter 'value' must be assigned before control leaves the current method`.
+- Kept resolver safety behavior unchanged: unsupported address-register forms still disable automatic Disassembler **Add Watchpoint** rather than guessing a target address.
+- No changes were made for the reported `XLS0414 System.Object` or `CS0006 ... Platform.PS5.dll could not be found` messages because those were dependency-chain failures produced after the PS5 project stopped on CS0177. A successful PS5 build is expected to eliminate those follow-on errors.
+
+### Versioning
+
+- Advanced centralized application metadata from `0.1.7.rev35` to **`0.1.7.rev36`** with feature title `PS5 Disassembly Watchpoint Resolver Compile Fix`.
+- Plugin API remains **`2.18.0`** because no public contract changed.
+- Advanced the PS5 plugin semantic version from `0.1.1` to **`0.1.2`** because the plugin source changed. The existing legacy revision field remains `39` for compatibility with the current metadata model; this revision does not introduce another plugin revision increment.
+- Mock remains `1.0.1.rev17` because no Mock code changed.
+- Updated the existing plugin-version verification assertion to expect PS5 `0.1.2.rev39`; the automated registry remains 152 checks.
+
+### Verification requirement
+
+Rev35 did not reach the automated suite because the solution failed to build. Rev36 therefore restarts **Gate 1** from a clean extraction/build and requires **152/152 PASS** before any runtime verification continues. Once Gate 1 passes, resume the existing ordered rev35 runtime sequence: Disassembler actions and green/yellow watchpoint presentation first, then snapshot capture/export/import, debugger list exports, Call Stack Comparer, modeless/offline lifecycle, permanent teardown safety, and full debugger regression.
+
+## TeeKay87's Memory Engine 0.1.7.rev35 - Disassembler Debugger Actions and Watchpoint Hit-Stop Highlighting
+
+### Status
+
+Rev35 is built directly from the supplied `0.1.7.rev34` verification candidate after the rev34 automated suite passed **152/152** and the carried rev32 watchpoint semantics passed focused Mock and live-PS5 runtime verification. The live PS5 test confirmed a hardware watchpoint at `0x2394E4040` was correctly presented with trigger instruction `0x8033D981` (`add [rax+40h],esi`) and real stop/current IP `0x8033D984` (`mov rcx,[rdi+30h]`). A subsequent Software/Execute breakpoint regression at `0x8033D981` also passed with logical/original bytes preserved.
+
+Rev35 refines the Disassembler debugger workflow and visual stop semantics before the remaining snapshot/export/import/comparer verification continues. Rev31 remains the permanent verified teardown-safety baseline.
+
+### Added
+
+- Added optional Plugin SDK contract `IDisassemblyWatchpointResolver` and neutral `DisassemblyWatchpointTarget`. The resolver receives one already-decoded neutral instruction plus the current debugger register snapshot and can return one derived data-watchpoint address, byte width, and access mode. The contract is optional; plugins that do not expose it simply leave **Add Watchpoint** unavailable from Disassembler.
+- Added a PS5 x86-64 implementation backed by the existing Iced decoder/instruction-info layer. It derives one explicit memory operand only, obtains the operand access mode and exact memory width, resolves the effective address from the paused register context, supports ordinary 64-bit GPR base/index addressing plus RIP-relative and FS/GS-base addressing, and returns no target when the result cannot be established safely.
+- Added explicit safety rejection for non-memory/`NoMemAccess` instructions such as `LEA`, multiple explicit memory operands, unsupported/variable memory widths, unavailable register/segment-base context, unsupported address-register forms, and memory-address registers that the selected instruction itself modifies. No textual operand parsing or host-side x86 assumptions are used.
+- Added a second transient Disassembler marker, **`Stop / Current IP`**, for resolved watchpoint stops when the backend stop/current instruction differs from the resolved trigger instruction.
+- Added a theme-derived `WarningMutedBrush` so watchpoint stop/current rows can use a readable yellow warning highlight in Light, Dimmed, and Dark without hard-coded per-view colors.
+
+### Changed
+
+- Replaced the Disassembler's combined **Add Breakpoint / Watchpoint...** context-menu command with separate **Add Breakpoint** and **Add Watchpoint** entries, matching the established Scan Results and Saved Addresses interaction.
+- Both Disassembler debugger actions now require exactly one selected row. Multiple selected rows keep both entries visible but disabled, preserving extended selection for copy/export.
+- **Add Breakpoint** is enabled only for a valid decoded instruction in the current executable memory region and only when the existing attached-debugger request validator accepts the generated persistent Software/Execute request.
+- **Add Watchpoint** is enabled only when the matching debugger is Paused with a valid current register snapshot and the selected row is the current stop instruction or the current resolved trigger instruction. The plugin resolver must derive one safe address/size/access tuple and the existing debugger validator must accept the final persistent Hardware request. This prevents stale/arbitrary register state from being applied to unrelated disassembly rows.
+- PS5 read-only instruction accesses are mapped to a Hardware Read/Write request because x86 debug-register data breakpoints do not provide a read-only encoding; write-only memory accesses remain Write. The normal plugin validator remains authoritative for supported widths, alignment, mapped-range rules, and slot availability.
+- Resolved watchpoint presentation now uses two visual highlights in Disassembler: **green = actual Hit/Trigger Instruction**, **yellow = real Stop/Current IP**. If trigger resolution is unavailable, only the stop/current row is shown with the yellow unresolved-watchpoint presentation; no green trigger is fabricated.
+- Software breakpoint highlighting remains unchanged: the breakpoint/origin instruction keeps the existing green presentation, and debugger `INT3` instrumentation remains masked by the logical/original-byte overlay.
+- Plugin API advances from `2.17.0` to **`2.18.0`** for the new optional disassembly-watchpoint resolver contract. Mock semantic version advances from `1.0.0` to **`1.0.1`** and PS5 semantic version advances from `0.1.0` to **`0.1.1`** in accordance with plugin update versioning; their existing revision fields remain present for compatibility with the current metadata model. Their API target advances to `2.18.0`.
+- Application metadata advances from `0.1.7.rev34` to `0.1.7.rev35` with feature title `Disassembler Debugger Actions and Watchpoint Hit-Stop Highlighting`.
+
+### Verification coverage
+
+- Kept the automated registry at **152 checks** while strengthening existing checks rather than adding duplicate entries.
+- Extended the PS5 x86-64 disassembly check to verify that `add [rax+40h],esi` resolves to the expected effective address, 4-byte size, and Write watchpoint request from a known RAX value, and that `LEA` is rejected as a non-memory-access watchpoint source.
+- Extended the debugger overlay lifecycle check to require both `Watchpoint hit` at the trigger instruction and `Stop / Current IP` at the separate backend stop instruction.
+- Extended Disassembler source-contract verification for the separate menu actions, single-selection gating, plugin-owned resolver use, derived size/access consumption, existing request validation, and green/yellow row-highlight bindings.
+
+### Verification requirement
+
+Rev35 must restart the clean Windows automated gate because Plugin SDK and PS5 plugin code changed. Require **152/152 PASS** before continuing the runtime sequence. After that, recheck the already proven watchpoint hit/stop presentation specifically for the new green/yellow row coloring and verify the two separate Disassembler actions, including automatic PS5 watchpoint derivation from the live `add [rax+40h],esi` example. The remaining snapshot/export/import/comparer gates then continue in order from the updated rev35 verification document.
+
+## TeeKay87's Memory Engine 0.1.7.rev34 - Debugger Finalization Verification Test Corrections
+
+### Status
+
+Rev34 is a verification-correction revision built directly from the unverified `0.1.7.rev33` candidate after the first Windows automated run exposed two deterministic defects in the newly added test assertions. The underlying snapshot importer and comparer behavior covered by those two checks did not require runtime changes. Rev31 remains the latest fully verified live-PS5 teardown baseline, and the complete rev32-rev33 runtime verification sequence remains pending after the corrected automated gate passes.
+
+### Changed
+
+- Corrected the debugger snapshot JSON address-width validation fixture. Rev33 changed the serialized `addressWidth` from 64 to 32 bits, but every address in that fixture was still representable in 32 bits, so accepting the document was correct. The rev34 test now declares a 28-bit address width, which is valid schema metadata but is smaller than the fixture's `0x10000000` code address and therefore genuinely exercises the importer's existing out-of-range rejection path.
+- Corrected the snapshot comparer verification to treat neutral register identifiers case-insensitively. The fixture stores the canonical register id as `r12`, while the rev33 assertion searched for the literal case-sensitive value `R12`; the comparer row existed but the test's `Single(...)` lookup could not find it. The detailed register lookup and promoted summary lookup now use ordinal case-insensitive matching, consistent with the comparer/register model.
+- Updated the snapshot test fixture's captured application revision metadata from 33 to 34 so JSON round-trip/comparison verification represents the current application candidate.
+- Application metadata advances from `0.1.7.rev33` to `0.1.7.rev34` with feature title `Debugger Finalization Verification Test Corrections`. Plugin API remains `2.17.0`; Mock remains `1.0.0.rev17`; PS5 remains `0.1.0.rev39` because this revision changes no plugin contracts or platform transport/runtime implementation.
+
+### Intermittent PS5 register test observation
+
+- During the first rev33 Windows verification attempt, `PS5 debugger general register snapshot protocol` passed. During the second complete run it returned 28 registers instead of the expected 76. A 28-register result is the already supported fallback shape when the optional FPU/SIMD probe is unavailable while general registers and FS/GS base remain available.
+- Because the failure did not reproduce consistently and rev33/rev34 do not change the PS5 register transport or mapper, rev34 does not alter the verified optional-register fallback behavior or production timeout policy. The corrected full automated suite must be rerun. If this register-count failure repeats, it becomes a separate investigation before runtime acceptance continues.
+
+### Verification requirement
+
+Run the full Windows suite again and require **152/152 PASS** before continuing to runtime Gate 2. If the PS5 general-register check fails again, stop and preserve the complete output so the intermittent optional-register probe path can be isolated without weakening the existing timeout-safety behavior.
+
+## TeeKay87's Memory Engine 0.1.7.rev33 - Debugger Finalization, Snapshots and Comparer
+
+### Status
+
+Rev33 is a combined **verification candidate** built on rev32. Rev31 remains the latest fully verified PS5 teardown baseline; rev32 was not separately runtime-accepted before this package. The rev32 watchpoint trigger/current-IP work is therefore retained as the first verification gate for rev33 rather than being treated as an already verified dependency.
+
+### Added
+
+- Added **Add Breakpoint / Watchpoint...** to the Disassembler row context menu. It is enabled only when exactly one instruction is selected, requires an already attached Debugger for the same plugin/process/connection generation, runs the same neutral plugin validation used elsewhere, and opens the existing `BreakpointDialog` before using the existing `DebuggerViewModel.AddBreakpointAsync` path. Multiple selected instructions leave the command disabled.
+- Added the Core-owned immutable debugger snapshot model with explicit source metadata, section status, event context, exact register bytes, call frames, bounded logical disassembly, breakpoint/watchpoint state, and bounded memory blocks.
+- Added one shared live snapshot capture path in `DebuggerViewModel`. Capture requires a Paused debugger, current target identity, current connection generation, and an unchanged stop-event sequence through the complete read. It captures already resolved rev32 trigger semantics, requires the selected thread to match the stop thread when both are known, and revalidates the stop before publishing.
+- Added bounded Standard Snapshot context: up to 64 bytes before/after stop and trigger through the existing logical Disassembler pipeline plus a bounded 256-byte Memory Viewer window around the semantic stack pointer when safely available. Optional failures are represented by section state instead of being silently converted to valid-looking zero/default data.
+- Added debugger snapshot JSON schema `teekay87-memory-engine-debugger-snapshot` version `1`, exact hexadecimal 64-bit address serialization, string enum values, raw-byte validation, width/range checks, additive-field tolerance, import validation, and temporary-file transactional publication.
+- Added a separate modeless **Call Stack Comparer** window. Snapshots can be captured directly while the associated debugger is Paused or imported from JSON for completely offline analysis. Label, Group, and Notes remain user-editable metadata while captured debugger data remains immutable.
+- Added pairwise and arbitrary user-defined group comparison. The comparer reports common/stable call-stack paths, first stable cross-group divergence, ordered-frame alignment evidence, exact raw register differences, separate trigger/current instruction context, logical/original disassembly differences, breakpoint/watchpoint context, and bounded stack-memory differences. Module + Offset is preferred over raw code addresses where available so captures remain comparable across ASLR/process restarts.
+- Added explainable **Potential discriminator** summary rows only for values that are stable inside both compared groups and different between them. Variable data remains visible but is not promoted as a semantic conclusion.
+- Added Universal Export from the Debugger for Threads, Registers, Breakpoints / Watchpoints, Call Stack, and Events using the existing JSON/CSV/TSV/Markdown table pipeline. Breakpoint export separates Type, Mechanism, Access, Size, Enabled state, and Lifetime; event export separates Instruction Pointer, Trigger Instruction, watched-address context, and Trigger Resolution.
+- Added Universal Export for the current derived comparison-result table.
+- Added `InMemoryExportDataSource` as the bounded structured adapter for already materialized debugger/comparer tables.
+- Added automated/source-contract coverage for snapshot immutability, live capture safety, JSON round trip and validation, transactional cancellation, comparer pair/group behavior, module-relative/frame alignment behavior, Disassembler debugger actions, Call Stack Comparer integration, and the five debugger table exports. The registry target is now **152 checks**.
+- Added `docs/architecture/DEBUGGER_SNAPSHOTS_AND_COMPARER.md` and the ordered rev33 verification/source-review documents.
+
+### Changed
+
+- Application metadata advances from `0.1.7.rev32` to `0.1.7.rev33`. Plugin API remains `2.17.0`; Mock remains `1.0.0.rev17`; PS5 remains `0.1.0.rev39` because no plugin contract or platform transport changed in rev33.
+- Snapshot breakpoint records now model **Type** (`Breakpoint`/`Watchpoint`), **Mechanism** (`Software`/`Hardware`), and **Lifetime** (`Persistent`/`Temporary`) independently before schema version 1 is released.
+- Snapshot publication deep-copies collection state, including per-instruction marker collections, so later debugger/UI mutation cannot alter a previously published capture.
+- Snapshot section status now reports supported-but-empty Registers or Call Stack as unavailable rather than claiming a complete section with no captured data.
+- Group call-stack divergence is only reported when each group is internally stable at the claimed frame; a difference between the first sample of each group is no longer sufficient.
+- The Call Stack Comparer subscribes to the associated live Debugger only while the comparer is open. **Capture Current** reflects `CanCaptureSnapshot`, and closing the comparer releases that reference while retained/imported snapshots remain ordinary offline data.
+- Complete snapshot JSON and flat Universal Export remain deliberately separate: snapshot JSON is the lossless hierarchical source-of-truth format, while Universal Export is used for individual debugger/comparison tables.
+
+### Preserved safety and compatibility
+
+- Rev32's separate stop/current IP and trigger instruction semantics are unchanged and are captured/exported independently.
+- Rev31's explicit PS5 software/hardware breakpoint/watchpoint teardown and staged-cleanup behavior is untouched and remains a permanent live regression gate.
+- Snapshot capture, import, export, and comparison are read-only. Import never reconnects to a target and never recreates breakpoint/watchpoint state.
+- Logical/original Disassembler bytes remain authoritative. Software-breakpoint `INT3` instrumentation is not saved as game code and does not create comparison differences.
+- Existing Scan Results and Saved Addresses debugger actions, stepping, Run to Address, Breakpoints/Watchpoints manager, Threads, Registers, Call Stack, Memory Viewer, themes, and modeless-window behavior are retained.
+
+### Verification requirement
+
+This package was prepared in an environment without the Windows/.NET WPF toolchain, so the 152-check executable suite is **not claimed as passed here**. Static package validation must be followed by the ordered Windows/Mock/live-PS5 procedure in `docs/testing/APP_0.1.7_REV33_VERIFICATION.md`. Because rev32 was not separately tested, that procedure begins by verifying the carried-forward rev32 watchpoint semantics before testing the new rev33 work.
+
+
+## TeeKay87's Memory Engine 0.1.7.rev32 - Watchpoint Trigger Resolution and Event Semantics
+
+Revision 32 begins the final debugger-finalization sequence from the verified `0.1.7.rev31` baseline. The revision does not change the rev31 PS5 watchpoint-detach safety path. It corrects the remaining watchpoint presentation ambiguity first, so later Debugger Snapshot export/import and Call Stack Comparer work can be built on an event model that preserves the difference between where execution stopped and which instruction actually caused a watched memory access.
+
+### Added - Neutral watchpoint trigger semantics
+
+- Plugin API advances from `2.16.0` to **`2.17.0`**.
+- Added `DebuggerTriggerResolution` with the initial public states `Unresolved`, `BackendExact`, and `DisassemblyDerived`.
+- `DebuggerEvent` now preserves `TriggerInstructionAddress` and `TriggerResolution` independently from the existing authoritative `InstructionPointer`.
+- Watchpoint events expose neutral `WatchedAddress`, `WatchpointAccess`, and `WatchpointSize` values from their triggered watchpoint context without replacing the original breakpoint/watchpoint request model.
+- The pre-existing `DebuggerEvent` constructors remain available for compatible older 2.x plugins. Events created through those constructors default to an unresolved trigger unless a backend supplies a resolved trigger through the new constructor.
+- Added `DebuggerEvent.WithTriggerInstruction(...)` so Core/host enrichment can create a new immutable event while preserving the original stop context and timestamp.
+
+### Added - Core disassembly-derived trigger resolver
+
+- Added `DebuggerWatchpointTriggerResolver` in Core.
+- The resolver accepts a neutral watchpoint event plus a logical `DisassemblySnapshot`; it does not contain x86-specific decoding logic.
+- A trigger is accepted only when exactly one valid logical instruction ends at the event's stop/current instruction pointer.
+- Existing backend-exact trigger information is never replaced by Core.
+- If the boundary cannot be established safely, the original event is retained as `Unresolved`; no `RIP - 1` or other fixed-length guess is used.
+- Resolution consumes the same logical Disassembler path used elsewhere in the application, so debugger byte overlays remain authoritative and software-breakpoint `INT3` instrumentation is not intentionally treated as game code.
+
+### Changed - Disassembler watchpoint markers
+
+- `DebuggerDisassemblyOverlayState` no longer treats every watchpoint event's `InstructionPointer` as the trigger address.
+- Resolved watchpoints show **`Watchpoint hit`** at `TriggerInstructionAddress`.
+- Unresolved watchpoints show **`Watchpoint stop (trigger unresolved)`** at the real stop/current instruction pointer instead of falsely identifying that instruction as the memory-accessing instruction.
+- Resume and detach/reset paths still clear transient watchpoint markers.
+- Software-breakpoint markers, logical byte overlays, staged breakpoint-retirement behavior, and marker coexistence remain unchanged.
+
+### Changed - Debugger event presentation
+
+- The Events table now exposes separate **Instruction Pointer**, **Trigger Instruction**, **Watched Address**, and **Trigger Resolution** columns.
+- The Debugger attempts best-effort disassembly-derived trigger resolution for paused unresolved watchpoint events before refreshing the rest of the stop context.
+- Successful resolution updates the stored/displayed event snapshot and the shared Disassembler overlay while preserving the original stop IP.
+- Failed resolution remains explicit and non-fatal; registers, call stack, breakpoint/watchpoint management, stepping, and normal debugger refresh continue from the real stop context.
+- PS5 watchpoint event text no longer claims that the callback RIP is the accessing instruction. It now describes that RIP as the address where execution stopped until host resolution establishes a trigger.
+
+### Changed - Deterministic Mock watchpoint fixture
+
+- Mock advances from `1.0.0.rev16` to **`1.0.0.rev17`** and targets Plugin API `2.17.0`.
+- The deterministic hardware-watchpoint fixture now models the post-access stop explicitly: its stop/current IP is the instruction following the synthetic trigger instruction.
+- Mock supplies the known synthetic trigger as `BackendExact`, allowing automated coverage to prove that backend-exact and disassembly-derived trigger paths remain distinct.
+- PS5 advances from `0.1.0.rev38` to **`0.1.0.rev39`** for the Plugin API target and corrected watchpoint stop wording. The rev31 hardware-watchpoint teardown implementation is otherwise unchanged.
+
+### Verification coverage
+
+- Added **Core watchpoint trigger resolution** to the automated registry.
+- Extended the neutral event-model coverage for trigger address, trigger resolution, watched address, access mode, and size.
+- Updated Mock hardware-watchpoint verification so stop/current IP and trigger instruction are asserted independently.
+- Extended the debugger Disassembly-overlay lifecycle check to prove both unresolved and resolved marker behavior and to ensure the resolved marker is not left on the post-access stop instruction.
+- The automated registry target advances from **142 to 143 checks**.
+
+### Preserved safety and regression requirements
+
+- Rev31 PS5 active/staged hardware-watchpoint cleanup before detach/disposal remains unchanged and remains a mandatory live regression gate.
+- Rev36 software-breakpoint cleanup, rev28 composed-operation cleanup, breakpoint-aware Step Over, Step Out, Run to Address, logical breakpoint bytes, stale-session guards, register safety, and modeless-window lifecycle are not redesigned by this revision.
+- The documented ps5debug-NG same-instruction software-breakpoint/watchpoint event-consumption limitation remains external; rev32 does not fabricate an event that the backend never delivered.
+
+### Development order
+
+- The debugger finalization handover is now dependency-driven. Rev32 implements **Phase A — Event semantics** first.
+- The next accepted revision should continue with the neutral immutable Debugger Snapshot model and shared capture pipeline before complete snapshot JSON persistence or the Call Stack Comparer is added.
+- Universal Export for flat debugger tables remains a separate finalization requirement and is not substituted for the hierarchical snapshot model.
+
+### Version / compatibility
+
+| Component | rev32 value | Change |
+| --- | --- | --- |
+| Application | `0.1.7.rev32` | Watchpoint trigger/current-IP separation |
+| Feature title | `Watchpoint Trigger Resolution and Event Semantics` | New application feature title |
+| Plugin API | `2.17.0` | Add neutral trigger-resolution event context |
+| Mock plugin | `1.0.0.rev17` | Backend-exact post-access watchpoint fixture |
+| PS5 plugin | `0.1.0.rev39` | API target and accurate stop wording; rev31 cleanup retained |
+| Automated registry | `143` | One new Core trigger-resolution check plus updated regressions |
+
 ## TeeKay87's Memory Engine 0.1.7.rev31 - Safe PS5 Watchpoint Detach Cleanup
 
 Revision 31 continues the active `0.1.7` Debugger block from the supplied rev30 package. Rev30 introduced debugger-address shortcuts and clearer Breakpoint/Watchpoint classification, but it was superseded before verification after live PS5 shutdown testing exposed a target-safety problem: leaving a hardware watchpoint enabled and then closing the application could leave the watchpoint armed after debugger teardown. The game continued running until the watched access occurred again, at which point it could terminate because the stale hardware debug-register condition was still active without the client debugger attached.

@@ -219,12 +219,33 @@ public partial class MainWindow : Window
             }
         }
 
+        CallStackComparerViewModel? comparerWorkspace = null;
+
+        Task OpenComparerFromDebuggerAsync()
+        {
+            comparerWorkspace ??= new CallStackComparerViewModel { LiveDebugger = viewModel };
+
+            if (_toolWindowManager.TryActivateDataContext<CallStackComparerViewModel>(
+                    candidate => ReferenceEquals(candidate, comparerWorkspace)))
+            {
+                return Task.CompletedTask;
+            }
+
+            CallStackComparerWindow comparerWindow = new(
+                comparerWorkspace,
+                () => viewModel.CaptureSnapshotAsync());
+            _toolWindowManager.Show(comparerWindow, this);
+            return Task.CompletedTask;
+        }
+
         DebuggerWindow window = new(
             viewModel,
             CanOpenDisassemblerFromDebugger,
             OpenDisassemblerFromDebugger,
             CanOpenMemoryViewerFromDebugger,
-            OpenMemoryViewerFromDebugger);
+            OpenMemoryViewerFromDebugger,
+            OpenComparerFromDebuggerAsync);
+        window.Closed += (_, _) => comparerWorkspace?.DetachLiveDebugger();
         _toolWindowManager.Show(window, this);
         e.Handled = true;
     }
@@ -664,11 +685,91 @@ public partial class MainWindow : Window
         ArgumentNullException.ThrowIfNull(plugin);
         ArgumentNullException.ThrowIfNull(targetProcess);
 
-        DisassemblerWindow window = new(new DisassemblerViewModel(
+        long connectionGeneration = plugin.ConnectionGeneration;
+        DisassemblerViewModel viewModel = new(
             plugin,
             targetProcess,
-            plugin.ConnectionGeneration,
-            address));
+            connectionGeneration,
+            address);
+
+        DebuggerViewModel? GetDebugger()
+        {
+            if (plugin.ConnectionGeneration != connectionGeneration)
+            {
+                return null;
+            }
+
+            return FindAttachedDebugger(plugin, targetProcess);
+        }
+
+        bool CanAddBreakpoint(ulong rowAddress)
+        {
+            DebuggerViewModel? debugger = GetDebugger();
+            return debugger?.ValidateAddressActionRequest(
+                CreateSoftwareExecuteBreakpointRequest(rowAddress)).IsValid == true;
+        }
+
+        DebuggerBreakpointRequest? CreateResolvedWatchpointRequest(DisassembledInstruction instruction)
+        {
+            DebuggerViewModel? debugger = GetDebugger();
+            if (debugger is null || !debugger.CanResolveDisassemblyWatchpoint())
+            {
+                return null;
+            }
+
+            DisassemblyWatchpointTarget? target = plugin.ResolveDisassemblyWatchpointTarget(
+                instruction,
+                debugger.Registers.Select(register => register.Register).ToArray());
+            if (target is null)
+            {
+                return null;
+            }
+
+            DebuggerBreakpointRequest request = new(
+                target.Address,
+                target.Size,
+                DebuggerBreakpointKind.Hardware,
+                target.Access);
+            return debugger.ValidateAddressActionRequest(request).IsValid
+                ? request
+                : null;
+        }
+
+        bool CanAddWatchpoint(DisassembledInstruction instruction)
+        {
+            return CreateResolvedWatchpointRequest(instruction) is not null;
+        }
+
+        async Task AddBreakpointAsync(ulong rowAddress)
+        {
+            DebuggerViewModel? debugger = GetDebugger();
+            DebuggerBreakpointRequest request = CreateSoftwareExecuteBreakpointRequest(rowAddress);
+            if (debugger is null || !debugger.ValidateAddressActionRequest(request).IsValid)
+            {
+                return;
+            }
+
+            await debugger.AddBreakpointAsync(request).ConfigureAwait(true);
+        }
+
+        async Task AddWatchpointAsync(DisassembledInstruction instruction)
+        {
+            DebuggerViewModel? debugger = GetDebugger();
+            DebuggerBreakpointRequest? request = CreateResolvedWatchpointRequest(instruction);
+            if (debugger is null || request is null)
+            {
+                return;
+            }
+
+            await debugger.AddBreakpointAsync(request).ConfigureAwait(true);
+        }
+
+        DisassemblerWindow window = new(
+            viewModel,
+            CanAddBreakpoint,
+            CanAddWatchpoint,
+            AddBreakpointAsync,
+            AddWatchpointAsync);
         _toolWindowManager.Show(window, this);
     }
 
@@ -842,6 +943,50 @@ public partial class MainWindow : Window
         }
 
         await plugin.ExportDataAsync(this, selection, path).ConfigureAwait(true);
+    }
+
+
+    private void SavedAddressRemoveButton_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { DataContext: SavedAddressViewModel savedAddress })
+        {
+            RemoveSavedAddressWithOptionalConfirmation(savedAddress);
+        }
+    }
+
+    private void SavedAddressRemoveMenuItem_Click(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuItem { DataContext: SavedAddressViewModel savedAddress })
+        {
+            RemoveSavedAddressWithOptionalConfirmation(savedAddress);
+        }
+    }
+
+    private void RemoveSavedAddressWithOptionalConfirmation(SavedAddressViewModel savedAddress)
+    {
+        string description = savedAddress.Description?.Trim() ?? string.Empty;
+        if (description.Length > 0)
+        {
+            bool confirmed = _confirmationDialogService.Show(
+                this,
+                new ConfirmationDialogOptions(
+                    title: "Remove Saved Address",
+                    message: $"Remove saved address '{description}'?",
+                    confirmButtonText: "Remove",
+                    cancelButtonText: "Cancel",
+                    tone: ConfirmationDialogTone.Danger,
+                    confirmIsDefault: false));
+
+            if (!confirmed)
+            {
+                return;
+            }
+        }
+
+        if (savedAddress.RemoveCommand.CanExecute(null))
+        {
+            savedAddress.RemoveCommand.Execute(null);
+        }
     }
 
     private void RemoveAllSavedAddressesButton_Click(object sender, RoutedEventArgs e)

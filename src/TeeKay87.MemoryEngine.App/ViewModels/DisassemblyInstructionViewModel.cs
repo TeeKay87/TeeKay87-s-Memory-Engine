@@ -22,12 +22,18 @@ public sealed class DisassemblyInstructionViewModel
         Address = $"0x{instruction.Address:X}";
         RawBytes = instruction.RawBytes;
         Bytes = FormatHex(instruction.RawBytes.Span);
+        DisassemblyMarker[] markerSnapshot = (markers ?? Enumerable.Empty<DisassemblyMarker>()).ToArray();
         Markers = string.Join(
             " · ",
-            (markers ?? Enumerable.Empty<DisassemblyMarker>())
+            markerSnapshot
                 .Select(marker => marker.Text)
                 .Where(text => !string.IsNullOrWhiteSpace(text))
                 .Distinct(StringComparer.Ordinal));
+        IsWatchpointHitRow = markerSnapshot.Any(marker =>
+            string.Equals(marker.Text, "Watchpoint hit", StringComparison.Ordinal));
+        IsWatchpointStopRow = markerSnapshot.Any(marker =>
+            string.Equals(marker.Text, "Stop / Current IP", StringComparison.Ordinal) ||
+            string.Equals(marker.Text, "Watchpoint stop (trigger unresolved)", StringComparison.Ordinal));
         Mnemonic = instruction.Mnemonic;
         Operands = instruction.Operands;
         Instruction = string.IsNullOrWhiteSpace(instruction.Operands)
@@ -56,6 +62,10 @@ public sealed class DisassemblyInstructionViewModel
     public string Bytes { get; }
 
     public string Markers { get; }
+
+    public bool IsWatchpointHitRow { get; }
+
+    public bool IsWatchpointStopRow { get; }
 
     public string Mnemonic { get; }
 

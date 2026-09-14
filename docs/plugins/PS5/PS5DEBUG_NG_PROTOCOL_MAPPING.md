@@ -722,3 +722,7 @@ During live rev6 acceptance, `CMD_DEBUG_SUSPEND_THREAD` (`0xBDBB0006`) returned 
 ### Rev37 validation-only note
 
 Plugin rev37 does not add or alter a ps5debug-NG opcode. `IDebuggerBreakpointValidationService` is satisfied entirely from the plugin's existing request shape rules, current cached memory-map information, active/staged breakpoint/watchpoint records, and local slot allocation state. A successful validation is only a preflight hint to generic UI; the existing `0xBDBB0003` / `0xBDBB0004` add paths repeat authoritative validation before writing backend state.
+
+## Host 0.1.7.rev32 / PS5 0.1.0.rev39 — Watchpoint Stop RIP Semantics
+
+No ps5debug-NG wire command changes in this revision. For hardware data watchpoints, the interrupt packet's RIP is retained as the debugger stop/current instruction pointer. On x86-64 this can be the instruction following the memory access that triggered the debug trap. The plugin therefore no longer labels callback RIP as the accessing instruction. The host resolves a separate trigger address from logical disassembly when possible; unresolved cases remain explicit. The existing DR6 attribution limitations and the documented same-instruction software-breakpoint/watchpoint event-consumption behavior are unchanged.

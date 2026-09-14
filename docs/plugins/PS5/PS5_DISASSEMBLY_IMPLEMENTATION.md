@@ -1,6 +1,6 @@
 # PS5 x86-64 Disassembly Implementation
 
-The complete host `0.1.6.rev14` Disassembler block is hardware-verified. Current PS5 plugin `0.1.0.rev36` retains the same verified rev24 Iced decoder; later PS5 plugin revisions changed debugger/scanner integration while leaving the disassembly decoder and memory-read boundary unchanged.
+The complete host `0.1.6.rev14` Disassembler block is hardware-verified. Current host `0.1.7.rev36` / PS5 plugin `0.1.2.rev39` retains the same verified rev24 Iced decoder. Rev35 added a separate Iced-backed watchpoint-target resolver for Disassembler debugger actions; rev36 only corrects an `out`-parameter definite-assignment compile path in that resolver and does not change the decoder or memory-read boundary.
 
 ## Purpose
 
@@ -263,3 +263,14 @@ Those later features must continue to reuse the neutral provider/Core foundation
 PS5 plugin `0.1.0.rev36` and its Iced x86-64 decoder are unchanged in rev29. ps5debug-NG may implement a Software/Execute breakpoint by writing `0xCC` to the first byte of the instruction. The host now prevents that debugger-owned trap byte from changing the user-visible disassembly: Core applies the original instruction bytes captured before breakpoint installation to a local copy of the bounded read buffer before calling the PS5 decoder. The decoder still receives ordinary caller-supplied bytes and contains no breakpoint-specific branch.
 
 This does not restore or patch PS5 target memory. The backend breakpoint remains armed exactly as before. `Breakpoint`, `Breakpoint (disabled)`, and `Watchpoint hit` are neutral host markers and do not become PS5-specific instruction metadata. Future intentional assembly/NOP patching must remain distinguishable from this debugger-only logical view.
+
+
+## Rev35 Disassembler Watchpoint Target Resolution
+
+Plugin API `2.18.0` adds the optional neutral `IDisassemblyWatchpointResolver`. PS5 implements it with the same Iced decoder already used by `Ps5DisassemblerProvider`, keeping x86-64 operand interpretation platform-specific. The host supplies one logical `DisassembledInstruction` plus the current paused debugger register snapshot and receives either a neutral `DisassemblyWatchpointTarget` or no result.
+
+The resolver requires exactly one explicit memory operand. It derives the hardware-watchpoint width from Iced memory-size metadata and accepts only the PS5 debugger-supported 1, 2, 4, and 8-byte widths. Effective address resolution supports ordinary 64-bit GPR base/index/scale/displacement addressing, RIP-relative operands, and FS/GS addressing only when the corresponding neutral base register is present. If a required register is unavailable or the address cannot be established without guessing, resolution fails.
+
+Memory access classification uses Iced instruction-info operand access. Definite writes map to neutral `Write`; reads and read/write accesses map to `ReadWrite` because amd64 hardware data breakpoints cannot express a read-only trap independently of writes. Address-only instructions such as `lea`, non-memory instructions, ambiguous/multiple explicit memory operands, unsupported sizes, and unsafe self-modifying address-register cases are rejected.
+
+This service only derives a candidate. The WPF host still requires exactly one Disassembler row, a matching attached and Paused debugger with a current register snapshot, and successful validation through the existing `IDebuggerBreakpointValidationService` before **Add Watchpoint** becomes available. Host rev38 no longer restricts derivation to the current stop/trigger row: any single instruction in the current view may be evaluated. For base/index addressing the result is explicitly derived from the debugger's current paused register state, while RIP-relative operands can resolve directly from instruction metadata. Unsafe or ambiguous cases remain unavailable rather than guessed.

@@ -1,4 +1,5 @@
 <Window x:Class="TeeKay87.MemoryEngine.App.DisassemblerWindow"
+        Icon="/TeeKay87.MemoryEngine;component/Assets/TK87ME.ico"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:controls="clr-namespace:TeeKay87.MemoryEngine.App.Controls"
@@ -216,6 +217,12 @@
                                   Tag="FollowTarget"
                                   InputGestureText="Enter"
                                   Click="FollowTargetMenuItem_Click" />
+                        <MenuItem Header="Add Breakpoint"
+                                  Tag="AddBreakpoint"
+                                  Click="AddBreakpointMenuItem_Click" />
+                        <MenuItem Header="Add Watchpoint"
+                                  Tag="AddWatchpoint"
+                                  Click="AddWatchpointMenuItem_Click" />
                         <Separator />
                         <MenuItem Header="Copy Address"
                                   Tag="CopyAddress"
@@ -248,6 +255,26 @@
                             <MultiDataTrigger>
                                 <MultiDataTrigger.Conditions>
                                     <Condition Binding="{Binding IsOriginRow}" Value="True" />
+                                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Background" Value="{DynamicResource SuccessMutedBrush}" />
+                            </MultiDataTrigger>
+                            <DataTrigger Binding="{Binding IsWatchpointStopRow}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource WarningMutedBrush}" />
+                            </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsWatchpointStopRow}" Value="True" />
+                                    <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
+                                </MultiDataTrigger.Conditions>
+                                <Setter Property="Background" Value="{DynamicResource WarningMutedBrush}" />
+                            </MultiDataTrigger>
+                            <DataTrigger Binding="{Binding IsWatchpointHitRow}" Value="True">
+                                <Setter Property="Background" Value="{DynamicResource SuccessMutedBrush}" />
+                            </DataTrigger>
+                            <MultiDataTrigger>
+                                <MultiDataTrigger.Conditions>
+                                    <Condition Binding="{Binding IsWatchpointHitRow}" Value="True" />
                                     <Condition Binding="{Binding RelativeSource={RelativeSource Self}, Path=IsSelected}" Value="True" />
                                 </MultiDataTrigger.Conditions>
                                 <Setter Property="Background" Value="{DynamicResource SuccessMutedBrush}" />

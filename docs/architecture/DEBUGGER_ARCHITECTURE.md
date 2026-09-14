@@ -661,7 +661,7 @@ Rev29 keeps the debugger session and backend contracts unchanged while making th
 
 The Debugger already captured the original instruction before installing a Software/Execute breakpoint for breakpoint-aware Step Over. Rev29 reuses that capture instead of adding a second memory-read path. Enabled Software/Execute breakpoints publish `Breakpoint`; disabled records publish `Breakpoint (disabled)`. If a paused remove/disable is staged because the backend cannot safely retire the trap immediately, the marker can disappear while the original-byte mask remains until Continue completes the backend retirement. This prevents a still-present `INT3` from becoming visible as code during the staging window.
 
-A paused Hardware Watchpoint event records `Watchpoint hit` at the event's semantic instruction pointer. This is marker-only state: watchpoints do not supply replacement code bytes. Running or another paused stop clears the stale watchpoint-hit marker.
+A paused Hardware Watchpoint event records `Watchpoint hit` at the event's semantic instruction pointer. This is marker-only state: watchpoints do not supply replacement code bytes. Running or another paused stop clears the stale watchpoint-hit marker. This describes the rev29 pre-resolution behavior; rev32 supersedes the marker location for data watchpoints by keeping real stop/current IP separate and moving `Watchpoint hit` to the safely resolved trigger instruction.
 
 The Disassembler consumes this information through the normal host/Core read path. Neither the WPF workspace nor Core depends on the PS5 debugger implementation, and no presentation operation writes target memory. Future assembler/NOP/patch functionality must remain a separate intentional-code-change layer so debugger instrumentation can never redefine the original instruction shown to or edited by the user.
 
@@ -682,3 +682,39 @@ PS5 plugin `0.1.0.rev38` no longer relies solely on ps5debug-NG's generic detach
 This mirrors the software-breakpoint safety boundary established in PS5 rev36: debugger instrumentation owned by the client is removed by the client before backend detach is requested. The event channel remains alive during both cleanup passes, while `_detaching` prevents teardown interrupts from being surfaced as ordinary debugger stops. No public debugger model, capability, Plugin API contract, watchpoint legality rule, or wire opcode changes.
 
 The change addresses a live shutdown failure where an enabled hardware watchpoint could survive application exit and later terminate the target when the watched access occurred. Current ps5debug-NG source conditionally enters its per-LWP DBREG clear path only after a preliminary `PT_GETDBREGS` probe whose return value is not checked. The external behavior and source path are documented in `docs/bug-reports/ps5debug-ng-detach-can-leave-hardware-watchpoints-active.md`. Rev31 keeps the backend bug external and adds deterministic client-side cleanup instead of guessing post-detach target state.
+
+## 0.1.7.rev32 — Watchpoint Trigger and Stop Context Separation
+
+Hardware data-watchpoint stops now preserve two separate instruction concepts. `DebuggerEvent.InstructionPointer` remains the authoritative stop/current instruction pointer used by register state, stepping, and execution control. `DebuggerEvent.TriggerInstructionAddress` identifies the instruction that caused the watched access only when that address is known safely. `DebuggerTriggerResolution` records whether the trigger came from the backend (`BackendExact`), from logical disassembly (`DisassemblyDerived`), or remains `Unresolved`.
+
+The Core `DebuggerWatchpointTriggerResolver` is architecture-neutral. It accepts a logical `DisassemblySnapshot` and resolves only when exactly one valid instruction ends at the stop instruction pointer. It never subtracts a fixed amount from RIP and never replaces a backend-exact result. The WPF debugger obtains the logical snapshot through the existing target/session-bound Disassembler path, so software-breakpoint byte overlays remain in effect while trigger boundaries are evaluated.
+
+`DebuggerDisassemblyOverlayState` presents `Watchpoint hit` at the resolved trigger instruction. If trigger resolution fails, the real stop IP may be marked `Watchpoint stop (trigger unresolved)` so the UI does not claim that the post-access stop instruction caused the watched memory access. Both addresses remain available independently for later snapshot/export/comparison work.
+
+Rev31's PS5 software/hardware instrumentation cleanup, connection-generation binding, and stale-session protections are unchanged and remain mandatory regression behavior.
+
+## 0.1.7.rev33 — Snapshot, Export and Comparison Finalization
+
+Rev33 carries rev32's trigger/current-IP event semantics into one shared debugger-finalization pipeline. A paused debugger can now compose an immutable Core-owned `DebuggerSnapshot` only after validating the same target/session identity and an unchanged stop sequence through the full bounded capture. The snapshot contains structured event context, exact register bytes, call frames, logical/original disassembly, breakpoint/watchpoint manager state, section status, and a bounded stack-memory window when safely available.
+
+Complete debugger context is persisted through a dedicated schema-versioned JSON serializer rather than flattened into the table exporter. Import is offline data only and never reconnects or applies captured breakpoint state. Threads, Registers, Breakpoints/Watchpoints, Call Stack, and Events separately use Universal Export because those are naturally tabular views.
+
+The Call Stack workspace gains a **Compare...** entry to a separate modeless Call Stack Comparer. Live and imported snapshots use the same `DebuggerSnapshotComparer`: pairwise and arbitrary group comparisons prefer Module + Offset for code identity, compare exact register bytes, retain trigger/current instruction as distinct concepts, compare logical disassembly and debugger context, and only promote stable cross-group differences as potential discriminators. No comparison operation performs target traffic. Host rev39 makes comparer lifetime explicitly session-oriented: the same Debugger window/session retains one comparer workspace across comparer-window close/reopen, opening the comparer does not auto-capture, and only **Capture Current** adds live snapshots. A new paused stop raises capture availability again after Continue, while closing the Debugger detaches any still-open comparer from live authority without deleting its snapshot evidence.
+
+The complete snapshot/comparer design is documented in `docs/architecture/DEBUGGER_SNAPSHOTS_AND_COMPARER.md`.
+
+Host rev41 changes only the comparer presentation and session-local group-assignment workflow. Snapshot rows now mirror the Saved Addresses in-row control pattern where applicable: editable Label/Notes fields, an editable Group dropdown, centered read-only evidence, and a per-row Remove action. The comparer workspace owns a unique case-insensitive group-name catalog for its session. Group A/B are non-editable selectors populated from that catalog, so comparisons can only choose groups that were assigned through snapshot rows. Core comparison semantics and snapshot schema version 1 are unchanged.
+
+
+## Rev35 Disassembler Debugger Actions and Dual Watchpoint Highlighting
+
+The Disassembler now exposes two separate context actions instead of the rev33 combined dialog route: **Add Breakpoint** and **Add Watchpoint**. Both require exactly one selected row; Extended multi-selection disables both. Add Breakpoint constructs the existing persistent Software/Execute request and remains gated by executable-region state plus the attached debugger's existing validation service. No second breakpoint manager is introduced.
+
+Add Watchpoint is available only when the selected instruction can be resolved safely through the optional plugin-owned `IDisassemblyWatchpointResolver`. The host requires a matching attached debugger in `Paused`, current register data, and a row whose instruction address is either the real stop/current IP or the resolved trigger instruction for that same stop. This prevents a paused register snapshot from being applied to an unrelated historical/arbitrary Disassembler row. The plugin returns only the neutral effective address, byte width, and access mode; final legality, alignment, duplicate, slot, mapped-range, and backend rules remain authoritative in the normal breakpoint/watchpoint validation/add path.
+
+Resolved hardware-watchpoint presentation now carries two simultaneous markers when trigger and stop differ:
+
+- `Watchpoint hit` marks the true trigger instruction and the row uses the existing success/green semantic.
+- `Stop / Current IP` marks the real post-access stop instruction and the row uses a warning/yellow semantic.
+
+The real stop IP remains authoritative for registers, stepping, call stack, execution control, snapshots, and event history. The green row is presentation of the cause, not a replacement execution state. An unresolved watchpoint has no fabricated green trigger row; its actual stop row remains warning/yellow with `Watchpoint stop (trigger unresolved)`. Software breakpoint presentation remains on its existing success/green row and does not gain a second yellow marker.

@@ -1295,7 +1295,7 @@ internal sealed class Ps5DebuggerSession :
                     threadId,
                     instructionPointer,
                     watchpoint,
-                    $"PS5 {FormatWatchpointAccess(watchpoint.Request.Access)} watchpoint at 0x{watchpoint.Request.Address:X} hit from instruction 0x{instructionPointer:X} on {threadText}.{attribution}"));
+                    $"PS5 {FormatWatchpointAccess(watchpoint.Request.Access)} watchpoint at 0x{watchpoint.Request.Address:X} stopped execution at 0x{instructionPointer:X} on {threadText}.{attribution}"));
             }
 
             return;

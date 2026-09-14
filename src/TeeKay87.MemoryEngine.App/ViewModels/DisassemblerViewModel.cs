@@ -164,6 +164,9 @@ public sealed class DisassemblerViewModel : ObservableObject, IDisposable
 
     public bool CanExport => !_disposed && !IsBusy && Instructions.Count > 0;
 
+    public bool IsCurrentRegionExecutable =>
+        _currentRegion?.Protection.HasFlag(MemoryProtection.Execute) == true;
+
     public DisassemblyInstructionViewModel? SelectedInstruction
     {
         get => _selectedInstruction;

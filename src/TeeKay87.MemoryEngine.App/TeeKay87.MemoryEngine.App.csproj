@@ -6,6 +6,7 @@
     <UseWPF>true</UseWPF>
     <AssemblyName>TeeKay87.MemoryEngine</AssemblyName>
     <RootNamespace>TeeKay87.MemoryEngine.App</RootNamespace>
+    <ApplicationIcon>Assets\TK87ME.ico</ApplicationIcon>
   </PropertyGroup>
   <ItemGroup>
     <ProjectReference Include="..\TeeKay87.MemoryEngine.Core\TeeKay87.MemoryEngine.Core.csproj" />
@@ -18,6 +19,7 @@
                       DeployAsPlugin="true" />
   </ItemGroup>
   <ItemGroup>
+    <Resource Include="Assets\TK87ME.ico" />
     <None Update="Themes\*.json" CopyToOutputDirectory="PreserveNewest" CopyToPublishDirectory="PreserveNewest" />
   </ItemGroup>
   <Target Name="RemoveLegacyBundledThemeFiles" AfterTargets="CopyFilesToOutputDirectory">

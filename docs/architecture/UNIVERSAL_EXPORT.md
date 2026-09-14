@@ -6,7 +6,7 @@ Application `0.1.4.rev1` introduced the first production universal list/table ex
 
 The implementation is shared infrastructure rather than a Scan Results-specific or PlayStation 5-specific exporter. **Scan Results**, **Saved Addresses**, and from application `0.1.6.rev12` the **Disassembler** are production consumers. Future list-based tools should use the same contracts when their data fits the tabular model instead of creating independent serializers and progress/cancellation behavior.
 
-Application `0.1.6.rev12` kept the verified Core writer/contracts/schema unchanged and added a new `DisassemblyExportSource` consumer plus a shared host destination picker. That export integration is part of the fully verified `0.1.6.rev14` Disassembler block. Host `0.1.7.rev1` advanced the public Plugin API to `2.12.0` for separate debugger contracts. Host `0.1.7.rev2` keeps the export subsystem unchanged while Mock advances to `1.0.0.rev8` / API `2.12.0` for its debugger backend and PS5 remains `0.1.0.rev24` / API `2.11.0`. Scan Results, Saved Addresses, and Disassembler export behavior are unchanged by the debugger work so far. Host `0.1.7.rev3` adds the real PS5 debugger transport without changing the existing universal export subsystem. Host `0.1.7.rev4` corrects only the shared main-window target/header and button-text presentation; host `0.1.7.rev5` changes only responsive row-1 target input sizing. Universal export remains unchanged and debugger-specific export remains planned for the final debugger integration revision.
+Application `0.1.6.rev12` kept the verified Core writer/contracts/schema unchanged and added a new `DisassemblyExportSource` consumer plus a shared host destination picker. That export integration is part of the fully verified `0.1.6.rev14` Disassembler block. Host `0.1.7.rev1` advanced the public Plugin API to `2.12.0` for separate debugger contracts. Host `0.1.7.rev2` keeps the export subsystem unchanged while Mock advances to `1.0.0.rev8` / API `2.12.0` for its debugger backend and PS5 remains `0.1.0.rev24` / API `2.11.0`. Scan Results, Saved Addresses, and Disassembler export behavior are unchanged by the debugger work so far. Host `0.1.7.rev33` extends the same universal export pipeline to Debugger Threads, Registers, Breakpoints / Watchpoints, Call Stack, and Events plus Call Stack Comparer results. Host `0.1.7.rev40` corrects the shared export dialog option presentation for every consumer without changing Core export contracts, writers, schemas, or data sources. Host `0.1.7.rev43` keeps those contracts unchanged and improves the same shared dialog with Select None, live column-selection validation, and immediate Continue-button gating.
 
 ## Ownership Boundary
 
@@ -103,9 +103,13 @@ The application-owned export dialog is reusable across list consumers. It expose
 - **Scope**;
 - **Format**;
 - **Columns**;
-- Select All for the current scope's available columns.
+- Select None and Select All for the current scope's available columns.
+- Continue is enabled only while at least one column is selected.
+- Column validation updates immediately as selection changes; a zero-column state shows `Select at least one column.` and any subsequent selected column clears that message immediately.
 
 Changing scope rebuilds the available column list because a complete stored result set may guarantee fewer fields than a materialized presentation row.
+
+Scope and Format ComboBoxes use explicit item templates bound to each option's `DisplayName`; diagnostic record representations are never intended as user-facing option text. Because the dialog is shared, this presentation rule applies to every export consumer.
 
 The destination chooser runs only after the user confirms scope/format/columns and uses the matching default file extension.
 
@@ -258,7 +262,7 @@ The Scan Type metadata is intentionally named **selectedScanType**, not “last 
 
 ## Current Non-Goals
 
-The current application (`0.1.7.rev31`) retains the verified `0.1.4` export foundation and extends the verified `0.1.6` Disassembler export integration only with additive debugger `Markers` metadata and logical/original instruction bytes. It still does not implement:
+The current candidate (`0.1.7.rev33`) retains the verified `0.1.4` export foundation, the verified `0.1.6` Disassembler integration, and now adds flat debugger/comparison table integration. Complete Debugger Snapshot persistence intentionally uses its own hierarchical JSON schema instead of the flat Universal Export contract. The generic exporter still does not implement:
 
 - automatic export integration for every future list/table;
 - a generic “currently filtered rows” scope where a view has a real filter model;
@@ -276,3 +280,11 @@ Those can be added when their owning subsystems exist and their semantics are kn
 ### Disassembler marker metadata
 
 Host `0.1.7.rev29` adds `Markers` immediately after `Bytes` in the Disassembler export column catalog. The value is the same address-scoped debugger presentation text shown in the workspace, such as `Breakpoint` or `Watchpoint hit`. Export still uses already materialized logical instructions and causes no additional target traffic. When a Software/Execute breakpoint backend has patched target memory with `INT3`, exported `Bytes` and `Instruction` describe the locally restored original/logical instruction, while `Markers` records the debugger state separately. The disassembly export schema version remains `1` because the structured format already supports additive selectable columns.
+
+## Host 0.1.7.rev33 — Debugger Tables and Snapshot Boundary
+
+Rev33 completes the planned debugger-table integration with the existing Universal Export pipeline. The Debugger can export the currently materialized Threads, Registers, Breakpoints/Watchpoints, Call Stack, and Events scopes as JSON, CSV, TSV, or Markdown table. The adapter snapshots the already materialized table data into an `InMemoryExportDataSource`, so the writer/progress/cancellation/transactional publication path remains shared and export itself causes no new target reads.
+
+Structured debugger exports preserve the distinctions required by the debugger model. Breakpoints/Watchpoints expose Type, Mechanism, Access, Size, Enabled state, and Lifetime separately. Events expose Instruction Pointer and Trigger Instruction independently together with watched address/access/size and Trigger Resolution. Registers include exact raw bytes in addition to formatted presentation text.
+
+A complete `DebuggerSnapshot` deliberately does **not** use this tabular abstraction. The hierarchical snapshot owns event, register, frame, disassembly, breakpoint, memory, source, and section-status relationships and therefore uses `teekay87-memory-engine-debugger-snapshot` JSON schema version 1. This file is the lossless persistence/import format used by Call Stack Comparer. Derived comparison result rows may again use Universal Export because the comparison result table is flat data.

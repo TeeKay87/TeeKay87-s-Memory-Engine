@@ -4,7 +4,7 @@ namespace TeeKay87.MemoryEngine.PluginSdk;
 
 public static class PluginApiInfo
 {
-    public const string CurrentVersionText = "2.16.0";
+    public const string CurrentVersionText = "2.18.0";
 
     public static Version CurrentVersion { get; } = Version.Parse(CurrentVersionText);
 

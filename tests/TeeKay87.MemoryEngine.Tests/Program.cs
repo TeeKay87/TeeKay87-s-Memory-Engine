@@ -10,6 +10,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using TeeKay87.MemoryEngine.Core.Debugging;
+using TeeKay87.MemoryEngine.Core.Debugging.Snapshots;
 using TeeKay87.MemoryEngine.Core.Diagnostics;
 using TeeKay87.MemoryEngine.Core.Disassembly;
 using TeeKay87.MemoryEngine.Core.Exporting;
@@ -36,6 +37,16 @@ internal static class Program
         ("Plugin API and independent plugin versions", VerifyPluginVersioningAsync),
         ("Debugger neutral model contracts", VerifyDebuggerModelContractsAsync),
         ("Debugger triggered breakpoint event context", VerifyDebuggerTriggeredBreakpointEventAsync),
+        ("Core watchpoint trigger resolution", VerifyWatchpointTriggerResolutionAsync),
+        ("Debugger snapshot capture model", VerifyDebuggerSnapshotCaptureModelAsync),
+        ("Debugger snapshot JSON round trip", VerifyDebuggerSnapshotJsonRoundTripAsync),
+        ("Debugger snapshot JSON validation", VerifyDebuggerSnapshotJsonValidationAsync),
+        ("Debugger snapshot export cancellation is transactional", VerifyDebuggerSnapshotExportCancellationAsync),
+        ("Debugger snapshot live capture source contract", VerifyDebuggerSnapshotLiveCaptureSourceAsync),
+        ("Debugger snapshot pairwise and group comparer", VerifyDebuggerSnapshotComparerAsync),
+        ("Disassembler breakpoint/watchpoint context action source contract", VerifyDisassemblerBreakpointWatchpointActionSourceAsync),
+        ("Call Stack Comparer workspace source contract", VerifyCallStackComparerWorkspaceSourceAsync),
+        ("Debugger list export source contract", VerifyDebuggerListExportSourceAsync),
         ("Debugger optional service contracts", VerifyDebuggerServiceContractsAsync),
         ("Debugger session target identity", VerifyDebuggerSessionIdentityAsync),
         ("Core debugger session lifecycle and event binding", VerifyDebuggerSessionCoordinatorLifecycleAsync),
@@ -215,14 +226,14 @@ internal static class Program
         MockTargetPlugin mock = new();
         Ps5TargetPlugin ps5 = new();
 
-        AssertEqual(new Version(2, 16, 0), PluginApiInfo.CurrentVersion, "Unexpected Plugin API version.");
-        AssertTrue(PluginApiInfo.IsCompatible(new Version(2, 12, 0)), "Plugin API 2.16 host rejected an older compatible 2.12 plugin contract.");
+        AssertEqual(new Version(2, 18, 0), PluginApiInfo.CurrentVersion, "Unexpected Plugin API version.");
+        AssertTrue(PluginApiInfo.IsCompatible(new Version(2, 12, 0)), "Plugin API 2.18 host rejected an older compatible 2.12 plugin contract.");
         AssertTrue(PluginApiInfo.IsCompatible(mock.Metadata.ApiVersion), "Mock plugin API version is incompatible.");
         AssertTrue(PluginApiInfo.IsCompatible(ps5.Metadata.ApiVersion), "PS5 plugin API version is incompatible.");
-        AssertEqual("1.0.0.rev16", mock.Metadata.DisplayVersion, "Unexpected mock plugin display version.");
-        AssertEqual(new Version(2, 16, 0), mock.Metadata.ApiVersion, "Unexpected Mock plugin API version.");
-        AssertEqual("0.1.0.rev38", ps5.Metadata.DisplayVersion, "Unexpected PS5 plugin display version.");
-        AssertEqual(new Version(2, 16, 0), ps5.Metadata.ApiVersion, "Unexpected PS5 plugin API version.");
+        AssertEqual("1.0.1.rev17", mock.Metadata.DisplayVersion, "Unexpected mock plugin display version.");
+        AssertEqual(new Version(2, 18, 0), mock.Metadata.ApiVersion, "Unexpected Mock plugin API version.");
+        AssertEqual("0.1.2.rev39", ps5.Metadata.DisplayVersion, "Unexpected PS5 plugin display version.");
+        AssertEqual(new Version(2, 18, 0), ps5.Metadata.ApiVersion, "Unexpected PS5 plugin API version.");
 
         return Task.CompletedTask;
     }
@@ -356,6 +367,63 @@ internal static class Program
             "Debugger breakpoint validation success result is malformed.");
         AssertFalse(invalid.IsValid, "Debugger breakpoint validation failure result is malformed.");
         AssertEqual("blocked", invalid.Message, "Debugger breakpoint validation failure message changed unexpectedly.");
+
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyWatchpointTriggerResolutionAsync()
+    {
+        DebuggerBreakpoint watchpoint = new(
+            "wp-resolve",
+            new DebuggerBreakpointRequest(
+                0x9000,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write));
+        DebuggerEvent sourceEvent = new(
+            DebuggerEventKind.Watchpoint,
+            DebuggerExecutionState.Paused,
+            DebuggerStopReason.Watchpoint,
+            threadId: 3,
+            instructionPointer: 0x4005,
+            triggeredBreakpoint: watchpoint);
+
+        DisassembledInstruction trigger = new(
+            0x4002,
+            new byte[] { 0x01, 0x70, 0x40 },
+            "add",
+            "[rax+40h],esi");
+        DisassembledInstruction stop = new(
+            0x4005,
+            new byte[] { 0x90 },
+            "nop",
+            string.Empty);
+        DisassemblySnapshot snapshot = new(
+            requestedAddress: 0x4005,
+            startAddress: 0x4002,
+            bytes: new byte[] { 0x01, 0x70, 0x40, 0x90 },
+            region: new MemoryRegion(0x4000, 0x100, MemoryProtection.Read | MemoryProtection.Execute),
+            architecture: new TargetArchitecture(CpuArchitecture.X64, 64, 64, Endianness.Little),
+            instructions: new[] { trigger, stop });
+
+        DebuggerEvent resolved = new DebuggerWatchpointTriggerResolver().Resolve(sourceEvent, snapshot);
+        AssertEqual<ulong?>(0x4005, resolved.InstructionPointer,
+            "Watchpoint trigger resolution changed the authoritative stop/current instruction pointer.");
+        AssertEqual<ulong?>(0x4002, resolved.TriggerInstructionAddress,
+            "Watchpoint trigger resolution did not identify the logical instruction ending at the stop RIP.");
+        AssertEqual(DebuggerTriggerResolution.DisassemblyDerived, resolved.TriggerResolution,
+            "Watchpoint trigger resolution did not report its derivation source.");
+        AssertEqual<ulong?>(0x9000, resolved.WatchedAddress,
+            "Watchpoint trigger resolution lost the watched memory address.");
+        AssertEqual<DebuggerBreakpointAccess?>(DebuggerBreakpointAccess.Write, resolved.WatchpointAccess,
+            "Watchpoint trigger resolution lost the watchpoint access mode.");
+        AssertEqual<int?>(4, resolved.WatchpointSize,
+            "Watchpoint trigger resolution lost the watchpoint size.");
+
+        DebuggerEvent exact = sourceEvent.WithTriggerInstruction(0x4001, DebuggerTriggerResolution.BackendExact);
+        DebuggerEvent preserved = new DebuggerWatchpointTriggerResolver().Resolve(exact, snapshot);
+        AssertTrue(ReferenceEquals(exact, preserved),
+            "Core replaced a backend-exact trigger instruction with a disassembly-derived result.");
 
         return Task.CompletedTask;
     }
@@ -1817,8 +1885,8 @@ internal static class Program
     private static async Task VerifyMockDebuggerProviderAsync()
     {
         MockTargetPlugin plugin = new();
-        AssertEqual("1.0.0.rev16", plugin.Metadata.DisplayVersion, "Unexpected Mock debugger plugin revision.");
-        AssertEqual(new Version(2, 16, 0), plugin.Metadata.ApiVersion, "Mock debugger backend must target Plugin API 2.16.0.");
+        AssertEqual("1.0.1.rev17", plugin.Metadata.DisplayVersion, "Unexpected Mock debugger plugin revision.");
+        AssertEqual(new Version(2, 18, 0), plugin.Metadata.ApiVersion, "Mock debugger backend must target Plugin API 2.18.0.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.Debugger), "Mock debugger capability is missing.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.ThreadEnumeration), "Mock thread-enumeration capability is missing.");
         AssertTrue(plugin.Capabilities.HasFlag(TargetCapabilities.ThreadControl), "Mock thread-control capability is missing.");
@@ -2351,8 +2419,12 @@ internal static class Program
         await debugger.ContinueAsync(CancellationToken.None).ConfigureAwait(false);
         DebuggerEvent hit = await firstHit.Task.WaitAsync(TimeSpan.FromSeconds(2)).ConfigureAwait(false);
         AssertEqual(DebuggerStopReason.Watchpoint, hit.StopReason, "Mock hardware watchpoint hit lost its stop reason.");
-        AssertEqual<ulong?>(MockTargetLayout.CodeAddress + 4, hit.InstructionPointer,
-            "Mock hardware watchpoint did not report the accessing instruction as its instruction pointer.");
+        AssertEqual<ulong?>(MockTargetLayout.CodeAddress + 6, hit.InstructionPointer,
+            "Mock hardware watchpoint did not preserve the post-access stop instruction pointer.");
+        AssertEqual<ulong?>(MockTargetLayout.CodeAddress + 4, hit.TriggerInstructionAddress,
+            "Mock hardware watchpoint did not identify its deterministic trigger instruction separately.");
+        AssertEqual(DebuggerTriggerResolution.BackendExact, hit.TriggerResolution,
+            "Mock hardware watchpoint did not mark its deterministic trigger as backend-exact.");
         AssertEqual(persistent.Id, hit.TriggeredBreakpoint?.Id,
             "Mock hardware watchpoint event did not identify the triggered watchpoint.");
         AssertEqual(MockTargetLayout.HealthAddress, hit.TriggeredBreakpoint!.Request.Address,
@@ -3617,16 +3689,44 @@ internal static class Program
         AssertTrue(state.CreateOverlay().IsEmpty,
             "Completed software-breakpoint retirement left stale logical bytes or markers in the Disassembler overlay.");
 
+        DebuggerBreakpoint watchpoint = new(
+            "hw-1",
+            new DebuggerBreakpointRequest(
+                0x500000,
+                4,
+                DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write));
         state.ObserveEvent(new DebuggerEvent(
             DebuggerEventKind.Watchpoint,
             DebuggerExecutionState.Paused,
-            DebuggerStopReason.Breakpoint,
+            DebuggerStopReason.Watchpoint,
             threadId: 7,
-            instructionPointer: 0x402000));
+            instructionPointer: 0x402003,
+            triggeredBreakpoint: watchpoint));
+        DisassemblyOverlay unresolvedWatchpointOverlay = state.CreateOverlay();
+        AssertTrue(unresolvedWatchpointOverlay.Markers.Any(marker =>
+                marker.Address == 0x402003 && marker.Text == "Watchpoint stop (trigger unresolved)"),
+            "An unresolved watchpoint stop falsely presented the current instruction as the triggering instruction.");
+
+        state.ObserveEvent(new DebuggerEvent(
+            DebuggerEventKind.Watchpoint,
+            DebuggerExecutionState.Paused,
+            DebuggerStopReason.Watchpoint,
+            threadId: 7,
+            instructionPointer: 0x402003,
+            triggeredBreakpoint: watchpoint,
+            triggerInstructionAddress: 0x402000,
+            triggerResolution: DebuggerTriggerResolution.DisassemblyDerived));
         DisassemblyOverlay watchpointOverlay = state.CreateOverlay();
         AssertTrue(watchpointOverlay.Markers.Any(marker =>
                 marker.Address == 0x402000 && marker.Text == "Watchpoint hit"),
-            "A paused hardware-watchpoint event did not produce a Disassembler marker at its reported instruction pointer.");
+            "A resolved watchpoint event did not move the Disassembler marker to the triggering instruction.");
+        AssertFalse(watchpointOverlay.Markers.Any(marker =>
+                marker.Address == 0x402003 && marker.Text == "Watchpoint hit"),
+            "A resolved watchpoint event still marked the post-access stop instruction as the trigger.");
+        AssertTrue(watchpointOverlay.Markers.Any(marker =>
+                marker.Address == 0x402003 && marker.Text == "Stop / Current IP"),
+            "A resolved watchpoint event did not preserve the real stop/current instruction as a separate Disassembler marker.");
 
         state.ObserveEvent(new DebuggerEvent(
             DebuggerEventKind.Resumed,
@@ -4292,6 +4392,9 @@ internal static class Program
         string rowSource = File.ReadAllText(rowViewModelPath);
         AssertTrue(rowSource.Contains("public string Markers { get; }", StringComparison.Ordinal),
             "Disassembly rows do not expose debugger marker text.");
+        AssertTrue(rowSource.Contains("public bool IsWatchpointHitRow { get; }", StringComparison.Ordinal) &&
+                   rowSource.Contains("public bool IsWatchpointStopRow { get; }", StringComparison.Ordinal),
+            "Disassembly rows do not expose separate resolved-hit and stop/current highlight state.");
 
         string disassemblerSource = File.ReadAllText(disassemblerViewModelPath);
         AssertTrue(disassemblerSource.Contains("snapshot.Markers", StringComparison.Ordinal),
@@ -4419,9 +4522,34 @@ internal static class Program
 
     private static Task VerifyDisassemblerSelectionCopyExportSourceAsync()
     {
+        string exportDialogXamlPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DataExportDialog.xaml");
+        string exportDialogCodePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DataExportDialog.xaml.cs");
+        string exportDialogXaml = File.ReadAllText(exportDialogXamlPath);
+        string exportDialogCode = File.ReadAllText(exportDialogCodePath);
+        AssertTrue(exportDialogXaml.Contains("<ComboBox.ItemTemplate>", StringComparison.Ordinal) &&
+                   exportDialogXaml.Contains("Text=\"{Binding DisplayName}\"", StringComparison.Ordinal) &&
+                   !exportDialogXaml.Contains("DisplayMemberPath=\"DisplayName\"", StringComparison.Ordinal),
+            "Universal export dialog must render scope and format option DisplayName values through explicit item templates.");
+        AssertContains(exportDialogXaml, "Click=\"SelectNoColumnsButton_Click\"",
+            "Universal export dialog does not expose Select None next to Select All.");
+        AssertContains(exportDialogXaml, "x:Name=\"ContinueButton\"",
+            "Universal export dialog Continue action is not addressable for live column-selection gating.");
+        AssertContains(exportDialogCode, "ContinueButton.IsEnabled = hasSelectedColumn",
+            "Universal export dialog does not disable Continue immediately when no columns are selected.");
+        AssertContains(exportDialogCode, "ValidationTextBlock.Text = hasSelectedColumn ? string.Empty : \"Select at least one column.\"",
+            "Universal export dialog validation text is not synchronized with live column selection.");
+
         string xamlPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DisassemblerWindow.xaml");
         string windowSourcePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DisassemblerWindow.xaml.cs");
         string viewModelSourcePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "DisassemblerViewModel.cs");
+        string pluginViewModelSourcePath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "PluginViewModel.cs");
+        string mainWindowXamlPath = Path.Combine(AppContext.BaseDirectory, "Fixtures", "MainWindow.xaml");
+
+        foreach (string path in new[] { xamlPath, windowSourcePath, viewModelSourcePath, pluginViewModelSourcePath, mainWindowXamlPath })
+        {
+            AssertTrue(File.Exists(path),
+                $"Disassembler/export UI fixture is missing: {Path.GetFileName(path)}");
+        }
 
         string xaml = File.ReadAllText(xamlPath);
         AssertTrue(xaml.Contains("SelectionMode=\"Extended\"", StringComparison.Ordinal),
@@ -4459,6 +4587,18 @@ internal static class Program
             "Disassembler export scopes must include Displayed and Selected.");
         AssertTrue(viewModelSource.Contains("new DisassemblyExportSource", StringComparison.Ordinal),
             "Disassembler export scopes are not backed by the structured Core disassembly export source.");
+        AssertContains(viewModelSource, "public bool CanExport => !_disposed && !IsBusy && Instructions.Count > 0;",
+            "Disassembler Export must be disabled when there are no displayed instructions.");
+
+        string pluginViewModelSource = File.ReadAllText(pluginViewModelSourcePath);
+        AssertContains(pluginViewModelSource, "public bool CanExportScanResults =>\n        HasVisibleScanResults &&",
+            "Scan Results Export must be disabled when there are no results.");
+        AssertContains(pluginViewModelSource, "public bool CanExportSavedAddresses =>\n        HasSavedAddresses &&",
+            "Saved Addresses Export must be disabled when there are no saved addresses.");
+
+        string mainWindowXaml = File.ReadAllText(mainWindowXamlPath);
+        AssertContains(mainWindowXaml, "IsEnabled=\"{Binding SelectedPlugin.HasSavedAddresses}\"",
+            "Saved Addresses Remove All must be disabled when the list is empty.");
 
         return Task.CompletedTask;
     }
@@ -6335,6 +6475,11 @@ internal static class Program
         AssertTrue(secondRow.Contains("Orientation=\"Horizontal\"", StringComparison.Ordinal) &&
                    secondRow.Contains("HorizontalAlignment=\"Left\"", StringComparison.Ordinal),
             "The second-row action lane is not left-aligned and horizontal.");
+        string disassemblerButton = secondRow[secondRow.LastIndexOf("<Button", disassemblerIndex, StringComparison.Ordinal)..disassemblerIndex];
+        string debuggerButton = secondRow[secondRow.LastIndexOf("<Button", debuggerIndex, StringComparison.Ordinal)..debuggerIndex];
+        AssertTrue(disassemblerButton.Contains("Style=\"{StaticResource PrimaryButtonStyle}\"", StringComparison.Ordinal) &&
+                   debuggerButton.Contains("Style=\"{StaticResource PrimaryButtonStyle}\"", StringComparison.Ordinal),
+            "Disassembler and Debugger must use the theme-driven primary action style used by the active First Scan action.");
 
         AssertFalse(xaml.Contains("SelectedPlugin.ActiveProcessText", StringComparison.Ordinal),
             "Main workspace still displays the removed Active <process> text.");
@@ -6549,6 +6694,46 @@ internal static class Program
         int consumedByteCount = instructions.Sum(instruction => instruction.Length);
         AssertEqual(code.Length, consumedByteCount,
             "PS5 x86-64 provider did not consume the deterministic byte fixture exactly once.");
+
+        IDisassemblyWatchpointResolver watchpointResolver = session.GetRequiredService<IDisassemblyWatchpointResolver>();
+        IReadOnlyList<DisassembledInstruction> watchpointInstructions = await provider
+            .DisassembleAsync(
+                0x8033D981,
+                new byte[] { 0x01, 0x70, 0x40 },
+                session.Architecture,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        DebuggerRegister rax = new(
+            "rax",
+            "RAX",
+            64,
+            BitConverter.GetBytes(0x00000002394E4000UL),
+            "General",
+            DebuggerRegisterRole.None,
+            canWrite: false,
+            DebuggerRegisterValueEncoding.UnsignedLittleEndian);
+        DisassemblyWatchpointTarget? watchpointTarget = watchpointResolver.ResolveWatchpointTarget(
+            watchpointInstructions.Single(),
+            new[] { rax });
+        AssertTrue(watchpointTarget is not null,
+            "PS5 disassembly watchpoint resolver did not resolve a simple register+displacement memory write.");
+        AssertEqual(0x00000002394E4040UL, watchpointTarget!.Address,
+            "PS5 disassembly watchpoint resolver produced the wrong effective memory address.");
+        AssertEqual(4, watchpointTarget.Size,
+            "PS5 disassembly watchpoint resolver produced the wrong memory-access width.");
+        AssertEqual(DebuggerBreakpointAccess.ReadWrite, watchpointTarget.Access,
+            "PS5 disassembly watchpoint resolver produced the wrong watchpoint access mode for a read-modify-write instruction.");
+
+        IReadOnlyList<DisassembledInstruction> leaInstructions = await provider
+            .DisassembleAsync(
+                0x8033D990,
+                new byte[] { 0x48, 0x8D, 0x48, 0x40 },
+                session.Architecture,
+                CancellationToken.None)
+            .ConfigureAwait(false);
+        AssertEqual<DisassemblyWatchpointTarget?>(null,
+            watchpointResolver.ResolveWatchpointTarget(leaInstructions.Single(), new[] { rax }),
+            "PS5 disassembly watchpoint resolver treated LEA as a real memory access.");
 
         await server.Completion.ConfigureAwait(false);
     }
@@ -8466,6 +8651,371 @@ internal static class Program
         }
 
         throw new InvalidOperationException(message);
+    }
+
+    private static Task VerifyDebuggerSnapshotCaptureModelAsync()
+    {
+        DebuggerSnapshotCaptureService service = new();
+        DebuggerSnapshotCaptureRequest request = CreateSnapshotRequest(
+            label: "Player hit 1",
+            group: "Player",
+            moduleBase: 0x10000000,
+            registerValue: 1,
+            uniqueFrameOffset: 0x300);
+        DebuggerSnapshot snapshot = service.Capture(request);
+
+        AssertTrue(snapshot.SnapshotId != Guid.Empty, "Snapshot capture did not generate a stable snapshot id.");
+        AssertEqual("Player hit 1", snapshot.Label, "Snapshot label was not preserved.");
+        AssertEqual("Player", snapshot.Group, "Snapshot group was not preserved.");
+        AssertEqual(DebuggerSnapshotCaptureSource.Live, snapshot.CaptureMode, "Live capture source was not preserved.");
+        AssertEqual((ulong)0x10000020, snapshot.Event.InstructionPointer!.Value, "Snapshot stop/current IP changed during composition.");
+        AssertEqual((ulong)0x10000010, snapshot.Event.TriggerInstructionAddress!.Value, "Snapshot trigger IP changed during composition.");
+        AssertEqual(DebuggerTriggerResolution.DisassemblyDerived, snapshot.Event.TriggerResolution, "Snapshot trigger-resolution provenance was not preserved.");
+        AssertEqual("Mock Main", snapshot.Event.ThreadName, "Snapshot stopped-thread name was not preserved.");
+        AssertEqual(DebuggerSnapshotBreakpointType.Watchpoint, snapshot.Breakpoints[0].Type, "Snapshot breakpoint/watchpoint semantic type was not preserved.");
+        AssertEqual(DebuggerBreakpointKind.Hardware, snapshot.Breakpoints[0].Mechanism, "Snapshot breakpoint/watchpoint mechanism was not preserved.");
+        AssertEqual(3, snapshot.CallStack.Count, "Snapshot call stack did not preserve every frame.");
+        AssertEqual((ulong)0x100, snapshot.CallStack[1].ModuleOffset!.Value, "Module-relative frame offset was not preserved.");
+        AssertEqual("0100000000000000", snapshot.Registers[0].RawBytes, "Snapshot register raw bytes changed.");
+
+        DebuggerSnapshot renamed = snapshot.WithMetadata(label: "Renamed", group: "Enemy");
+        AssertEqual("Player hit 1", snapshot.Label, "Updating snapshot metadata mutated the original immutable snapshot.");
+        AssertEqual("Renamed", renamed.Label, "Snapshot metadata copy did not update the label.");
+        AssertEqual("Enemy", renamed.Group, "Snapshot metadata copy did not update the group.");
+
+        string[] mutableMarkers = ["Original marker"];
+        DebuggerSnapshotCaptureRequest mutableRequest = request with
+        {
+            Disassembly =
+            [
+                request.Disassembly[0] with { Markers = mutableMarkers },
+                request.Disassembly[1]
+            ]
+        };
+        DebuggerSnapshot frozen = service.Capture(mutableRequest);
+        mutableMarkers[0] = "Mutated after capture";
+        AssertEqual("Original marker", frozen.Disassembly[0].Markers[0],
+            "Snapshot capture retained a mutable instruction-marker collection.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerSnapshotJsonRoundTripAsync()
+    {
+        DebuggerSnapshot snapshot = new DebuggerSnapshotCaptureService().Capture(CreateSnapshotRequest(
+            label: "Round trip",
+            group: "Player",
+            moduleBase: 0x7FFF00000000,
+            registerValue: 0x1122334455667788,
+            uniqueFrameOffset: 0x444));
+        DebuggerSnapshotJsonSerializer serializer = new();
+        string json = serializer.Serialize(snapshot);
+
+        AssertContains(json, "\"schema\": \"teekay87-memory-engine-debugger-snapshot\"", "Snapshot JSON did not emit the canonical schema id.");
+        AssertContains(json, "\"schemaVersion\": 1", "Snapshot JSON did not emit schema version 1.");
+        AssertContains(json, "\"instructionPointer\": \"0x7FFF00000020\"", "Snapshot JSON did not preserve the 64-bit stop address as a hexadecimal string.");
+        AssertContains(json, "\"triggerInstructionAddress\": \"0x7FFF00000010\"", "Snapshot JSON did not preserve the 64-bit trigger address as a hexadecimal string.");
+
+        DebuggerSnapshot restored = serializer.Deserialize(json);
+        AssertEqual(snapshot.SnapshotId, restored.SnapshotId, "Snapshot id changed during JSON round trip.");
+        AssertEqual(snapshot.CapturedAtUtc, restored.CapturedAtUtc, "Snapshot capture timestamp changed during JSON round trip.");
+        AssertEqual(snapshot.Event.InstructionPointer, restored.Event.InstructionPointer, "Stop/current IP changed during JSON round trip.");
+        AssertEqual(snapshot.Event.TriggerInstructionAddress, restored.Event.TriggerInstructionAddress, "Trigger IP changed during JSON round trip.");
+        AssertEqual(snapshot.Registers[0].RawBytes, restored.Registers[0].RawBytes, "Raw register bytes changed during JSON round trip.");
+        AssertEqual(snapshot.Disassembly[0].Bytes, restored.Disassembly[0].Bytes, "Logical disassembly bytes changed during JSON round trip.");
+        AssertEqual(snapshot.Breakpoints[0].Address, restored.Breakpoints[0].Address, "Breakpoint context changed during JSON round trip.");
+        AssertEqual(snapshot.Memory[0].Bytes, restored.Memory[0].Bytes, "Bounded memory context changed during JSON round trip.");
+        AssertEqual(snapshot.Source.CaptureSource, restored.Source.CaptureSource, "Original capture provenance changed during JSON round trip.");
+        AssertEqual(snapshot.CaptureMode, restored.CaptureMode, "Snapshot capture mode changed during JSON round trip.");
+        AssertTrue(restored.Disassembly[0].Markers is ICollection<string> { IsReadOnly: true },
+            "Imported snapshot instruction markers were not frozen as read-only data.");
+        DebuggerSnapshotComparison importedComparison = new DebuggerSnapshotComparer().Compare(snapshot, restored);
+        AssertTrue(importedComparison.Items.Where(item => item.Category != "Summary").All(item => item.Classification == DebuggerComparisonClassification.Identical),
+            "Imported snapshot did not compare identically to its pre-export source.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerSnapshotJsonValidationAsync()
+    {
+        DebuggerSnapshot snapshot = new DebuggerSnapshotCaptureService().Capture(CreateSnapshotRequest(
+            label: "Validation",
+            group: "Player",
+            moduleBase: 0x10000000,
+            registerValue: 1,
+            uniqueFrameOffset: 0x300));
+        DebuggerSnapshotJsonSerializer serializer = new();
+        string json = serializer.Serialize(snapshot);
+
+        AssertThrows<InvalidDataException>(
+            () => serializer.Deserialize(json.Replace(
+                "teekay87-memory-engine-debugger-snapshot",
+                "not-a-debugger-snapshot",
+                StringComparison.Ordinal)),
+            "Snapshot importer accepted an invalid schema id.");
+        AssertThrows<NotSupportedException>(
+            () => serializer.Deserialize(json.Replace("\"schemaVersion\": 1", "\"schemaVersion\": 99", StringComparison.Ordinal)),
+            "Snapshot importer accepted an unsupported future schema version.");
+        AssertThrows<InvalidDataException>(
+            () => serializer.Deserialize(json.Replace("0100000000000000", "0G", StringComparison.Ordinal)),
+            "Snapshot importer accepted invalid raw register hex data.");
+        AssertThrows<InvalidDataException>(
+            () => serializer.Deserialize(json.Replace("\"addressWidth\": 64", "\"addressWidth\": 28", StringComparison.Ordinal)),
+            "Snapshot importer accepted addresses that exceed the declared address width.");
+
+        string additiveJson = json.Replace(
+            "\"schemaVersion\": 1,",
+            "\"schemaVersion\": 1,\n  \"futureOptionalField\": { \"enabled\": true },",
+            StringComparison.Ordinal);
+        DebuggerSnapshot additive = serializer.Deserialize(additiveJson);
+        AssertEqual(snapshot.SnapshotId, additive.SnapshotId,
+            "Snapshot importer rejected or changed a schema-v1 document containing an unknown additive field.");
+        return Task.CompletedTask;
+    }
+
+    private static async Task VerifyDebuggerSnapshotExportCancellationAsync()
+    {
+        DebuggerSnapshot snapshot = new DebuggerSnapshotCaptureService().Capture(CreateSnapshotRequest(
+            "Transactional export", "Player", 0x10000000, 1, 0x300));
+        DebuggerSnapshotJsonSerializer serializer = new();
+        string directory = Path.Combine(Path.GetTempPath(), $"tk87me-snapshot-{Guid.NewGuid():N}");
+        string destination = Path.Combine(directory, "snapshot.json");
+        Directory.CreateDirectory(directory);
+        await File.WriteAllTextAsync(destination, "existing-complete-file").ConfigureAwait(false);
+        try
+        {
+            using CancellationTokenSource cancellation = new();
+            cancellation.Cancel();
+            await AssertThrowsAsync<OperationCanceledException>(
+                () => serializer.ExportAsync(destination, snapshot, cancellation.Token),
+                "Cancelled debugger snapshot export did not surface cancellation.").ConfigureAwait(false);
+            AssertEqual("existing-complete-file", await File.ReadAllTextAsync(destination).ConfigureAwait(false),
+                "Cancelled debugger snapshot export replaced an existing completed destination.");
+            AssertEqual(0, Directory.GetFiles(directory, "*.tmp").Length,
+                "Cancelled debugger snapshot export left a temporary publication file behind.");
+        }
+        finally
+        {
+            TryDeleteDirectory(directory);
+        }
+    }
+
+    private static Task VerifyDebuggerSnapshotLiveCaptureSourceAsync()
+    {
+        string source = File.ReadAllText(Path.Combine(AppContext.BaseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+        AssertContains(source, "DebuggerSessionState.Paused",
+            "Live snapshot capture is not explicitly gated to a paused debugger session.");
+        AssertContains(source, "_latestStopContext?.Sequence != stopSequence",
+            "Live snapshot capture does not revalidate the stop sequence before publishing a snapshot.");
+        AssertContains(source, "!IsTargetCurrent()",
+            "Live snapshot capture does not revalidate Active Target/session identity before publication.");
+        AssertContains(source, "CancellationTokenSource.CreateLinkedTokenSource",
+            "Live snapshot capture does not accept cancellation through the debugger lifetime/caller token.");
+        AssertContains(source, "ReadDisassemblyContextAsync",
+            "Live snapshot capture does not preserve bounded logical disassembly context.");
+        AssertContains(source, "ReadMemoryViewerWindowAsync",
+            "Live snapshot capture does not preserve the bounded standard stack-memory context.");
+        AssertContains(source, "DebuggerSnapshotSectionStatus.Failed",
+            "Live snapshot capture does not preserve optional-section failures honestly.");
+        AssertContains(source, "DebuggerSnapshotCaptureService",
+            "Live snapshot capture bypasses the shared snapshot composition service.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerSnapshotComparerAsync()
+    {
+        DebuggerSnapshotCaptureService capture = new();
+        DebuggerSnapshot player1 = capture.Capture(CreateSnapshotRequest("Player 1", "Player", 0x10000000, 1, 0x300));
+        DebuggerSnapshot player2 = capture.Capture(CreateSnapshotRequest("Player 2", "Player", 0x20000000, 1, 0x300));
+        DebuggerSnapshot enemy1 = capture.Capture(CreateSnapshotRequest("Enemy 1", "Enemy", 0x30000000, 0, 0x400));
+        DebuggerSnapshot enemy2 = capture.Capture(CreateSnapshotRequest("Enemy 2", "Enemy", 0x40000000, 0, 0x400));
+
+        DebuggerSnapshotComparer comparer = new();
+        DebuggerSnapshotComparison pair = comparer.Compare(player1, player2);
+        DebuggerComparisonItem context = pair.Items.Single(item => item.Category == "Context" && item.Name == "Stop/current instruction");
+        AssertEqual(DebuggerComparisonClassification.Identical, context.Classification,
+            "Module-relative stop addresses with different raw ASLR bases were not treated as the same code location.");
+
+        DebuggerSnapshotComparison groups = comparer.CompareGroups([player1, player2], [enemy1, enemy2]);
+        DebuggerComparisonItem register = groups.Items.Single(item => item.Category == "Registers" && string.Equals(item.Name, "R12", StringComparison.OrdinalIgnoreCase));
+        AssertEqual(DebuggerComparisonClassification.StableInBothGroupsDifferentBetweenGroups, register.Classification,
+            "Comparer did not identify a register that is stable inside both groups and different between them.");
+        DebuggerComparisonItem divergence = groups.Items.Single(item => item.Category == "Call Stack" && item.Name == "First divergence");
+        AssertContains(divergence.GroupA, "+0x300", "Comparer did not expose the first Player call-stack divergence.");
+        AssertContains(divergence.GroupB, "+0x400", "Comparer did not expose the first Enemy call-stack divergence.");
+        DebuggerComparisonItem triggerCode = groups.Items.Single(item => item.Category == "Instructions" && item.Name == "Trigger instruction code");
+        AssertEqual(DebuggerComparisonClassification.Identical, triggerCode.Classification,
+            "Logical trigger instruction comparison did not normalize module-relative locations across ASLR bases.");
+        DebuggerComparisonItem summaryRegister = groups.Items.Single(item =>
+            item.Category == "Summary" && item.Name.Contains("Registers / R12", StringComparison.OrdinalIgnoreCase));
+        AssertEqual(DebuggerComparisonClassification.StableInBothGroupsDifferentBetweenGroups, summaryRegister.Classification,
+            "Stable register discriminator was not promoted into the explainable comparison summary.");
+
+        DebuggerSnapshot withWrapper = enemy1 with
+        {
+            CallStack = Array.AsReadOnly(new[]
+            {
+                enemy1.CallStack[0],
+                enemy1.CallStack[0] with { Index = 1, ModuleOffset = 0x250, InstructionAddress = 0x30000250 },
+                enemy1.CallStack[1] with { Index = 2 },
+                enemy1.CallStack[2] with { Index = 3 }
+            })
+        };
+        DebuggerSnapshotComparison aligned = comparer.Compare(enemy1, withWrapper);
+        DebuggerComparisonItem alignedPath = aligned.Items.Single(item => item.Category == "Call Stack" && item.Name == "Execution path");
+        AssertContains(alignedPath.Evidence, "3 ordered frame(s) align overall",
+            "Pairwise call-stack comparison did not retain ordered alignment evidence when one stack contains an extra wrapper frame.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDisassemblerBreakpointWatchpointActionSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DisassemblerWindow.xaml"));
+        string code = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DisassemblerWindow.xaml.cs"));
+        string main = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "MainWindow.xaml.cs"));
+        AssertContains(xaml, "Header=\"Add Breakpoint\"", "Disassembler context menu does not expose the direct Add Breakpoint action.");
+        AssertContains(xaml, "Header=\"Add Watchpoint\"", "Disassembler context menu does not expose the direct Add Watchpoint action.");
+        AssertContains(code, "dataGrid.SelectedItems.Count == 1", "Disassembler debugger actions are not explicitly gated to exactly one selected row.");
+        AssertContains(code, "AddBreakpointMenuItem_Click", "Disassembler Add Breakpoint action has no code-behind handler.");
+        AssertContains(code, "AddWatchpointMenuItem_Click", "Disassembler Add Watchpoint action has no code-behind handler.");
+        AssertContains(main, "FindAttachedDebugger(plugin, targetProcess)", "Disassembler debugger actions do not reuse the existing attached-debugger lookup path.");
+        AssertContains(main, "CanResolveDisassemblyWatchpoint()", "Disassembler Add Watchpoint is still restricted to only the current stop/trigger instruction instead of any safely resolvable selected row while paused.");
+        AssertContains(main, "ResolveDisassemblyWatchpointTarget", "Disassembler Add Watchpoint does not use the plugin-owned memory-access resolver.");
+        AssertContains(main, "target.Size", "Disassembler Add Watchpoint does not use the derived memory-access size.");
+        AssertContains(main, "target.Access", "Disassembler Add Watchpoint does not use the derived memory-access mode.");
+        AssertContains(main, "ValidateAddressActionRequest(request)", "Disassembler debugger actions bypass existing backend request validation.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyCallStackComparerWorkspaceSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string debuggerXaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string comparerXaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "CallStackComparerWindow.xaml"));
+        string comparerCode = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "CallStackComparerWindow.xaml.cs"));
+        string comparerViewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "CallStackComparerViewModel.cs"));
+        string main = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "MainWindow.xaml.cs"));
+        AssertContains(debuggerXaml, "Content=\"Compare...\"", "Call Stack workspace does not expose the comparer entry point.");
+        AssertContains(comparerXaml, "Capture Current", "Comparer does not expose live snapshot capture.");
+        AssertContains(comparerXaml, "IsEnabled=\"{Binding CanCaptureCurrent}\"",
+            "Comparer live capture is not disabled while the debugger cannot safely capture the current paused context.");
+        AssertContains(comparerXaml, "Compare Groups", "Comparer does not expose grouped comparison.");
+        AssertContains(comparerXaml, "<DataGridTemplateColumn Header=\"Group\"", "Comparer snapshot rows do not use a template-based Group editor consistent with Saved Addresses rows.");
+        AssertContains(comparerXaml, "ItemsSource=\"{Binding AvailableGroups}\"", "Comparer snapshot Group editor is not populated from session-local group names.");
+        AssertContains(comparerXaml, "x:Name=\"NewSnapshotGroupTextBox\"", "Comparer snapshot Group dropdown does not expose the dedicated text input for new session groups.");
+        AssertContains(comparerXaml, "PreviewKeyDown=\"SnapshotNewGroupTextBox_PreviewKeyDown\"", "Comparer new-group input is not wired to explicit creation on Enter.");
+        AssertContains(comparerXaml, "DropDownOpened=\"SnapshotGroupComboBox_DropDownOpened\"", "Comparer Group dropdown does not focus the dedicated new-group input when opened.");
+        AssertContains(comparerXaml, "SelectedItem=\"{Binding Group, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\"", "Comparer snapshot Group dropdown does not assign an existing session group directly to the row.");
+        AssertContains(comparerXaml, "Style=\"{StaticResource SnapshotGroupComboBoxStyle}\"", "Comparer snapshot Group row does not use the dedicated group-creation dropdown presentation.");
+        AssertContains(comparerXaml, "x:Name=\"GroupAComboBox\"", "Comparer Group A selector is not a dropdown.");
+        AssertContains(comparerXaml, "x:Name=\"GroupBComboBox\"", "Comparer Group B selector is not a dropdown.");
+        AssertContains(comparerXaml, "ItemsSource=\"{Binding GroupNames}\" SelectedItem=\"{Binding SelectedGroupA, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\" IsEditable=\"False\"", "Comparer Group A selector is not restricted to registered session names with live view-model selection state.");
+        AssertContains(comparerXaml, "ItemsSource=\"{Binding GroupNames}\" SelectedItem=\"{Binding SelectedGroupB, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}\" IsEditable=\"False\"", "Comparer Group B selector is not restricted to registered session names with live view-model selection state.");
+        AssertFalse(comparerXaml.Contains("x:Name=\"GroupATextBox\"", StringComparison.Ordinal), "Comparer Group A still exposes free-form text entry.");
+        AssertFalse(comparerXaml.Contains("x:Name=\"GroupBTextBox\"", StringComparison.Ordinal), "Comparer Group B still exposes free-form text entry.");
+        AssertContains(comparerXaml, "Click=\"RemoveSnapshotRowButton_Click\"", "Comparer snapshot rows do not expose the Saved-Addresses-style row Remove action.");
+        AssertContains(comparerViewModel, "raw.Length == 0 ? string.Empty : _registerGroupName(raw)", "Comparer No group does not bypass group-name registration for empty membership.");
+        AssertContains(comparerXaml, "Content=\"No group\"", "Comparer Group dropdown does not expose an explicit ungroup action.");
+        AssertContains(comparerCode, "comboBox.SelectedIndex = -1;", "Comparer No group action does not clear the live row ComboBox selection immediately.");
+        AssertFalse(comparerCode.Contains("comboBox.GetBindingExpression(ComboBox.SelectedItemProperty)?.UpdateTarget();", StringComparison.Ordinal), "Comparer No group action still relies on the ineffective rev47 binding-target refresh.");
+        AssertContains(comparerXaml, "IsEnabled=\"{Binding CanComparePair}\"", "Comparer Compare 2 action is not gated to exactly two selected snapshots.");
+        AssertContains(comparerXaml, "IsEnabled=\"{Binding CanCompareGroups}\"", "Comparer Compare Groups action is not gated to two distinct non-empty groups.");
+        AssertContains(comparerXaml, "IsEnabled=\"{Binding CanExportSnapshot}\"", "Comparer snapshot Export action is not gated to exactly one selected snapshot.");
+        AssertContains(comparerXaml, "IsEnabled=\"{Binding HasResults}\"", "Comparer Export Results action is not gated to a current comparison result.");
+        AssertContains(comparerXaml, "IsEnabled=\"{Binding HasSnapshots}\"", "Comparer Remove All action is not disabled when the snapshot list is empty.");
+        AssertFalse(comparerXaml.Contains("Click=\"RemoveButton_Click\"", StringComparison.Ordinal), "Comparer still exposes the redundant panel-level Remove action.");
+        AssertContains(comparerCode, "SnapshotNewGroupTextBox_PreviewKeyDown", "Comparer does not create a new snapshot group from the dropdown input.");
+        AssertContains(comparerCode, "TryCreateAndAssignGroup", "Comparer new-group input does not assign the created group to the originating snapshot row.");
+        AssertContains(comparerViewModel, "TryCreateAndAssignGroup", "Comparer row view model does not expose explicit create-and-assign group behavior.");
+        AssertContains(comparerCode, "ViewModel.SelectedGroupA", "Comparer group comparison does not use the restricted Group A view-model selection.");
+        AssertContains(comparerViewModel, "ObservableCollection<string> GroupNames", "Comparer does not retain session-local group names.");
+        AssertContains(comparerViewModel, "RegisterGroupName", "Comparer does not normalize and register snapshot group assignments.");
+        AssertContains(comparerViewModel, "StringComparison.OrdinalIgnoreCase", "Comparer group-name reuse is not case-insensitive.");
+        AssertContains(comparerCode, "ImportAsync", "Comparer does not import offline snapshot JSON.");
+        AssertContains(comparerCode, "ExportResultsButton_Click", "Comparer does not export derived comparison results.");
+        AssertContains(comparerViewModel, "CompareGroups", "Comparer view model does not use the shared grouped comparison engine.");
+        AssertContains(comparerCode, "ConfirmationDialogService", "Comparer destructive snapshot removal does not reuse the shared confirmation dialog service.");
+        AssertContains(comparerViewModel, "ComparisonUsesSnapshot", "Comparer does not track whether a removed snapshot belongs to the current comparison result.");
+        AssertContains(comparerViewModel, "SnapshotGroupChanged", "Comparer does not invalidate group results when compared-group membership changes.");
+        AssertContains(comparerViewModel, "InvalidateGroupComparisonForSelectionChange", "Comparer does not invalidate group results when Group A/B inputs change.");
+        AssertContains(comparerViewModel, "public void ClearGroup() => Group = string.Empty;", "Comparer row model does not support explicit ungrouping while retaining the session group catalog.");
+        AssertContains(main, "CallStackComparerViewModel? comparerWorkspace = null", "Comparer snapshot state is not retained by the debugger-session workspace after the window closes.");
+        AssertContains(main, "candidate => ReferenceEquals(candidate, comparerWorkspace)", "Main window does not reuse/activate the existing comparer window for one debugger-session workspace.");
+        AssertFalse(main.Contains("DebuggerSnapshot? snapshot = viewModel.CanCaptureSnapshot", StringComparison.Ordinal), "Opening the comparer still performs an implicit snapshot capture.");
+        AssertContains(main, "window.Closed += (_, _) => comparerWorkspace?.DetachLiveDebugger()", "Debugger-window closure does not detach the persistent comparer workspace from the disposed live debugger.");
+        AssertFalse(comparerCode.Contains("CallStackComparerWindow_Closed", StringComparison.Ordinal), "Closing the comparer still discards its live-debugger binding instead of preserving the same-session workspace state.");
+
+        string debuggerViewModel = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerViewModel.cs"));
+        AssertContains(debuggerViewModel, "_latestStopContext = context;\n                OnPropertyChanged(nameof(CanCaptureSnapshot));",
+            "Comparer capture availability is not re-evaluated when a new paused stop context arrives.");
+        return Task.CompletedTask;
+    }
+
+    private static Task VerifyDebuggerListExportSourceAsync()
+    {
+        string baseDirectory = AppContext.BaseDirectory;
+        string xaml = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml"));
+        string code = File.ReadAllText(Path.Combine(baseDirectory, "Fixtures", "DebuggerWindow.xaml.cs"));
+        AssertContains(xaml, "Click=\"ExportDebuggerButton_Click\"", "Debugger does not expose a Universal Export entry point.");
+        AssertContains(code, "debugger-threads", "Debugger export does not include Threads.");
+        AssertContains(code, "debugger-registers", "Debugger export does not include Registers.");
+        AssertContains(code, "debugger-breakpoints", "Debugger export does not include Breakpoints/Watchpoints.");
+        AssertContains(code, "debugger-call-stack", "Debugger export does not include Call Stack rows.");
+        AssertContains(code, "debugger-events", "Debugger export does not include Events.");
+        AssertContains(code, "Trigger Instruction", "Debugger event export does not expose trigger instruction separately from stop/current IP.");
+        AssertContains(code, "TabularExportService", "Debugger lists do not use the shared Universal Export service.");
+        return Task.CompletedTask;
+    }
+
+    private static DebuggerSnapshotCaptureRequest CreateSnapshotRequest(
+        string label,
+        string group,
+        ulong moduleBase,
+        ulong registerValue,
+        ulong uniqueFrameOffset)
+    {
+        byte[] registerBytes = BitConverter.GetBytes(registerValue);
+        DebuggerSnapshotSource source = new(
+            "0.1.7", 35, "mock", "Mock", "1.0.1", 17, "2.18.0", "Mock",
+            0x1234, "mock-process", CpuArchitecture.X64, 64, 64, Endianness.Little, 7,
+            DebuggerSnapshotCaptureSource.Live);
+        DebuggerSnapshotEventContext context = new(
+            42, DateTimeOffset.Parse("2026-09-12T12:00:00Z", CultureInfo.InvariantCulture),
+            DebuggerEventKind.Watchpoint, DebuggerExecutionState.Paused, DebuggerStopReason.Watchpoint,
+            0x99, "Mock Main", moduleBase + 0x20, moduleBase + 0x10, DebuggerTriggerResolution.DisassemblyDerived,
+            0x50000000, DebuggerBreakpointAccess.Write, 4, "wp0", DebuggerSnapshotBreakpointType.Watchpoint,
+            DebuggerBreakpointKind.Hardware, DebuggerSnapshotBreakpointLifetime.Persistent, "Watchpoint hit");
+        DebuggerSnapshotRegister[] registers =
+        [
+            new("r12", "R12", "General", DebuggerRegisterRole.None, 64, DebuggerRegisterValueEncoding.Bytes,
+                Convert.ToHexString(registerBytes), $"0x{registerValue:X16}", false)
+        ];
+        DebuggerSnapshotCallFrame[] frames =
+        [
+            new(0, moduleBase + 0x20, moduleBase + 0x80, 0x70000000, 0x70000020, "eboot.bin", moduleBase, 0x20, "shared_health_write"),
+            new(1, moduleBase + 0x100, moduleBase + 0x180, 0x70000040, 0x70000060, "eboot.bin", moduleBase, 0x100, "apply_damage"),
+            new(2, moduleBase + uniqueFrameOffset, null, 0x70000080, 0x700000A0, "eboot.bin", moduleBase, uniqueFrameOffset, null)
+        ];
+        DebuggerSnapshotInstruction[] instructions =
+        [
+            new(moduleBase + 0x10, "eboot.bin", 0x10, "017040", "add [rax+40h],esi", DisassemblyFlowControl.None, null, ["Watchpoint hit"]),
+            new(moduleBase + 0x20, "eboot.bin", 0x20, "488B4F30", "mov rcx,[rdi+30h]", DisassemblyFlowControl.None, null, Array.Empty<string>())
+        ];
+        DebuggerSnapshotBreakpoint[] breakpoints =
+        [
+            new("wp0", 0x50000000, true, DebuggerSnapshotBreakpointType.Watchpoint, DebuggerBreakpointKind.Hardware,
+                DebuggerBreakpointAccess.Write, 4, DebuggerSnapshotBreakpointLifetime.Persistent, true)
+        ];
+        DebuggerSnapshotMemoryBlock[] memory =
+        [
+            new("Stack", 0x70000000, "00112233445566778899AABBCCDDEEFF")
+        ];
+        DebuggerSnapshotSections sections = new(
+            DebuggerSnapshotSectionStatus.Complete,
+            DebuggerSnapshotSectionStatus.Complete,
+            DebuggerSnapshotSectionStatus.Complete,
+            DebuggerSnapshotSectionStatus.Complete,
+            DebuggerSnapshotSectionStatus.Complete);
+        return new DebuggerSnapshotCaptureRequest(source, context, registers, frames, instructions, breakpoints, memory, sections, label, group);
     }
 
     private sealed class NoOpMemoryWriter : IMemoryWriter

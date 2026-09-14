@@ -249,3 +249,10 @@ A color theme must never contain:
 If a new UI component needs another semantic color, the application palette contract should be deliberately extended and all bundled themes updated together. Views should not work around a missing theme color by introducing local hardcoded colors.
 
 Plugin-specific themes are not part of the architecture. The active color theme belongs to the host presentation layer and applies consistently regardless of which platform plugin is active.
+
+
+## Rev35 Watchpoint Stop Highlight
+
+Application `0.1.7.rev35` adds a derived `WarningMutedBrush` for the Disassembler's real Stop/Current-IP row when a resolved watchpoint hit is shown on a different instruction. `ThemeManager` derives the translucent brush from each theme's existing `WarningText` color using the same muted-opacity approach as `SuccessMutedBrush`; no new required JSON palette key is introduced, so existing custom theme files remain compatible.
+
+For a resolved watchpoint, `Watchpoint hit` uses `SuccessMutedBrush` (green semantic) and `Stop / Current IP` uses `WarningMutedBrush` (yellow/warning semantic). For an unresolved watchpoint, only the real stop row is warning-highlighted. Both highlights remain row-layout-neutral and must be checked in Light, Dimmed, and Dark.

@@ -305,6 +305,22 @@ public sealed partial class PluginViewModel : ObservableObject, IDisposable
                AreSameProcess(activeProcess.Process, targetProcess);
     }
 
+    internal DisassemblyWatchpointTarget? ResolveDisassemblyWatchpointTarget(
+        DisassembledInstruction instruction,
+        IReadOnlyList<DebuggerRegister> registers)
+    {
+        ArgumentNullException.ThrowIfNull(instruction);
+        ArgumentNullException.ThrowIfNull(registers);
+
+        if (_session is not ITargetSession session || !IsConnected)
+        {
+            return null;
+        }
+
+        IDisassemblyWatchpointResolver? resolver = session.GetService<IDisassemblyWatchpointResolver>();
+        return resolver?.ResolveWatchpointTarget(instruction, registers);
+    }
+
     internal bool CanOpenMemoryViewerForTarget(TargetProcess targetProcess)
     {
         ArgumentNullException.ThrowIfNull(targetProcess);

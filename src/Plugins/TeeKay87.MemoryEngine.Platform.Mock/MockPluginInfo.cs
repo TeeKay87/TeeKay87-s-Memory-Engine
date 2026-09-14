@@ -6,9 +6,9 @@ public static class MockPluginInfo
 {
     public const string Id = "platform.mock.in-memory";
     public const string Name = "In-Memory Test Target";
-    public const string Version = "1.0.0";
-    public const int Revision = 16;
-    public const string ApiVersion = "2.16.0";
+    public const string Version = "1.0.1";
+    public const int Revision = 17;
+    public const string ApiVersion = "2.18.0";
 
     public static string DisplayVersion => $"{Version}.rev{Revision}";
 

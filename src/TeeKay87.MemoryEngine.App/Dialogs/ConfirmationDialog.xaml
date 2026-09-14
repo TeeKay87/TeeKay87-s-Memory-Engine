@@ -1,4 +1,5 @@
 <Window x:Class="TeeKay87.MemoryEngine.App.Dialogs.ConfirmationDialog"
+        Icon="/TeeKay87.MemoryEngine;component/Assets/TK87ME.ico"
         x:ClassModifier="internal"
         xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"

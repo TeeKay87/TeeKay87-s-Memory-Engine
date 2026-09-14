@@ -23,6 +23,7 @@ internal sealed class Ps5TargetSession :
     IProcessControl
 {
     private static readonly IDisassemblerProvider DisassemblerProvider = new Ps5X64DisassemblerProvider();
+    private static readonly IDisassemblyWatchpointResolver DisassemblyWatchpointResolver = new Ps5DisassemblyWatchpointResolver();
 
     private readonly object _memoryRegionCacheGate = new();
     private readonly Ps5DebugClient _client;
@@ -61,6 +62,11 @@ internal sealed class Ps5TargetSession :
         if (typeof(TService) == typeof(IDisassemblerProvider))
         {
             return DisassemblerProvider as TService;
+        }
+
+        if (typeof(TService) == typeof(IDisassemblyWatchpointResolver))
+        {
+            return DisassemblyWatchpointResolver as TService;
         }
 
         if (typeof(TService) == typeof(IDebuggerProvider))

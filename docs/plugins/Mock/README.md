@@ -11,15 +11,15 @@ This directory contains documentation that belongs specifically to the mock plug
 | Property | Value |
 | --- | --- |
 | Plugin id | `platform.mock.in-memory` |
-| Plugin version | `1.0.0.rev16` |
-| Plugin API | `2.16.0` |
+| Plugin version | `1.0.1.rev17` |
+| Plugin API | `2.18.0` |
 | Platform | Development |
 | Backend | In-Memory |
 | Architecture | Custom / Unknown CPU, 64-bit addresses, 64-bit pointers, little-endian |
 
 The plugin version and revision are independent from the TeeKay87's Memory Engine host application version.
 
-Current host application `0.1.7.rev31` uses Plugin API `2.16.0`. Mock plugin `1.0.0.rev16` preserves the verified debugger fixtures and adds only the optional breakpoint-request validation service used by rev30 address shortcuts. The verified debugger lifecycle/thread/register/software-breakpoint and rev16 hardware-watchpoint behavior remains the base. Mock plugin `1.0.0.rev16` now advertises `CallStack` and `StepExecution`, exposes deterministic paused-thread call frames, and supplies native Step Into so the generic host can verify Call Stack presentation and its composed Step Over, Step Out, and Run-to workflows without physical hardware. Rev13 software-breakpoint target-range validation and rev14 hardware-watchpoint rules remain unchanged.
+Current host application `0.1.7.rev35` uses Plugin API `2.18.0`. Mock plugin `1.0.1.rev17` preserves the deterministic debugger fixtures, including the rev32 `BackendExact` post-access watchpoint event used to distinguish trigger instruction from stop/current IP. Rev35 does not add a Mock-specific Disassembler watchpoint resolver because the Mock disassembler intentionally uses a synthetic non-x86 instruction set; absence of the optional resolver therefore leaves automatic Disassembler **Add Watchpoint** unavailable on Mock while the generic Add Breakpoint flow remains testable. The verified debugger lifecycle/thread/register/software-breakpoint/hardware-watchpoint/call-stack/step behavior is otherwise unchanged.
 
 ## Current Capabilities
 
@@ -45,7 +45,7 @@ It intentionally does not advertise native-scanner, assembler, pointer-scanner, 
 
 ## Scanner Capability Declarations
 
-Plugin `1.0.0.rev16` targets Plugin API `2.16.0` and supplies the same concrete Value Type definitions for the shared scanner: UInt8, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, Float64, and ByteArray. The mock plugin currently reuses the optional standard definitions in the Plugin SDK.
+Plugin `1.0.1.rev17` targets Plugin API `2.18.0` and supplies the same concrete Value Type definitions for the shared scanner: UInt8, Int8, UInt16, Int16, UInt32, Int32, UInt64, Int64, Float32, Float64, and ByteArray. The mock plugin currently reuses the optional standard definitions in the Plugin SDK.
 
 Core now supplies the standard Scan Type catalog to Mock automatically. The Mock plugin continues to own only its Value Types and target behavior, which makes it the deterministic regression target for the same Scan Type semantics future platform plugins receive.
 
@@ -141,7 +141,7 @@ When Continue is requested and at least one enabled breakpoint exists, the deter
 
 Mock `1.0.0.rev14` reuses the same breakpoint service for `Hardware` requests and advertises `TargetCapabilities.Watchpoints`. Supported access modes are `Read`, `Write`, and `ReadWrite`. Supported widths are 1, 2, 4, and 8 bytes. The address must be naturally aligned to the selected width, and the entire watched range must remain inside the deterministic target memory map. Hardware records have a separate maximum of four slots so their resource model does not consume the 30 synthetic software-breakpoint slots. Equivalent Hardware requests at the same address/size/access are rejected.
 
-A deterministic hardware-watchpoint hit reports the synthetic accessing instruction at `CodeAddress + 4` in `DebuggerEvent.InstructionPointer` and places the watched memory condition in `DebuggerEvent.TriggeredBreakpoint`. This intentionally exercises the neutral distinction between code that performed the access and memory that was watched. Persistent records remain available after a hit; temporary records are removed after the first hit.
+A deterministic hardware-watchpoint hit models post-access stop semantics: `DebuggerEvent.InstructionPointer` is the synthetic stop/current instruction after the access, while `TriggerInstructionAddress` identifies the known synthetic accessing instruction and uses explicit trigger-resolution metadata. The watched memory condition remains separate in `TriggeredBreakpoint` / watched-address context. This exercises the neutral distinction between trigger instruction, stop instruction, and watched memory. Persistent records remain available after a hit; temporary records are removed after the first hit.
 
 
 ### Deterministic Call Stack and Stepping
@@ -162,3 +162,14 @@ The mock plugin should remain available throughout development. New generic subs
 ## Rev30 Breakpoint Request Validation
 
 Mock `1.0.0.rev16` exposes optional Plugin API `2.16.0` `IDebuggerBreakpointValidationService`. It preflights the same deterministic rules used by the existing add path: Software/Execute requests must resolve to the executable fixture, Hardware data watchpoints must use a supported width/access and natural alignment, equivalent active records are rejected, and the 30 software / 4 hardware slot limits are enforced. Validation does not mutate debugger state.
+
+## 1.0.0.rev17 — Watchpoint Trigger Fixture
+
+Mock now targets Plugin API `2.17.0`. Its deterministic hardware-watchpoint event models post-access stop semantics explicitly: the synthetic memory-access instruction is at `CodeAddress + 4`, while the authoritative stop/current instruction pointer advances to `CodeAddress + 6`. Because the Mock backend owns this deterministic fixture, it reports the trigger as `BackendExact`. This gives the automated suite a stable reference for verifying that trigger and stop addresses are not collapsed into one field.
+
+
+## 1.0.1.rev17 — Plugin API 2.18 Compatibility
+
+Rev35 advances the host Plugin API to `2.18.0` for the optional `IDisassemblyWatchpointResolver` contract. The Mock plugin advances its semantic version to `1.0.1` and API target to `2.18.0` without adding architecture-specific operand analysis to its synthetic disassembler. Its deterministic debugger/watchpoint fixtures remain unchanged, including the authoritative `BackendExact` trigger at `CodeAddress + 4` and stop/current IP at `CodeAddress + 6`.
+
+The optional resolver is intentionally absent from Mock. Automatic Disassembler **Add Watchpoint** therefore remains disabled there rather than inventing memory-operand semantics for the custom fixture instruction set.

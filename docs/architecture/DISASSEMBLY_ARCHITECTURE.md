@@ -388,3 +388,27 @@ Future disassembly development should preserve these rules:
 
 
 > Host `0.1.7.rev6` builds on the fully verified rev5 baseline. Its Threads/Thread Control and passive header-status cleanup do not redesign the subsystem documented here.
+
+## 0.1.7.rev32 — Watchpoint Trigger Resolution
+
+The logical disassembly pipeline is now also used as evidence for watchpoint-trigger resolution. Core does not decode x86 instructions itself. A paused unresolved watchpoint event is paired with a bounded logical `DisassemblySnapshot`; if exactly one valid instruction ends at the debugger's real stop/current instruction pointer, that instruction becomes the `DisassemblyDerived` trigger. Existing byte overlays therefore continue to hide backend `INT3` instrumentation from this analysis.
+
+A resolved watchpoint marker is attached to the trigger instruction. An unresolved stop is explicitly labeled as unresolved at the current instruction instead of reusing the current IP as a false trigger address. This is presentation metadata only and does not write target memory.
+
+## 0.1.7.rev33 / rev38 — Direct Debugger Address Action
+
+The Disassembler context menu exposes separate **Add Breakpoint** and **Add Watchpoint** commands. Exactly one selected instruction is required; an Extended multi-selection keeps both entries visible but disabled. Add Breakpoint is enabled only for a valid instruction in the current executable region and only when the already attached Debugger for the same plugin/process/connection generation accepts the neutral Software/Execute request. Add Watchpoint is intentionally stricter: the debugger must be Paused, current registers must be available from the matching paused debugger, and the plugin's optional `IDisassemblyWatchpointResolver` must resolve exactly one safe effective data address/width/access tuple. For base/index addressing, the derived address reflects the current paused register values and is therefore a current-context candidate rather than proof that an unrelated instruction previously executed with those values. RIP-relative addressing can resolve without dynamic GPR state. The resulting Hardware request still passes the existing plugin validator before add. No debugger is implicitly attached from Disassembler and no architecture-specific operand logic moves into Core/WPF.
+
+This action does not change the Disassembler's multi-row copy/export semantics. It also does not bypass logical byte overlays: Software/Execute debugger instrumentation remains presentation state rather than original instruction data.
+
+
+## Watchpoint hit and stop highlighting
+
+Watchpoint presentation deliberately separates the instruction that caused the memory access from the instruction where the backend reports execution stopped.
+
+- **Green / `SuccessMutedBrush`** marks a resolved **Hit / Trigger Instruction** and carries the `Watchpoint hit` marker.
+- **Yellow / `WarningMutedBrush`** marks the real **Stop / Current IP** when it differs from the trigger and carries the `Stop / Current IP` marker.
+- If trigger resolution fails, no green hit is invented. The current/stop instruction alone is shown in yellow with `Watchpoint stop (trigger unresolved)`.
+- Software breakpoint presentation remains unchanged; the breakpoint/origin instruction retains the existing green presentation and logical/original bytes continue masking physical debugger instrumentation.
+
+`WarningMutedBrush` is derived from each theme's `WarningText` palette value at runtime, matching the existing derived `SuccessMutedBrush` approach so Light, Dimmed, and Dark keep the same semantics without hard-coded view colors.

@@ -12,7 +12,9 @@ public sealed class DebuggerDisassemblyOverlayState
     private readonly Dictionary<ulong, DisassembledInstruction> _originalSoftwareInstructions = new();
     private readonly Dictionary<string, DebuggerBreakpoint> _breakpoints = new(StringComparer.Ordinal);
     private readonly HashSet<ulong> _stagedSoftwareBreakpointRetirements = new();
-    private ulong? _watchpointHitInstructionPointer;
+    private ulong? _watchpointMarkerAddress;
+    private string? _watchpointMarkerText;
+    private ulong? _watchpointStopAddress;
 
     public void RememberSoftwareBreakpointInstruction(DisassembledInstruction instruction)
     {
@@ -114,7 +116,9 @@ public sealed class DebuggerDisassemblyOverlayState
         {
             if (debugEvent.ExecutionState == DebuggerExecutionState.Running)
             {
-                _watchpointHitInstructionPointer = null;
+                _watchpointMarkerAddress = null;
+                _watchpointMarkerText = null;
+                _watchpointStopAddress = null;
                 return;
             }
 
@@ -123,9 +127,27 @@ public sealed class DebuggerDisassemblyOverlayState
                 return;
             }
 
-            _watchpointHitInstructionPointer = debugEvent.Kind == DebuggerEventKind.Watchpoint
-                ? debugEvent.InstructionPointer
-                : null;
+            if (debugEvent.Kind != DebuggerEventKind.Watchpoint)
+            {
+                _watchpointMarkerAddress = null;
+                _watchpointMarkerText = null;
+                _watchpointStopAddress = null;
+                return;
+            }
+
+            _watchpointStopAddress = debugEvent.InstructionPointer;
+            if (debugEvent.TriggerInstructionAddress.HasValue)
+            {
+                _watchpointMarkerAddress = debugEvent.TriggerInstructionAddress.Value;
+                _watchpointMarkerText = "Watchpoint hit";
+            }
+            else
+            {
+                _watchpointMarkerAddress = debugEvent.InstructionPointer;
+                _watchpointMarkerText = _watchpointMarkerAddress.HasValue
+                    ? "Watchpoint stop (trigger unresolved)"
+                    : null;
+            }
         }
     }
 
@@ -164,11 +186,19 @@ public sealed class DebuggerDisassemblyOverlayState
                     breakpoint.IsEnabled ? "Breakpoint" : "Breakpoint (disabled)"));
             }
 
-            if (_watchpointHitInstructionPointer.HasValue)
+            if (_watchpointMarkerAddress.HasValue && !string.IsNullOrWhiteSpace(_watchpointMarkerText))
             {
                 markers.Add(new DisassemblyMarker(
-                    _watchpointHitInstructionPointer.Value,
-                    "Watchpoint hit"));
+                    _watchpointMarkerAddress.Value,
+                    _watchpointMarkerText));
+            }
+
+            if (_watchpointStopAddress.HasValue &&
+                (!_watchpointMarkerAddress.HasValue || _watchpointStopAddress.Value != _watchpointMarkerAddress.Value))
+            {
+                markers.Add(new DisassemblyMarker(
+                    _watchpointStopAddress.Value,
+                    "Stop / Current IP"));
             }
 
             return new DisassemblyOverlay(byteOverlays, markers);
@@ -182,7 +212,9 @@ public sealed class DebuggerDisassemblyOverlayState
             _originalSoftwareInstructions.Clear();
             _breakpoints.Clear();
             _stagedSoftwareBreakpointRetirements.Clear();
-            _watchpointHitInstructionPointer = null;
+            _watchpointMarkerAddress = null;
+            _watchpointMarkerText = null;
+            _watchpointStopAddress = null;
         }
     }
 

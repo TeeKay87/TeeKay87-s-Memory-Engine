@@ -8,10 +8,13 @@ using System.Threading;
 using System.Threading.Tasks;
 using System.Windows.Input;
 using System.Windows.Threading;
+using TeeKay87.MemoryEngine.App.Application;
 using TeeKay87.MemoryEngine.App.Debugging;
 using TeeKay87.MemoryEngine.App.Infrastructure;
 using TeeKay87.MemoryEngine.Core.Debugging;
+using TeeKay87.MemoryEngine.Core.Debugging.Snapshots;
 using TeeKay87.MemoryEngine.Core.Disassembly;
+using TeeKay87.MemoryEngine.Core.MemoryViewer;
 using TeeKay87.MemoryEngine.PluginSdk.Capabilities;
 using TeeKay87.MemoryEngine.PluginSdk.Contracts;
 using TeeKay87.MemoryEngine.PluginSdk.Models;
@@ -27,6 +30,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
     private readonly long _connectionGeneration;
     private readonly Dispatcher _dispatcher;
     private readonly CancellationTokenSource _lifetimeCancellation = new();
+    private readonly DebuggerWatchpointTriggerResolver _watchpointTriggerResolver = new();
     private readonly AsyncRelayCommand _attachCommand;
     private readonly AsyncRelayCommand _pauseCommand;
     private readonly AsyncRelayCommand _continueCommand;
@@ -59,6 +63,8 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
     private DebuggerStackFrameViewModel? _selectedStackFrame;
     private ulong? _currentInstructionPointer;
     private DebuggerEvent? _deferredStopContextEvent;
+    private DebuggerEventContext? _latestStopContext;
+    private readonly DebuggerSnapshotCaptureService _snapshotCaptureService = new();
     private ComposedExecutionOperation? _activeComposedExecutionOperation;
     private ComposedExecutionOperation? _pendingInterruptedComposedExecutionOperation;
     private ulong? _logicalSoftwareBreakpointStopAddress;
@@ -138,6 +144,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             if (SetProperty(ref _isBusy, value))
             {
                 RaiseCommandStates();
+                OnPropertyChanged(nameof(CanCaptureSnapshot));
             }
         }
     }
@@ -294,6 +301,24 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         ? $"0x{CurrentInstructionPointer.Value:X}"
         : "Unavailable";
 
+    internal bool CanResolveDisassemblyWatchpoint()
+    {
+        return !_disposed &&
+               !IsBusy &&
+               _sessionState == DebuggerSessionState.Paused &&
+               Registers.Count > 0 &&
+               IsTargetCurrent();
+    }
+
+    public bool CanExportDebuggerData => IsAttachedState();
+
+    public bool CanCaptureSnapshot =>
+        !_disposed &&
+        !IsBusy &&
+        _sessionState == DebuggerSessionState.Paused &&
+        _latestStopContext is not null &&
+        IsTargetCurrent();
+
     public bool CanNavigateToCurrentInstruction =>
         CurrentInstructionPointer.HasValue &&
         _sessionState == DebuggerSessionState.Paused &&
@@ -360,6 +385,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         }
 
         _disposed = true;
+        OnPropertyChanged(nameof(CanCaptureSnapshot));
         _plugin.PropertyChanged -= OnPluginPropertyChanged;
         _lifetimeCancellation.Cancel();
         ClearSoftwareBreakpointInstructionState();
@@ -1633,6 +1659,340 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         }
     }
 
+    internal void ReportExternalStatus(string status, string? error = null)
+    {
+        StatusText = status ?? string.Empty;
+        ErrorText = error ?? string.Empty;
+    }
+
+    public async Task<DebuggerSnapshot?> CaptureSnapshotAsync(
+        string? label = null,
+        string? group = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (!CanCaptureSnapshot || _latestStopContext is not DebuggerEventContext eventContext)
+        {
+            ErrorText = "Cannot capture snapshot because the debugger is not paused on the current Active Target.";
+            return null;
+        }
+
+        IsBusy = true;
+        ErrorText = string.Empty;
+        using CancellationTokenSource linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken,
+            _lifetimeCancellation.Token);
+        CancellationToken captureToken = linkedCancellation.Token;
+
+        try
+        {
+            long stopSequence = eventContext.Sequence;
+            DebuggerEvent debugEvent = eventContext.Event;
+            ulong? selectedThreadId = SelectedThread?.Id;
+            if (debugEvent.ThreadId.HasValue && selectedThreadId.HasValue && debugEvent.ThreadId != selectedThreadId)
+            {
+                throw new InvalidOperationException(
+                    "The selected debugger thread no longer matches the current stop context. Select the stopped thread before capturing a snapshot.");
+            }
+
+            DebuggerSnapshotRegister[] registers = Registers.Select(register => new DebuggerSnapshotRegister(
+                register.Register.Id,
+                register.Register.DisplayName,
+                register.Register.Group,
+                register.Register.Role,
+                register.Register.BitWidth,
+                register.Register.ValueEncoding,
+                Convert.ToHexString(register.Register.Value.Span),
+                register.ValueText,
+                register.Register.CanWrite)).ToArray();
+
+            DebuggerSnapshotCallFrame[] frames = CallFrames.Select(frame =>
+            {
+                MemoryRegion? region = _plugin.ActiveMemoryRegions.FirstOrDefault(candidate =>
+                    frame.Frame.InstructionAddress >= candidate.BaseAddress &&
+                    frame.Frame.InstructionAddress < candidate.EndAddressExclusive);
+                string? module = frame.Frame.ModuleName ?? region?.ModuleName ?? region?.Name;
+                ulong? moduleBase = FindModuleBase(module, region);
+                ulong? moduleOffset = moduleBase.HasValue && frame.Frame.InstructionAddress >= moduleBase.Value
+                    ? frame.Frame.InstructionAddress - moduleBase.Value
+                    : null;
+                return new DebuggerSnapshotCallFrame(
+                    frame.Frame.Index,
+                    frame.Frame.InstructionAddress,
+                    frame.Frame.ReturnAddress,
+                    frame.Frame.StackPointer,
+                    frame.Frame.FramePointer,
+                    module,
+                    moduleBase,
+                    moduleOffset,
+                    frame.Frame.SymbolName);
+            }).ToArray();
+
+            DebuggerSnapshotBreakpoint[] breakpoints = Breakpoints.Select(item => new DebuggerSnapshotBreakpoint(
+                item.Breakpoint.Id,
+                item.Breakpoint.Request.Address,
+                item.Breakpoint.IsEnabled,
+                item.Breakpoint.Request.Access == DebuggerBreakpointAccess.Execute
+                    ? DebuggerSnapshotBreakpointType.Breakpoint
+                    : DebuggerSnapshotBreakpointType.Watchpoint,
+                item.Breakpoint.Request.Kind,
+                item.Breakpoint.Request.Access,
+                item.Breakpoint.Request.Size,
+                item.Breakpoint.Request.IsTemporary
+                    ? DebuggerSnapshotBreakpointLifetime.Temporary
+                    : DebuggerSnapshotBreakpointLifetime.Persistent,
+                string.Equals(item.Breakpoint.Id, debugEvent.TriggeredBreakpoint?.Id, StringComparison.Ordinal))).ToArray();
+
+            List<DebuggerSnapshotInstruction> instructions = new();
+            DebuggerSnapshotSectionStatus disassemblyStatus =
+                DebuggerSnapshotSectionStatus.Unavailable("No instruction pointer was available.");
+            if (debugEvent.InstructionPointer.HasValue && _plugin.CanOpenDisassemblerForTarget(_targetProcess))
+            {
+                try
+                {
+                    List<ulong> origins = new() { debugEvent.InstructionPointer.Value };
+                    if (debugEvent.TriggerInstructionAddress is ulong triggerAddress && !origins.Contains(triggerAddress))
+                    {
+                        origins.Add(triggerAddress);
+                    }
+
+                    Dictionary<ulong, DebuggerSnapshotInstruction> uniqueInstructions = new();
+                    foreach (ulong origin in origins)
+                    {
+                        captureToken.ThrowIfCancellationRequested();
+                        DisassemblySnapshot disassembly = await _plugin.ReadDisassemblyContextAsync(
+                            _targetProcess,
+                            _connectionGeneration,
+                            origin,
+                            beforeByteCount: 64,
+                            afterByteCount: 64,
+                            captureToken).ConfigureAwait(true);
+
+                        string? module = disassembly.Region.ModuleName ?? disassembly.Region.Name;
+                        ulong? moduleBase = FindModuleBase(module, disassembly.Region);
+                        foreach (DisassembledInstruction instruction in disassembly.Instructions)
+                        {
+                            string instructionText = string.IsNullOrWhiteSpace(instruction.Operands)
+                                ? instruction.Mnemonic
+                                : $"{instruction.Mnemonic} {instruction.Operands}";
+                            string[] markers = disassembly.Markers
+                                .Where(marker => marker.Address == instruction.Address)
+                                .Select(marker => marker.Text)
+                                .Distinct(StringComparer.Ordinal)
+                                .ToArray();
+                            ulong? moduleOffset = moduleBase.HasValue && instruction.Address >= moduleBase.Value
+                                ? instruction.Address - moduleBase.Value
+                                : null;
+
+                            uniqueInstructions[instruction.Address] = new DebuggerSnapshotInstruction(
+                                instruction.Address,
+                                module,
+                                moduleOffset,
+                                Convert.ToHexString(instruction.RawBytes.Span),
+                                instructionText,
+                                instruction.FlowControl,
+                                instruction.BranchTarget,
+                                Array.AsReadOnly(markers));
+                        }
+                    }
+
+                    instructions.AddRange(uniqueInstructions.Values.OrderBy(instruction => instruction.Address));
+                    disassemblyStatus = DebuggerSnapshotSectionStatus.Complete;
+                }
+                catch (OperationCanceledException) when (captureToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    disassemblyStatus = DebuggerSnapshotSectionStatus.Failed(exception.Message);
+                }
+            }
+
+            List<DebuggerSnapshotMemoryBlock> memory = new();
+            DebuggerSnapshotSectionStatus memoryStatus =
+                DebuggerSnapshotSectionStatus.Skipped("No stack pointer was available for bounded standard memory capture.");
+            ulong? stackPointer = Registers
+                .FirstOrDefault(register => register.Register.Role == DebuggerRegisterRole.StackPointer) is DebuggerRegisterViewModel stackRegister
+                ? DecodeRegisterUnsigned(stackRegister.Register)
+                : SelectedStackFrame?.Frame.StackPointer;
+
+            if (stackPointer.HasValue && _plugin.SupportsMemoryRead && _plugin.ActiveMemoryRegions.Count > 0)
+            {
+                try
+                {
+                    MemoryViewSnapshot stackSnapshot = await _plugin.ReadMemoryViewerWindowAsync(
+                        _targetProcess,
+                        _connectionGeneration,
+                        stackPointer.Value,
+                        256,
+                        captureToken).ConfigureAwait(true);
+                    memory.Add(new DebuggerSnapshotMemoryBlock(
+                        "Stack",
+                        stackSnapshot.StartAddress,
+                        Convert.ToHexString(stackSnapshot.Bytes.Span)));
+                    memoryStatus = DebuggerSnapshotSectionStatus.Complete;
+                }
+                catch (OperationCanceledException) when (captureToken.IsCancellationRequested)
+                {
+                    throw;
+                }
+                catch (Exception exception)
+                {
+                    memoryStatus = DebuggerSnapshotSectionStatus.Failed(exception.Message);
+                }
+            }
+
+            if (_sessionState != DebuggerSessionState.Paused ||
+                _latestStopContext?.Sequence != stopSequence ||
+                !IsTargetCurrent())
+            {
+                throw new InvalidOperationException(
+                    "Debugger stop context changed while the snapshot was being captured.");
+            }
+
+            PluginMetadata metadata = _plugin.Metadata;
+            TargetArchitecture architecture = metadata.Architecture;
+            DebuggerSnapshotSource source = new(
+                AppInfo.Version,
+                AppInfo.Revision,
+                metadata.Id,
+                metadata.Name,
+                metadata.Version.ToString(),
+                metadata.Revision,
+                metadata.ApiVersion.ToString(),
+                metadata.Platform,
+                _targetProcess.Id,
+                _targetProcess.Name,
+                architecture.Cpu,
+                architecture.AddressWidthBits,
+                architecture.PointerWidthBits,
+                architecture.Endianness,
+                _connectionGeneration,
+                DebuggerSnapshotCaptureSource.Live);
+
+            DebuggerSnapshotEventContext snapshotEvent = new(
+                _latestStopContext.Sequence,
+                debugEvent.Timestamp,
+                debugEvent.Kind,
+                debugEvent.ExecutionState,
+                debugEvent.StopReason,
+                debugEvent.ThreadId,
+                SelectedThread?.Name,
+                debugEvent.InstructionPointer,
+                debugEvent.TriggerInstructionAddress,
+                debugEvent.TriggerResolution,
+                debugEvent.WatchedAddress,
+                debugEvent.WatchpointAccess,
+                debugEvent.WatchpointSize,
+                debugEvent.TriggeredBreakpoint?.Id,
+                debugEvent.TriggeredBreakpoint is DebuggerBreakpoint triggeredBreakpoint
+                    ? triggeredBreakpoint.Request.Access == DebuggerBreakpointAccess.Execute
+                        ? DebuggerSnapshotBreakpointType.Breakpoint
+                        : DebuggerSnapshotBreakpointType.Watchpoint
+                    : null,
+                debugEvent.TriggeredBreakpoint?.Request.Kind,
+                debugEvent.TriggeredBreakpoint is DebuggerBreakpoint lifetimeBreakpoint
+                    ? lifetimeBreakpoint.Request.IsTemporary
+                        ? DebuggerSnapshotBreakpointLifetime.Temporary
+                        : DebuggerSnapshotBreakpointLifetime.Persistent
+                    : null,
+                debugEvent.Message);
+
+            DebuggerSnapshotSections sections = new(
+                !HasRegisterAccessCapability
+                    ? DebuggerSnapshotSectionStatus.Unavailable("Register access is not supported.")
+                    : registers.Length > 0
+                        ? DebuggerSnapshotSectionStatus.Complete
+                        : DebuggerSnapshotSectionStatus.Unavailable("No register snapshot was available for the stopped thread."),
+                !HasCallStackCapability
+                    ? DebuggerSnapshotSectionStatus.Unavailable("Call stack is not supported.")
+                    : frames.Length > 0
+                        ? DebuggerSnapshotSectionStatus.Complete
+                        : DebuggerSnapshotSectionStatus.Unavailable("No call-stack frames were available for the stopped thread."),
+                disassemblyStatus,
+                HasBreakpointManagementCapability
+                    ? DebuggerSnapshotSectionStatus.Complete
+                    : DebuggerSnapshotSectionStatus.Unavailable("Breakpoint management is not supported."),
+                memoryStatus);
+
+            string snapshotLabel = string.IsNullOrWhiteSpace(label)
+                ? $"{debugEvent.Kind} {DateTime.Now:HH:mm:ss}"
+                : label.Trim();
+            DebuggerSnapshot snapshot = _snapshotCaptureService.Capture(new DebuggerSnapshotCaptureRequest(
+                source,
+                snapshotEvent,
+                registers,
+                frames,
+                instructions,
+                breakpoints,
+                memory,
+                sections,
+                snapshotLabel,
+                group?.Trim() ?? string.Empty));
+            StatusText = $"Captured debugger snapshot '{snapshot.Label}'.";
+            return snapshot;
+        }
+        catch (OperationCanceledException) when (captureToken.IsCancellationRequested)
+        {
+            StatusText = "Debugger snapshot capture cancelled. No partial snapshot was published.";
+            return null;
+        }
+        catch (Exception exception)
+        {
+            ErrorText = exception.Message;
+            StatusText = "Debugger snapshot capture failed.";
+            return null;
+        }
+        finally
+        {
+            IsBusy = false;
+        }
+    }
+
+    private ulong? FindModuleBase(string? moduleName, MemoryRegion? fallbackRegion)
+    {
+        if (!string.IsNullOrWhiteSpace(moduleName))
+        {
+            MemoryRegion[] regions = _plugin.ActiveMemoryRegions
+                .Where(region => string.Equals(
+                    region.ModuleName ?? region.Name,
+                    moduleName,
+                    StringComparison.OrdinalIgnoreCase))
+                .ToArray();
+            if (regions.Length > 0)
+            {
+                return regions.Min(region => region.BaseAddress);
+            }
+        }
+
+        return fallbackRegion?.BaseAddress;
+    }
+
+    private ulong? DecodeRegisterUnsigned(DebuggerRegister register)
+    {
+        ReadOnlySpan<byte> bytes = register.Value.Span;
+        if (bytes.Length == 0 || bytes.Length > sizeof(ulong))
+        {
+            return null;
+        }
+
+        ulong value = 0;
+        if (_plugin.Metadata.Architecture.Endianness == Endianness.Big)
+        {
+            foreach (byte current in bytes)
+            {
+                value = (value << 8) | current;
+            }
+            return value;
+        }
+
+        for (int index = 0; index < bytes.Length; index++)
+        {
+            value |= (ulong)bytes[index] << (index * 8);
+        }
+        return value;
+    }
+
     private async Task RefreshThreadsAsync()
     {
         IsBusy = true;
@@ -2212,12 +2572,16 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
 
             if (context.Event.ExecutionState == DebuggerExecutionState.Running)
             {
+                _latestStopContext = null;
                 _deferredStopContextEvent = null;
                 ClearRegisters();
                 ClearCallStack();
+                OnPropertyChanged(nameof(CanCaptureSnapshot));
             }
             else if (context.Event.ExecutionState == DebuggerExecutionState.Paused)
             {
+                _latestStopContext = context;
+                OnPropertyChanged(nameof(CanCaptureSnapshot));
                 if (context.Event.InstructionPointer.HasValue)
                 {
                     CurrentInstructionPointer = context.Event.InstructionPointer.Value;
@@ -2290,6 +2654,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
     {
         try
         {
+            debugEvent = await ResolveWatchpointTriggerAsync(debugEvent).ConfigureAwait(true);
             await RefreshBreakpointsCoreAsync(showStatus: false).ConfigureAwait(true);
             await RefreshThreadsCoreAsync(
                     showStatus: false,
@@ -2304,6 +2669,89 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         }
         catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
         {
+        }
+    }
+
+    private async Task<DebuggerEvent> ResolveWatchpointTriggerAsync(DebuggerEvent debugEvent)
+    {
+        if (debugEvent.Kind != DebuggerEventKind.Watchpoint ||
+            debugEvent.ExecutionState != DebuggerExecutionState.Paused ||
+            !debugEvent.InstructionPointer.HasValue ||
+            debugEvent.TriggerInstructionAddress.HasValue ||
+            !_plugin.CanOpenDisassemblerForTarget(_targetProcess))
+        {
+            return debugEvent;
+        }
+
+        DebuggerEvent resolvedEvent = debugEvent;
+        try
+        {
+            DisassemblySnapshot snapshot = await _plugin
+                .ReadDisassemblyContextAsync(
+                    _targetProcess,
+                    _connectionGeneration,
+                    debugEvent.InstructionPointer.Value,
+                    beforeByteCount: 64,
+                    afterByteCount: 16,
+                    _lifetimeCancellation.Token)
+                .ConfigureAwait(true);
+            resolvedEvent = _watchpointTriggerResolver.Resolve(debugEvent, snapshot);
+        }
+        catch (OperationCanceledException) when (_lifetimeCancellation.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch
+        {
+            // Trigger resolution is best-effort. The real stop instruction remains authoritative.
+        }
+
+        if (EnsureCurrentAttachedCoordinator(out DebuggerSessionCoordinator? coordinator))
+        {
+            coordinator.DisassemblyOverlayState.ObserveEvent(resolvedEvent);
+        }
+
+        ReplaceDisplayedEvent(debugEvent, resolvedEvent);
+
+        if (resolvedEvent.TriggerInstructionAddress is ulong triggerAddress &&
+            resolvedEvent.InstructionPointer is ulong stopAddress &&
+            resolvedEvent.WatchedAddress is ulong watchedAddress)
+        {
+            StatusText = $"Watchpoint at 0x{watchedAddress:X} triggered by instruction 0x{triggerAddress:X}; execution stopped at 0x{stopAddress:X}.";
+        }
+        else if (resolvedEvent.InstructionPointer is ulong unresolvedStopAddress)
+        {
+            StatusText = $"Watchpoint stopped execution at 0x{unresolvedStopAddress:X}; the triggering instruction could not be resolved safely.";
+        }
+
+        return resolvedEvent;
+    }
+
+    private void ReplaceDisplayedEvent(DebuggerEvent originalEvent, DebuggerEvent resolvedEvent)
+    {
+        if (ReferenceEquals(originalEvent, resolvedEvent))
+        {
+            return;
+        }
+
+        for (int index = Events.Count - 1; index >= 0; index--)
+        {
+            DebuggerEventViewModel viewModel = Events[index];
+            if (!ReferenceEquals(viewModel.Context.Event, originalEvent))
+            {
+                continue;
+            }
+
+            DebuggerEventContext resolvedContext = new(
+                viewModel.Context.Identity,
+                viewModel.Context.Sequence,
+                resolvedEvent);
+            Events[index] = new DebuggerEventViewModel(resolvedContext);
+            if (_latestStopContext?.Sequence == viewModel.Context.Sequence)
+            {
+                _latestStopContext = resolvedContext;
+            }
+            break;
         }
     }
 
@@ -2332,6 +2780,7 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
         ApplyThreadExecutionState(state);
         if (state != DebuggerSessionState.Paused)
         {
+            _latestStopContext = null;
             _deferredStopContextEvent = null;
             ClearLogicalSoftwareBreakpointStop();
             ClearRegisters();
@@ -2348,6 +2797,8 @@ public sealed class DebuggerViewModel : ObservableObject, IAsyncDisposable
             _ => "Detached"
         };
         RaiseCommandStates();
+        OnPropertyChanged(nameof(CanCaptureSnapshot));
+        OnPropertyChanged(nameof(CanExportDebuggerData));
     }
 
     private void RaiseCommandStates()
